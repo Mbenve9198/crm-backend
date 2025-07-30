@@ -40,8 +40,57 @@ mongoose.connect(MONGODB_URI, {
 });
 
 // Eventi di connessione MongoDB
-mongoose.connection.on('connected', () => {
+mongoose.connection.on('connected', async () => {
   console.log('🔗 Mongoose connesso a MongoDB');
+  
+  // Migrazione automatica: Fix indice email per permettere valori null multipli
+  try {
+    const db = mongoose.connection.db;
+    const collection = db.collection('contacts');
+    
+    // Verifica se esiste la collection contacts
+    const collections = await db.listCollections({ name: 'contacts' }).toArray();
+    if (collections.length > 0) {
+      console.log('🔧 Verifica migrazione indice email...');
+      
+      const existingIndexes = await collection.indexes();
+      const emailIndex = existingIndexes.find(idx => 
+        idx.key && idx.key.email === 1
+      );
+      
+      if (emailIndex && !emailIndex.sparse) {
+        console.log('📧 Migrazione indice email: rimozione indice non-sparse...');
+        await collection.dropIndex(emailIndex.name);
+        
+        console.log('📧 Migrazione indice email: creazione indice sparse...');
+        await collection.createIndex(
+          { email: 1 }, 
+          { 
+            unique: true, 
+            sparse: true,
+            name: 'email_1_sparse'
+          }
+        );
+        console.log('✅ Migrazione indice email completata: ora i contatti senza email sono supportati');
+      } else if (!emailIndex) {
+        console.log('📧 Creazione indice email sparse...');
+        await collection.createIndex(
+          { email: 1 }, 
+          { 
+            unique: true, 
+            sparse: true,
+            name: 'email_1_sparse'
+          }
+        );
+        console.log('✅ Indice email sparse creato');
+      } else {
+        console.log('✅ Indice email già configurato correttamente');
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️  Avviso migrazione indice email:', error.message);
+    // Non blocchiamo l'avvio del server per questo
+  }
 });
 
 mongoose.connection.on('error', (err) => {

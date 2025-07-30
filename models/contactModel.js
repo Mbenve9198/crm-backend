@@ -85,7 +85,7 @@ const contactSchema = new mongoose.Schema({
 });
 
 // Indici per ottimizzare le query
-contactSchema.index({ email: 1 }, { unique: true }); // Indice unico per email
+contactSchema.index({ email: 1 }, { unique: true, sparse: true }); // Indice unico per email (sparse permette più null)
 contactSchema.index({ lists: 1 }); // Indice per ricerche per lista
 contactSchema.index({ name: 1 }); // Indice per ricerche per nome
 contactSchema.index({ owner: 1 }); // Indice per ownership

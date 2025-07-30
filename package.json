@@ -10,6 +10,7 @@
     "create-admin": "node scripts/createAdmin.js",
     "create-users": "node scripts/createUsers.js",
     "create-production-users": "node scripts/createProductionUsers.js",
+    "fix-email-index": "node scripts/fixEmailIndex.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["crm", "contacts", "csv-import", "mongodb", "express"],
