@@ -14,16 +14,17 @@ const contactSchema = new mongoose.Schema({
     maxLength: [100, 'Il nome non può superare 100 caratteri']
   },
   
-  // Email del contatto (obbligatorio e unico)
+  // Email del contatto (opzionale)
   email: {
     type: String,
-    required: [true, 'L\'email è obbligatoria'],
     unique: true,
+    sparse: true, // Permette multiple entry con email vuota/null
     lowercase: true,
     trim: true,
     validate: {
       validator: function(email) {
-        return validator.isEmail(email);
+        // Se email è vuota/null, passa la validazione
+        return !email || validator.isEmail(email);
       },
       message: 'Formato email non valido'
     }

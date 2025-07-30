@@ -20,20 +20,22 @@ export const createContact = async (req, res) => {
     const { name, email, phone, lists = [], properties = {}, owner } = req.body;
 
     // Validazioni di base
-    if (!name || !email) {
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: 'Nome e email sono obbligatori'
+        message: 'Il nome è obbligatorio'
       });
     }
 
-    // Controlla se esiste già un contatto con questa email
-    const existingContact = await Contact.findOne({ email: email.toLowerCase() });
-    if (existingContact) {
-      return res.status(409).json({
-        success: false,
-        message: 'Esiste già un contatto con questa email'
-      });
+    // Controlla se esiste già un contatto con questa email (solo se email è fornita)
+    if (email && email.trim()) {
+      const existingContact = await Contact.findOne({ email: email.toLowerCase() });
+      if (existingContact) {
+        return res.status(409).json({
+          success: false,
+          message: 'Esiste già un contatto con questa email'
+        });
+      }
     }
 
     // Determina il proprietario del contatto
@@ -445,8 +447,8 @@ export const analyzeCsvFile = async (req, res) => {
               properties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
             },
             mappingInstructions: {
-              'name': 'Campo nome del contatto',
-              'email': 'Campo email (obbligatorio e unico)',
+              'name': 'Campo nome del contatto (obbligatorio)',
+              'email': 'Campo email (opzionale ma unico se fornito)',
               'phone': 'Campo telefono (opzionale)',
               'lists': 'Liste separate da virgola (es: "lista1,lista2")',
               'properties.company': 'Esempio: crea proprietà "company"',
@@ -534,19 +536,22 @@ export const importCsvFile = async (req, res) => {
           }
 
           // Validazioni di base
-          if (!contactData.name || !contactData.email) {
+          if (!contactData.name) {
             errors.push({
               row: processedCount,
-              error: 'Nome e email sono obbligatori',
+              error: 'Il nome è obbligatorio',
               data: row
             });
             return;
           }
 
-          // Gestisce i duplicati
-          const existingContact = await Contact.findOne({ 
-            email: contactData.email.toLowerCase() 
-          });
+          // Gestisce i duplicati (solo se email è fornita)
+          let existingContact = null;
+          if (contactData.email && contactData.email.trim()) {
+            existingContact = await Contact.findOne({ 
+              email: contactData.email.toLowerCase() 
+            });
+          }
 
           if (existingContact) {
             if (duplicateStrategy === 'skip') {
