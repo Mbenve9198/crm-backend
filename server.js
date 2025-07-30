@@ -65,7 +65,25 @@ app.use(cookieParser());
 
 // CORS per permettere richieste dal frontend
 app.use(cors({
-  origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'],
+  origin: function (origin, callback) {
+    // Lista domini permessi
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'http://localhost:5173',
+      process.env.FRONTEND_URL
+    ];
+    
+    // Permetti tutti i domini Vercel se non è specificato FRONTEND_URL
+    if (!origin || 
+        allowedOrigins.includes(origin) ||
+        origin.includes('.vercel.app') ||
+        origin.includes('crm-frontend')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Non permesso da CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
