@@ -338,6 +338,84 @@ export const deleteContact = async (req, res) => {
 };
 
 /**
+ * Elimina più contatti in bulk
+ * DELETE /contacts/bulk
+ */
+export const deleteContactsBulk = async (req, res) => {
+  try {
+    const { contactIds } = req.body;
+
+    // Validazioni di base
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Array di ID contatti richiesto'
+      });
+    }
+
+    if (contactIds.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Massimo 100 contatti per operazione bulk'
+      });
+    }
+
+    // Trova tutti i contatti per verificare i permessi
+    const contacts = await Contact.find({ _id: { $in: contactIds } });
+    
+    if (contacts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun contatto trovato con gli ID forniti'
+      });
+    }
+
+    // Verifica permessi per ogni contatto
+    const unauthorizedContacts = [];
+    const authorizedContactIds = [];
+
+    contacts.forEach(contact => {
+      if (req.user.canModifyContact(contact)) {
+        authorizedContactIds.push(contact._id);
+      } else {
+        unauthorizedContacts.push(contact.name);
+      }
+    });
+
+    if (authorizedContactIds.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Non hai i permessi per eliminare nessuno dei contatti selezionati'
+      });
+    }
+
+    // Elimina i contatti autorizzati
+    const result = await Contact.deleteMany({ _id: { $in: authorizedContactIds } });
+
+    console.log(`🗑️ Eliminazione bulk: ${result.deletedCount} contatti eliminati da utente ${req.user.email}`);
+
+    res.json({
+      success: true,
+      message: `Eliminazione bulk completata`,
+      data: {
+        deletedCount: result.deletedCount,
+        requestedCount: contactIds.length,
+        unauthorizedCount: unauthorizedContacts.length,
+        unauthorizedContacts: unauthorizedContacts.slice(0, 5), // Mostra max 5 nomi
+        hasMoreUnauthorized: unauthorizedContacts.length > 5
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nell\'eliminazione bulk:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * Aggiunge un contatto a una lista
  * POST /lists/:listName/contacts/:id
  */
@@ -688,6 +766,43 @@ export const getContactStats = async (req, res) => {
 
   } catch (error) {
     console.error('Errore nel recupero delle statistiche:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+}; 
+
+/**
+ * Ottieni tutte le proprietà dinamiche disponibili
+ * GET /contacts/dynamic-properties
+ */
+export const getDynamicProperties = async (req, res) => {
+  try {
+    // Ottieni tutte le proprietà dinamiche uniche dal database
+    const propertyKeys = await Contact.aggregate([
+      { $match: { properties: { $exists: true, $ne: null } } },
+      { $project: { properties: { $objectToArray: '$properties' } } },
+      { $unwind: '$properties' },
+      { $group: { _id: '$properties.k' } },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const properties = propertyKeys.map(item => item._id).filter(Boolean);
+
+    console.log('🔍 Proprietà dinamiche trovate:', properties);
+
+    res.json({
+      success: true,
+      data: {
+        properties,
+        count: properties.length,
+        lastUpdated: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nel recupero delle proprietà dinamiche:', error);
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'

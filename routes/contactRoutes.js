@@ -7,10 +7,12 @@ import {
   getContactById,
   updateContact,
   deleteContact,
+  deleteContactsBulk,
   addContactToList,
   removeContactFromList,
   handleCsvImport,
-  getContactStats
+  getContactStats,
+  getDynamicProperties
 } from '../controllers/contactController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -63,6 +65,9 @@ router.use(protect);
 // Statistiche contatti (deve essere prima di /:id per evitare conflitti)
 router.get('/stats', getContactStats);
 
+// Proprietà dinamiche disponibili (deve essere prima di /:id per evitare conflitti)
+router.get('/dynamic-properties', getDynamicProperties);
+
 // Importazione CSV con mappatura dinamica (solo agent e superiori)
 // Fase 1: POST /contacts/import-csv?phase=analyze
 // Fase 2: POST /contacts/import-csv?phase=import
@@ -75,6 +80,7 @@ router.post('/import-csv',
 // CRUD Operations per i contatti
 router.post('/', restrictTo('agent', 'manager', 'admin'), createContact);     // Crea nuovo contatto
 router.get('/', getContacts);                                                 // Lista contatti 
+router.delete('/bulk', restrictTo('agent', 'manager', 'admin'), deleteContactsBulk); // Elimina contatti in bulk
 router.get('/:id', getContactById);                                           // Ottieni contatto per ID
 router.put('/:id', restrictTo('agent', 'manager', 'admin'), updateContact);   // Aggiorna contatto
 router.delete('/:id', restrictTo('agent', 'manager', 'admin'), deleteContact); // Elimina contatto
