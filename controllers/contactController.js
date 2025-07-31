@@ -119,11 +119,21 @@ export const getContacts = async (req, res) => {
 
     // Esegue la query con paginazione e popolamento
     const contacts = await Contact.find(filter)
+      .select('+properties') // Forza l'inclusione del campo properties
       .populate('owner', 'firstName lastName email role')
       .populate('createdBy', 'firstName lastName email')
       .skip(skip)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
+
+    // Debug: verifica se i contatti hanno il campo properties
+    console.log('🔍 Debug contatti - primi 2 con properties:');
+    contacts.slice(0, 2).forEach((contact, i) => {
+      console.log(`Contatto ${i+1}: ${contact.name}`);
+      console.log(`  Properties presente: ${!!contact.properties}`);
+      console.log(`  Properties keys: ${Object.keys(contact.properties || {})}`);
+      console.log(`  Properties content:`, contact.properties);
+    });
 
     const total = await Contact.countDocuments(filter);
 
@@ -160,6 +170,7 @@ export const getContactById = async (req, res) => {
     const { id } = req.params;
 
     const contact = await Contact.findById(id)
+      .select('+properties') // Forza l'inclusione del campo properties
       .populate('owner', 'firstName lastName email role')
       .populate('createdBy', 'firstName lastName email')
       .populate('lastModifiedBy', 'firstName lastName email');
