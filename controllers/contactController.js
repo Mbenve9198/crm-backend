@@ -488,6 +488,137 @@ export const removeContactFromList = async (req, res) => {
 };
 
 /**
+ * Ottiene tutte le liste disponibili con conteggio contatti
+ * GET /contacts/lists
+ */
+export const getContactLists = async (req, res) => {
+  try {
+    // Costruisce il filtro di ricerca basato sui permessi
+    let filter = {};
+    
+    // Filtro per ownership basato sui permessi
+    if (req.user.role === 'agent') {
+      // Gli agent vedono solo i loro contatti
+      filter.owner = req.user._id;
+    } else if (req.user.hasRole('manager')) {
+      // Manager e admin possono vedere tutti i contatti
+      // Nessun filtro aggiuntivo necessario
+    }
+
+    // Aggrega le liste con conteggio contatti
+    const listsAggregation = await Contact.aggregate([
+      // Filtra i contatti in base ai permessi
+      { $match: filter },
+      
+      // Espande l'array lists per processare ogni lista separatamente
+      { $unwind: '$lists' },
+      
+      // Raggruppa per nome lista e conta i contatti
+      {
+        $group: {
+          _id: '$lists',
+          count: { $sum: 1 }
+        }
+      },
+      
+      // Ordina alfabeticamente per nome lista
+      { $sort: { _id: 1 } },
+      
+      // Rinomina il campo _id in name per chiarezza
+      {
+        $project: {
+          name: '$_id',
+          count: 1,
+          _id: 0
+        }
+      }
+    ]);
+
+    console.log('📋 Liste trovate:', listsAggregation);
+
+    res.json({
+      success: true,
+      data: listsAggregation,
+      message: `Trovate ${listsAggregation.length} liste`
+    });
+
+  } catch (error) {
+    console.error('Errore nel recupero delle liste:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Aggiunge contatti multipli a una lista
+ * POST /contacts/lists/:listName/bulk-add
+ */
+export const addContactsToListBulk = async (req, res) => {
+  try {
+    const { listName } = req.params;
+    const { contactIds } = req.body;
+
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Array di ID contatti richiesto'
+      });
+    }
+
+    // Trova i contatti che l'utente può modificare
+    let filter = { _id: { $in: contactIds } };
+    
+    // Permessi: agent può modificare solo i propri contatti
+    if (req.user.role === 'agent') {
+      filter.owner = req.user._id;
+    }
+
+    const contacts = await Contact.find(filter);
+
+    if (contacts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun contatto trovato o permessi insufficienti'
+      });
+    }
+
+    let addedCount = 0;
+    let alreadyInList = 0;
+
+    // Aggiunge ogni contatto alla lista
+    for (const contact of contacts) {
+      const wasAdded = contact.addToList(listName);
+      if (wasAdded) {
+        addedCount++;
+        await contact.save();
+      } else {
+        alreadyInList++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${addedCount} contatti aggiunti alla lista "${listName}". ${alreadyInList} erano già presenti.`,
+      data: {
+        addedCount,
+        alreadyInList,
+        totalProcessed: contacts.length,
+        totalRequested: contactIds.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nell\'aggiunta bulk alla lista:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * IMPORTAZIONE CSV CON MAPPATURA DINAMICA
  * Gestisce l'importazione di contatti da file CSV in due fasi:
  * 1. Analisi preliminare del CSV e restituzione delle colonne

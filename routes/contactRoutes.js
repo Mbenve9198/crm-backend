@@ -12,7 +12,9 @@ import {
   removeContactFromList,
   handleCsvImport,
   getContactStats,
-  getDynamicProperties
+  getDynamicProperties,
+  getContactLists,
+  addContactsToListBulk
 } from '../controllers/contactController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -88,6 +90,12 @@ router.delete('/:id', restrictTo('agent', 'manager', 'admin'), deleteContact); /
 /**
  * ROUTES PER LA GESTIONE DELLE LISTE
  */
+
+// Ottiene tutte le liste disponibili con conteggio
+router.get('/lists', getContactLists);
+
+// Aggiunge contatti multipli a una lista (bulk)
+router.post('/lists/:listName/bulk-add', restrictTo('agent', 'manager', 'admin'), addContactsToListBulk);
 
 // Aggiunge un contatto a una lista
 router.post('/lists/:listName/contacts/:id', addContactToList);
