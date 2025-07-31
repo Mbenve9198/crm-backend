@@ -511,4 +511,112 @@ export const resetUserPassword = async (req, res) => {
       message: 'Errore interno del server'
     });
   }
+};
+
+/**
+ * Ottiene le preferenze di visualizzazione tabella dell'utente corrente
+ * GET /users/me/table-preferences
+ */
+export const getTablePreferences = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('settings.tablePreferences');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utente non trovato'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        tablePreferences: user.settings?.tablePreferences || {
+          contacts: {
+            visibleColumns: ['Contact', 'Email', 'Phone', 'Owner', 'Lists', 'Created', 'Actions'],
+            pageSize: 10
+          }
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nel recupero preferenze tabella:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Aggiorna le preferenze di visualizzazione tabella dell'utente corrente
+ * PUT /users/me/table-preferences
+ */
+export const updateTablePreferences = async (req, res) => {
+  try {
+    const { tablePreferences } = req.body;
+
+    // Validazione base delle preferenze
+    if (!tablePreferences || !tablePreferences.contacts) {
+      return res.status(400).json({
+        success: false,
+        message: 'Preferenze tabella non valide'
+      });
+    }
+
+    const { visibleColumns, pageSize } = tablePreferences.contacts;
+
+    // Validazione visibleColumns
+    if (!Array.isArray(visibleColumns) || visibleColumns.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Almeno una colonna deve essere visibile'
+      });
+    }
+
+    // Validazione pageSize
+    if (pageSize && (typeof pageSize !== 'number' || pageSize < 5 || pageSize > 100)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il numero di righe per pagina deve essere tra 5 e 100'
+      });
+    }
+
+    // Aggiorna le preferenze dell'utente
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $set: {
+          'settings.tablePreferences': tablePreferences
+        }
+      },
+      { 
+        new: true,
+        runValidators: true
+      }
+    ).select('settings.tablePreferences');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utente non trovato'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Preferenze tabella aggiornate con successo',
+      data: {
+        tablePreferences: user.settings.tablePreferences
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nell\'aggiornamento preferenze tabella:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
 }; 

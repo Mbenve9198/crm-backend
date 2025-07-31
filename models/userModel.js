@@ -110,6 +110,20 @@ const userSchema = new mongoose.Schema({
       push: { type: Boolean, default: true },
       newContacts: { type: Boolean, default: true },
       assignedContacts: { type: Boolean, default: true }
+    },
+    tablePreferences: {
+      contacts: {
+        visibleColumns: {
+          type: [String],
+          default: ['Contact', 'Email', 'Phone', 'Owner', 'Lists', 'Created', 'Actions']
+        },
+        pageSize: {
+          type: Number,
+          default: 10,
+          min: [5, 'Il numero minimo di contatti per pagina è 5'],
+          max: [100, 'Il numero massimo di contatti per pagina è 100']
+        }
+      }
     }
   },
   

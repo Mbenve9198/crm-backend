@@ -8,7 +8,9 @@ import {
   transferUserContacts,
   getUsersStats,
   getUsersForAssignment,
-  resetUserPassword
+  resetUserPassword,
+  getTablePreferences,
+  updateTablePreferences
 } from '../controllers/userController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -29,6 +31,10 @@ router.get('/stats', restrictTo('manager', 'admin'), getUsersStats);
 
 // Lista utenti per assegnazione contatti (agent e superiori)
 router.get('/for-assignment', restrictTo('agent', 'manager', 'admin'), getUsersForAssignment);
+
+// Preferenze tabella utente corrente (tutti gli utenti autenticati)
+router.get('/me/table-preferences', getTablePreferences);
+router.put('/me/table-preferences', updateTablePreferences);
 
 // CRUD Operations per utenti (solo manager/admin)
 router.get('/', restrictTo('manager', 'admin'), getAllUsers);
