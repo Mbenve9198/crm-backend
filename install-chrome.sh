@@ -35,17 +35,17 @@ apt-get install -y \
     libappindicator3-1 \
     xdg-utils
 
-# Try to install Chromium
-echo "📦 Installazione Chromium..."
-apt-get install -y chromium-browser || apt-get install -y chromium
+# Install Google Chrome (raccomandato dalla documentazione OpenWA)
+echo "📦 Installazione Google Chrome..."
+wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+apt-get update
+apt-get install -y google-chrome-stable
 
-# Alternative: Install Google Chrome
-if [ ! -f "/usr/bin/chromium-browser" ] && [ ! -f "/usr/bin/chromium" ]; then
-    echo "📦 Chromium non trovato, installazione Google Chrome..."
-    wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    apt-get update
-    apt-get install -y google-chrome-stable
+# Fallback: Install Chromium se Chrome fallisce
+if [ ! -f "/usr/bin/google-chrome" ]; then
+    echo "📦 Google Chrome non installato, fallback a Chromium..."
+    apt-get install -y chromium-browser || apt-get install -y chromium
 fi
 
 # Create session directory
@@ -53,18 +53,15 @@ mkdir -p ./wa-sessions
 chmod 777 ./wa-sessions
 
 # Check installation
-if [ -f "/usr/bin/chromium-browser" ]; then
+if [ -f "/usr/bin/google-chrome" ]; then
+    echo "✅ Google Chrome installato: /usr/bin/google-chrome"
+    echo "🎯 OpenWA userà auto-detection con useChrome: true"
+elif [ -f "/usr/bin/chromium-browser" ]; then
     echo "✅ Chromium installato: /usr/bin/chromium-browser"
-    export CHROME_PATH="/usr/bin/chromium-browser"
-    export PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium-browser"
+    echo "🎯 OpenWA userà auto-detection con useChrome: true"
 elif [ -f "/usr/bin/chromium" ]; then
     echo "✅ Chromium installato: /usr/bin/chromium"
-    export CHROME_PATH="/usr/bin/chromium"
-    export PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
-elif [ -f "/usr/bin/google-chrome" ]; then
-    echo "✅ Google Chrome installato: /usr/bin/google-chrome"
-    export CHROME_PATH="/usr/bin/google-chrome"
-    export PUPPETEER_EXECUTABLE_PATH="/usr/bin/google-chrome"
+    echo "🎯 OpenWA userà auto-detection con useChrome: true"
 else
     echo "❌ Nessun browser Chrome/Chromium trovato!"
     exit 1
@@ -75,4 +72,4 @@ echo "📦 Installazione dipendenze Node.js..."
 npm install
 
 echo "🎉 Installazione completata!"
-echo "Chrome path: $CHROME_PATH" 
+echo "🚀 OpenWA configurato per auto-detection di Chrome" 

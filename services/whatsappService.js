@@ -95,10 +95,9 @@ class WhatsappService {
       });
       await session.save();
 
-      // Configurazione OpenWA con Chrome detection
+      // Configurazione OpenWA ottimizzata basata sulla documentazione
       const config = {
         sessionId,
-        useChrome: process.env.OPENWA_USE_CHROME === 'true' || true,
         headless: process.env.OPENWA_HEADLESS === 'true' || true,
         autoRefresh: true,
         qrTimeout: 30,
@@ -107,12 +106,13 @@ class WhatsappService {
         hostNotificationLang: 'IT',
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
         devtools: false,
-        // Configurazione Chrome per produzione
-        ...(process.env.CHROME_PATH && {
-          executablePath: process.env.CHROME_PATH
-        }),
-        ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+        // Docker detection per auto-configurazione
+        inDocker: process.env.NODE_ENV === 'production',
+        // Chrome configuration: usa useChrome per auto-detection, executablePath solo se specificato
+        ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+          executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+        } : {
+          useChrome: true  // Auto-detect Chrome se non specificato path
         }),
         // Configurazione per ambienti headless
         ...(process.env.NODE_ENV === 'production' && {
@@ -455,16 +455,16 @@ class WhatsappService {
           
           const config = {
             sessionId: session.sessionId,
-            useChrome: process.env.OPENWA_USE_CHROME === 'true' || true,
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
-            // Configurazione Chrome per produzione
-            ...(process.env.CHROME_PATH && {
-              executablePath: process.env.CHROME_PATH
-            }),
-            ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-              executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+            // Docker detection per auto-configurazione
+            inDocker: process.env.NODE_ENV === 'production',
+            // Chrome configuration: usa useChrome per auto-detection, executablePath solo se specificato
+            ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+              executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+            } : {
+              useChrome: true  // Auto-detect Chrome se non specificato path
             }),
             // Configurazione per ambienti headless
             ...(process.env.NODE_ENV === 'production' && {

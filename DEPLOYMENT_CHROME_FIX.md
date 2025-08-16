@@ -22,14 +22,15 @@ Questo errore si verifica perché OpenWA richiede Chrome/Chromium per funzionare
 1. Su Render, vai su Settings → Build & Deploy
 2. **Build Command**: `./install-chrome.sh`
 3. **Start Command**: `npm start`
-4. Aggiungi Environment Variables:
+4. Aggiungi Environment Variables (MINIME):
    ```
-   CHROME_PATH=/usr/bin/chromium-browser
-   PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
    NODE_ENV=production
-   OPENWA_USE_CHROME=true
    OPENWA_HEADLESS=true
+   OPENWA_SESSION_DATA_PATH=/tmp/wa-sessions
    ```
+   
+   **NOTA**: Non servono più CHROME_PATH/PUPPETEER_EXECUTABLE_PATH! 
+   OpenWA userà auto-detection con `useChrome: true`
 
 ### 🎯 **RAILWAY**
 
