@@ -18,6 +18,20 @@ class WhatsappService {
   }
 
   /**
+   * Metodo helper per trovare Puppeteer Chromium
+   */
+  async findPuppeteerChrome() {
+    try {
+      // Prova a importare puppeteer per ottenere il path del browser
+      const puppeteer = await import('puppeteer');
+      return puppeteer.executablePath ? puppeteer.executablePath() : null;
+    } catch (error) {
+      console.log('⚠️ Puppeteer non trovato, usa default OpenWA');
+      return null;
+    }
+  }
+
+  /**
    * Inizializza il servizio
    */
   async initialize() {
@@ -108,12 +122,14 @@ class WhatsappService {
         devtools: false,
         // Docker detection per auto-configurazione
         inDocker: process.env.NODE_ENV === 'production',
-        // Chrome configuration: usa useChrome per auto-detection, fallback a Puppeteer Chromium
+        // Chrome configuration: gestisce Puppeteer Chromium e Chrome
         ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
-          executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+          executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
+          useChrome: false
         } : process.env.NODE_ENV === 'production' ? {
-          // In produzione su Render, usa Puppeteer Chromium se Chrome non disponibile
-          useChrome: false  // Non cercare Chrome, usa Puppeteer Chromium
+          // In produzione su Render, usa browserRevision per forzare download Chromium
+          // Questo sovrascrive useChrome e executablePath (dalla documentazione OpenWA)
+          browserRevision: '737027'  // Versione stabile consigliata dalla docs
         } : {
           useChrome: true  // In sviluppo, cerca Chrome locale
         }),
@@ -463,12 +479,14 @@ class WhatsappService {
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
             // Docker detection per auto-configurazione
             inDocker: process.env.NODE_ENV === 'production',
-            // Chrome configuration: usa useChrome per auto-detection, fallback a Puppeteer Chromium  
+            // Chrome configuration: gestisce Puppeteer Chromium e Chrome
             ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
-              executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+              executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
+              useChrome: false
             } : process.env.NODE_ENV === 'production' ? {
-              // In produzione su Render, usa Puppeteer Chromium se Chrome non disponibile
-              useChrome: false  // Non cercare Chrome, usa Puppeteer Chromium
+              // In produzione su Render, usa browserRevision per forzare download Chromium
+              // Questo sovrascrive useChrome e executablePath (dalla documentazione OpenWA)
+              browserRevision: '737027'  // Versione stabile consigliata dalla docs
             } : {
               useChrome: true  // In sviluppo, cerca Chrome locale
             }),

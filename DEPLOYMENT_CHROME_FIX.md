@@ -10,7 +10,9 @@ Questo errore si verifica perché OpenWA richiede Chrome/Chromium per funzionare
 
 ## ✅ Soluzioni per Diversi Hosting
 
-### 🎯 **RENDER (Raccomandato)**
+### 🎯 **RENDER (Raccomandato) - RISOLTO CON browserRevision**
+
+**✅ SOLUZIONE TROVATA**: Usa `browserRevision` per forzare download di Chromium specifico!
 
 #### Opzione 1: Dockerfile (Più Affidabile)
 1. Il `Dockerfile` è già presente nel progetto
