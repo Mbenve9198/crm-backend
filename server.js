@@ -248,6 +248,41 @@ app.post('/api/calls/dial-complete', dialComplete);
 // Proxy per registrazioni audio - PUBBLICO (senza autenticazione)
 app.get('/api/calls/recording/:recordingSid', getRecordingProxy);
 
+// DEBUG: Endpoint per verificare installazione Chrome (SOLO PER DEBUG)
+app.get('/debug/chrome', (req, res) => {
+  try {
+    const fs = require('fs');
+    const paths = [
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable'
+    ];
+    
+    const results = paths.map(path => ({
+      path,
+      exists: fs.existsSync(path)
+    }));
+    
+    res.json({
+      environment: process.env.NODE_ENV,
+      chromePath: process.env.CHROME_PATH,
+      puppeteerPath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      availablePaths: results,
+      openwaConfig: {
+        useChrome: process.env.OPENWA_USE_CHROME,
+        headless: process.env.OPENWA_HEADLESS,
+        sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
 // Routes per autenticazione
 app.use('/api/auth', authRoutes);
 

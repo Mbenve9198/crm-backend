@@ -95,7 +95,7 @@ class WhatsappService {
       });
       await session.save();
 
-      // Configurazione OpenWA
+      // Configurazione OpenWA con Chrome detection
       const config = {
         sessionId,
         useChrome: process.env.OPENWA_USE_CHROME === 'true' || true,
@@ -107,6 +107,26 @@ class WhatsappService {
         hostNotificationLang: 'IT',
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
         devtools: false,
+        // Configurazione Chrome per produzione
+        ...(process.env.CHROME_PATH && {
+          executablePath: process.env.CHROME_PATH
+        }),
+        ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+        }),
+        // Configurazione per ambienti headless
+        ...(process.env.NODE_ENV === 'production' && {
+          chromiumArgs: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+          ]
+        }),
         // Aggiungi la licenza se disponibile
         ...(process.env.OPENWA_LICENSE_KEY && { 
           licenseKey: process.env.OPENWA_LICENSE_KEY 
@@ -439,6 +459,26 @@ class WhatsappService {
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
+            // Configurazione Chrome per produzione
+            ...(process.env.CHROME_PATH && {
+              executablePath: process.env.CHROME_PATH
+            }),
+            ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
+              executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+            }),
+            // Configurazione per ambienti headless
+            ...(process.env.NODE_ENV === 'production' && {
+              chromiumArgs: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-gpu'
+              ]
+            }),
             // Aggiungi la licenza se disponibile
             ...(process.env.OPENWA_LICENSE_KEY && { 
               licenseKey: process.env.OPENWA_LICENSE_KEY 
