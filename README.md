@@ -2,6 +2,8 @@
 
 Backend completo per **MenuChatCRM** - Sistema di gestione contatti con importazione CSV e proprietà dinamiche.
 
+🔄 **Last Deploy**: 2025-01-16 23:05 - Ottimizzazione OpenWA Chrome auto-detection
+
 ## 🚀 Caratteristiche Principali
 
 - ✅ **CRUD completo** per contatti con ownership

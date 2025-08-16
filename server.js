@@ -249,19 +249,19 @@ app.post('/api/calls/dial-complete', dialComplete);
 app.get('/api/calls/recording/:recordingSid', getRecordingProxy);
 
 // DEBUG: Endpoint per verificare installazione Chrome (SOLO PER DEBUG)
-app.get('/debug/chrome', (req, res) => {
+app.get('/debug/chrome', async (req, res) => {
   try {
-    const fs = require('fs');
+    const { existsSync } = await import('fs');
     const paths = [
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
       '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable'
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium'
     ];
     
     const results = paths.map(path => ({
       path,
-      exists: fs.existsSync(path)
+      exists: existsSync(path)
     }));
     
     res.json({
@@ -270,9 +270,13 @@ app.get('/debug/chrome', (req, res) => {
       puppeteerPath: process.env.PUPPETEER_EXECUTABLE_PATH,
       availablePaths: results,
       openwaConfig: {
-        useChrome: process.env.OPENWA_USE_CHROME,
         headless: process.env.OPENWA_HEADLESS,
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH
+      },
+      deployInfo: {
+        lastUpdate: new Date().toISOString(),
+        serverStartTime: process.uptime(),
+        nodeVersion: process.version
       }
     });
   } catch (error) {
