@@ -1,75 +1,53 @@
 #!/bin/bash
 
-# Script per installare Chrome/Chromium su Render
-echo "🔧 Installazione Chrome per OpenWA..."
+# 🔧 Script di installazione Chrome per Render
+# Usare come Build Command su Render se browserRevision non funziona
 
-# Update system
+echo "🔧 Installazione Chrome per OpenWA su Render..."
+
+# Aggiorna package manager
 apt-get update
 
-# Install required dependencies
+# Installa dipendenze Chrome
 apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
-    procps \
-    libxss1 \
-    libgconf-2-4 \
-    libxtst6 \
-    libxrandr2 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libatk1.0-0 \
-    libcairo-gobject2 \
-    libgtk-3-0 \
-    libgdk-pixbuf2.0-0 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxi6 \
-    libxss1 \
-    libnss3 \
-    libnss3-dev \
-    libgconf-2-4 \
-    libappindicator1 \
     fonts-liberation \
-    libappindicator3-1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
     xdg-utils
 
-# Install Google Chrome (raccomandato dalla documentazione OpenWA)
-echo "📦 Installazione Google Chrome..."
+# Installa Chrome
 wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
 echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
 apt-get update
 apt-get install -y google-chrome-stable
 
-# Fallback: Install Chromium se Chrome fallisce
-if [ ! -f "/usr/bin/google-chrome" ]; then
-    echo "📦 Google Chrome non installato, fallback a Chromium..."
-    apt-get install -y chromium-browser || apt-get install -y chromium
-fi
-
-# Create session directory
-mkdir -p ./wa-sessions
-chmod 777 ./wa-sessions
-
-# Check installation
-if [ -f "/usr/bin/google-chrome" ]; then
-    echo "✅ Google Chrome installato: /usr/bin/google-chrome"
-    echo "🎯 OpenWA userà auto-detection con useChrome: true"
-elif [ -f "/usr/bin/chromium-browser" ]; then
-    echo "✅ Chromium installato: /usr/bin/chromium-browser"
-    echo "🎯 OpenWA userà auto-detection con useChrome: true"
-elif [ -f "/usr/bin/chromium" ]; then
-    echo "✅ Chromium installato: /usr/bin/chromium"
-    echo "🎯 OpenWA userà auto-detection con useChrome: true"
+# Verifica installazione
+if command -v google-chrome-stable &> /dev/null; then
+    echo "✅ Chrome installato: $(google-chrome-stable --version)"
+    # Crea symlink per chrome
+    ln -sf /usr/bin/google-chrome-stable /tmp/chromium-browser/chrome
+    mkdir -p /tmp/chromium-browser
+    ln -sf /usr/bin/google-chrome-stable /tmp/chromium-browser/chrome
 else
-    echo "❌ Nessun browser Chrome/Chromium trovato!"
+    echo "❌ Errore installazione Chrome"
     exit 1
 fi
 
-# Install Node.js dependencies
-echo "📦 Installazione dipendenze Node.js..."
+# Installa dipendenze Node.js
 npm install
 
-echo "🎉 Installazione completata!"
-echo "🚀 OpenWA configurato per auto-detection di Chrome" 
+echo "🚀 Setup completato!" 

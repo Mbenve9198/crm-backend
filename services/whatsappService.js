@@ -130,9 +130,11 @@ class WhatsappService {
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
         devtools: false,
 
-        // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
+        // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
         ...(process.env.NODE_ENV === 'production' ? 
-          this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+          this.getProductionConfig() : 
+          (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
+          (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
           useChrome: false
         } : {
@@ -472,9 +474,11 @@ class WhatsappService {
             autoRefresh: true,
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
 
-            // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
+            // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
             ...(process.env.NODE_ENV === 'production' ? 
-              this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+              this.getProductionConfig() : 
+              (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
+              (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
               useChrome: false
             } : {
