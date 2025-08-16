@@ -23,11 +23,33 @@ class WhatsappService {
   async findPuppeteerChrome() {
     try {
       // Prova a importare puppeteer per ottenere il path del browser
-      const puppeteer = await import('puppeteer');
-      return puppeteer.executablePath ? puppeteer.executablePath() : null;
+      const puppeteer = require('puppeteer');
+      const path = puppeteer.executablePath();
+      console.log('🔍 Puppeteer Chromium trovato a:', path);
+      return path;
     } catch (error) {
-      console.log('⚠️ Puppeteer non trovato, usa default OpenWA');
+      console.log('⚠️ Puppeteer non trovato, errore:', error.message);
       return null;
+    }
+  }
+
+  /**
+   * Configurazione per produzione - prova Puppeteer prima, poi browserRevision
+   */
+  async getProductionConfig() {
+    const puppeteerPath = await this.findPuppeteerChrome();
+    
+    if (puppeteerPath) {
+      console.log('✅ Uso Puppeteer Chromium per produzione');
+      return {
+        executablePath: puppeteerPath,
+        useChrome: false
+      };
+    } else {
+      console.log('⚡ Fallback a browserRevision per scaricare Chromium');
+      return {
+        browserRevision: '737027'  // Versione stabile consigliata dalla docs
+      };
     }
   }
 
@@ -126,11 +148,8 @@ class WhatsappService {
         ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
           useChrome: false
-        } : process.env.NODE_ENV === 'production' ? {
-          // In produzione su Render, usa browserRevision per forzare download Chromium
-          // Questo sovrascrive useChrome e executablePath (dalla documentazione OpenWA)
-          browserRevision: '737027'  // Versione stabile consigliata dalla docs
-        } : {
+        } : process.env.NODE_ENV === 'production' ? 
+          await this.getProductionConfig() : {
           useChrome: true  // In sviluppo, cerca Chrome locale
         }),
         // Configurazione per ambienti headless
@@ -483,11 +502,8 @@ class WhatsappService {
             ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
               useChrome: false
-            } : process.env.NODE_ENV === 'production' ? {
-              // In produzione su Render, usa browserRevision per forzare download Chromium
-              // Questo sovrascrive useChrome e executablePath (dalla documentazione OpenWA)
-              browserRevision: '737027'  // Versione stabile consigliata dalla docs
-            } : {
+            } : process.env.NODE_ENV === 'production' ? 
+              await this.getProductionConfig() : {
               useChrome: true  // In sviluppo, cerca Chrome locale
             }),
             // Configurazione per ambienti headless
