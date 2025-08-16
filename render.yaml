@@ -3,52 +3,11 @@ services:
     name: menuchat-crm-backend
     env: node
     plan: starter
-    buildCommand: |
-      # Install Chrome dependencies
-      apt-get update && apt-get install -y \
-        wget \
-        gnupg \
-        ca-certificates \
-        procps \
-        libxss1 \
-        libgconf-2-4 \
-        libxtst6 \
-        libxrandr2 \
-        libasound2 \
-        libpangocairo-1.0-0 \
-        libatk1.0-0 \
-        libcairo-gobject2 \
-        libgtk-3-0 \
-        libgdk-pixbuf2.0-0 \
-        libxcomposite1 \
-        libxcursor1 \
-        libxdamage1 \
-        libxi6 \
-        libxss1 \
-        libnss3 \
-        libnss3-dev \
-        libgconf-2-4 \
-        libxss1 \
-        libappindicator1 \
-        fonts-liberation \
-        libappindicator3-1 \
-        xdg-utils
-
-      # Install Chromium
-      apt-get install -y chromium-browser
-
-      # Install Node dependencies
-      npm install
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
-      - key: CHROME_PATH
-        value: /usr/bin/chromium-browser
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/chromium-browser
-      - key: OPENWA_USE_CHROME
-        value: "true"
       - key: OPENWA_HEADLESS
         value: "true"
       - key: OPENWA_SESSION_DATA_PATH

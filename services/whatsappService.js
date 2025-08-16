@@ -108,11 +108,14 @@ class WhatsappService {
         devtools: false,
         // Docker detection per auto-configurazione
         inDocker: process.env.NODE_ENV === 'production',
-        // Chrome configuration: usa useChrome per auto-detection, executablePath solo se specificato
+        // Chrome configuration: usa useChrome per auto-detection, fallback a Puppeteer Chromium
         ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+        } : process.env.NODE_ENV === 'production' ? {
+          // In produzione su Render, usa Puppeteer Chromium se Chrome non disponibile
+          useChrome: false  // Non cercare Chrome, usa Puppeteer Chromium
         } : {
-          useChrome: true  // Auto-detect Chrome se non specificato path
+          useChrome: true  // In sviluppo, cerca Chrome locale
         }),
         // Configurazione per ambienti headless
         ...(process.env.NODE_ENV === 'production' && {
@@ -460,11 +463,14 @@ class WhatsappService {
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
             // Docker detection per auto-configurazione
             inDocker: process.env.NODE_ENV === 'production',
-            // Chrome configuration: usa useChrome per auto-detection, executablePath solo se specificato
+            // Chrome configuration: usa useChrome per auto-detection, fallback a Puppeteer Chromium  
             ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH
+            } : process.env.NODE_ENV === 'production' ? {
+              // In produzione su Render, usa Puppeteer Chromium se Chrome non disponibile
+              useChrome: false  // Non cercare Chrome, usa Puppeteer Chromium
             } : {
-              useChrome: true  // Auto-detect Chrome se non specificato path
+              useChrome: true  // In sviluppo, cerca Chrome locale
             }),
             // Configurazione per ambienti headless
             ...(process.env.NODE_ENV === 'production' && {
