@@ -34,23 +34,20 @@ class WhatsappService {
   }
 
   /**
-   * Configurazione per produzione - prova Puppeteer prima, poi browserRevision
+   * Configurazione per produzione - usa sempre browserRevision per evitare Chrome search
    */
   async getProductionConfig() {
-    const puppeteerPath = await this.findPuppeteerChrome();
+    console.log('🚀 Produzione: uso browserRevision per evitare ricerca Chrome');
     
-    if (puppeteerPath) {
-      console.log('✅ Uso Puppeteer Chromium per produzione');
-      return {
-        executablePath: puppeteerPath,
-        useChrome: false
-      };
-    } else {
-      console.log('⚡ Fallback a browserRevision per scaricare Chromium');
-      return {
-        browserRevision: '737027'  // Versione stabile consigliata dalla docs
-      };
-    }
+    // Usa una versione specifica di Chromium per bypassare completamente Chrome detection
+    const config = {
+      browserRevision: process.env.OPENWA_BROWSER_REVISION || '1108766',
+      useChrome: false,
+      headless: true
+    };
+    
+    console.log('📦 Configurazione produzione:', config);
+    return config;
   }
 
   /**
@@ -142,8 +139,8 @@ class WhatsappService {
         hostNotificationLang: 'IT',
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
         devtools: false,
-        // Docker detection per auto-configurazione
-        inDocker: process.env.NODE_ENV === 'production',
+        // Docker detection disabilitato per evitare conflitti
+        inDocker: false,
         // Chrome configuration: gestisce Puppeteer Chromium e Chrome
         ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -152,19 +149,8 @@ class WhatsappService {
           await this.getProductionConfig() : {
           useChrome: true  // In sviluppo, cerca Chrome locale
         }),
-        // Configurazione per ambienti headless
-        ...(process.env.NODE_ENV === 'production' && {
-          chromiumArgs: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process',
-            '--disable-gpu'
-          ]
-        }),
+        // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
+        // NOTA: chromiumArgs rimossi perché causano problemi con multi-device secondo OpenWA
         // Aggiungi la licenza se disponibile
         ...(process.env.OPENWA_LICENSE_KEY && { 
           licenseKey: process.env.OPENWA_LICENSE_KEY 
@@ -496,8 +482,8 @@ class WhatsappService {
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
-            // Docker detection per auto-configurazione
-            inDocker: process.env.NODE_ENV === 'production',
+            // Docker detection disabilitato per evitare conflitti
+            inDocker: false,
             // Chrome configuration: gestisce Puppeteer Chromium e Chrome
             ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -506,19 +492,8 @@ class WhatsappService {
               await this.getProductionConfig() : {
               useChrome: true  // In sviluppo, cerca Chrome locale
             }),
-            // Configurazione per ambienti headless
-            ...(process.env.NODE_ENV === 'production' && {
-              chromiumArgs: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--single-process',
-                '--disable-gpu'
-              ]
-            }),
+            // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
+            // NOTA: chromiumArgs rimossi perché causano problemi con multi-device secondo OpenWA
             // Aggiungi la licenza se disponibile
             ...(process.env.OPENWA_LICENSE_KEY && { 
               licenseKey: process.env.OPENWA_LICENSE_KEY 
