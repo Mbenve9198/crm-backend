@@ -18,19 +18,25 @@ class WhatsappService {
   }
 
   /**
-   * Configurazione minimal per produzione - SOLO browserRevision
+   * Configurazione per produzione - forza CHROME_PATH vuoto per disabilitare chrome-launcher
    */
   getProductionConfig() {
-    console.log('🚀 Produzione: configurazione minimal con SOLO browserRevision');
+    console.log('🚀 Produzione: disabilito chrome-launcher forzando CHROME_PATH vuoto');
     
-    // Configurazione minimal - SOLO browserRevision (sovrascrive tutto)
+    // SOLUZIONE BASATA SU RICERCA INTERNET:
+    // ChromeDriver 128+ ha bug con porte casuali e chrome-launcher
+    // Forzo CHROME_PATH vuoto per bypassare chrome-launcher
+    
     const config = {
       browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
       headless: true,
-      cacheEnabled: false
+      cacheEnabled: false,
+      // Forza vuoto per disabilitare chrome-launcher detection
+      executablePath: '',
+      useChrome: false
     };
     
-    console.log('📦 Config minimal browserRevision:', config);
+    console.log('📦 Config con chrome-launcher disabilitato:', config);
     return config;
   }
 
