@@ -23,6 +23,15 @@ class WhatsappService {
   getProductionConfig() {
     console.log('🚀 Produzione: uso browserRevision per scaricare Chromium automaticamente');
     
+    // Verifica che non ci siano environment variables che interferiscono
+    if (process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH) {
+      console.log('⚠️  WARNING: CHROME_PATH o PUPPETEER_EXECUTABLE_PATH sono impostati:', {
+        CHROME_PATH: process.env.CHROME_PATH,
+        PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH
+      });
+      console.log('⚠️  RIMUOVI queste variabili su Render per usare browserRevision!');
+    }
+    
     // browserRevision forza OpenWA a scaricare una versione specifica di Chromium
     // Questo bypassa completamente la ricerca di Chrome installato
     const config = {
@@ -128,12 +137,12 @@ class WhatsappService {
         devtools: false,
         // Docker detection disabilitato per evitare conflitti
         inDocker: false,
-        // Chrome configuration: gestisce Puppeteer Chromium e Chrome
-        ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+        // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
+        ...(process.env.NODE_ENV === 'production' ? 
+          this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
           useChrome: false
-        } : process.env.NODE_ENV === 'production' ? 
-          this.getProductionConfig() : {
+        } : {
           useChrome: true  // In sviluppo, cerca Chrome locale
         }),
         // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
@@ -471,12 +480,12 @@ class WhatsappService {
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
             // Docker detection disabilitato per evitare conflitti
             inDocker: false,
-            // Chrome configuration: gestisce Puppeteer Chromium e Chrome
-            ...(process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
+            // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
+            ...(process.env.NODE_ENV === 'production' ? 
+              this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
               useChrome: false
-            } : process.env.NODE_ENV === 'production' ? 
-              this.getProductionConfig() : {
+            } : {
               useChrome: true  // In sviluppo, cerca Chrome locale
             }),
             // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
