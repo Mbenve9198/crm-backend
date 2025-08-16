@@ -18,31 +18,19 @@ class WhatsappService {
   }
 
   /**
-   * Configurazione per produzione - usa browserRevision per scaricare Chromium
+   * Configurazione minimal per produzione - SOLO browserRevision
    */
   getProductionConfig() {
-    console.log('🚀 Produzione: uso browserRevision per scaricare Chromium automaticamente');
+    console.log('🚀 Produzione: configurazione minimal con SOLO browserRevision');
     
-    // Verifica che non ci siano environment variables che interferiscono
-    if (process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH) {
-      console.log('⚠️  WARNING: CHROME_PATH o PUPPETEER_EXECUTABLE_PATH sono impostati:', {
-        CHROME_PATH: process.env.CHROME_PATH,
-        PUPPETEER_EXECUTABLE_PATH: process.env.PUPPETEER_EXECUTABLE_PATH
-      });
-      console.log('⚠️  RIMUOVI queste variabili su Render per usare browserRevision!');
-    }
-    
-    // browserRevision forza OpenWA a scaricare una versione specifica di Chromium
-    // Questo bypassa completamente la ricerca di Chrome installato
+    // Configurazione minimal - SOLO browserRevision (sovrascrive tutto)
     const config = {
-      browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',  // Versione stabile dalla docs
-      useChrome: false,
+      browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
       headless: true,
-      autoRefresh: true,
       cacheEnabled: false
     };
     
-    console.log('📦 Configurazione produzione browserRevision:', config);
+    console.log('📦 Config minimal browserRevision:', config);
     return config;
   }
 
@@ -135,8 +123,7 @@ class WhatsappService {
         hostNotificationLang: 'IT',
         sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
         devtools: false,
-        // Docker detection disabilitato per evitare conflitti
-        inDocker: false,
+
         // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
         ...(process.env.NODE_ENV === 'production' ? 
           this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
@@ -478,8 +465,7 @@ class WhatsappService {
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
             sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
-            // Docker detection disabilitato per evitare conflitti
-            inDocker: false,
+
             // Chrome configuration: SOLO browserRevision in produzione per evitare conflitti
             ...(process.env.NODE_ENV === 'production' ? 
               this.getProductionConfig() : process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH ? {
