@@ -18,35 +18,22 @@ class WhatsappService {
   }
 
   /**
-   * Metodo helper per trovare Puppeteer Chromium
+   * Configurazione per produzione - usa browserRevision per scaricare Chromium
    */
-  async findPuppeteerChrome() {
-    try {
-      // Prova a importare puppeteer per ottenere il path del browser
-      const puppeteer = require('puppeteer');
-      const path = puppeteer.executablePath();
-      console.log('🔍 Puppeteer Chromium trovato a:', path);
-      return path;
-    } catch (error) {
-      console.log('⚠️ Puppeteer non trovato, errore:', error.message);
-      return null;
-    }
-  }
-
-  /**
-   * Configurazione per produzione - usa sempre browserRevision per evitare Chrome search
-   */
-  async getProductionConfig() {
-    console.log('🚀 Produzione: uso browserRevision per evitare ricerca Chrome');
+  getProductionConfig() {
+    console.log('🚀 Produzione: uso browserRevision per scaricare Chromium automaticamente');
     
-    // Usa una versione specifica di Chromium per bypassare completamente Chrome detection
+    // browserRevision forza OpenWA a scaricare una versione specifica di Chromium
+    // Questo bypassa completamente la ricerca di Chrome installato
     const config = {
-      browserRevision: process.env.OPENWA_BROWSER_REVISION || '1108766',
+      browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',  // Versione stabile dalla docs
       useChrome: false,
-      headless: true
+      headless: true,
+      autoRefresh: true,
+      cacheEnabled: false
     };
     
-    console.log('📦 Configurazione produzione:', config);
+    console.log('📦 Configurazione produzione browserRevision:', config);
     return config;
   }
 
@@ -146,7 +133,7 @@ class WhatsappService {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
           useChrome: false
         } : process.env.NODE_ENV === 'production' ? 
-          await this.getProductionConfig() : {
+          this.getProductionConfig() : {
           useChrome: true  // In sviluppo, cerca Chrome locale
         }),
         // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
@@ -489,7 +476,7 @@ class WhatsappService {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
               useChrome: false
             } : process.env.NODE_ENV === 'production' ? 
-              await this.getProductionConfig() : {
+              this.getProductionConfig() : {
               useChrome: true  // In sviluppo, cerca Chrome locale
             }),
             // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)

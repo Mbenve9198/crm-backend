@@ -18,11 +18,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (questo installerà Puppeteer con Chromium)
+# Install dependencies (OpenWA gestirà Chromium tramite browserRevision)
 RUN npm ci --only=production
-
-# Verifica che Puppeteer abbia installato Chromium
-RUN node -e "const puppeteer = require('puppeteer'); console.log('Chromium path:', puppeteer.executablePath());"
 
 # Copy application code
 COPY . .
