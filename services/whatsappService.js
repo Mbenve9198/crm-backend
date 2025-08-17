@@ -214,6 +214,11 @@ class WhatsappService {
       });
       await session.save();
 
+      // CRITICAL FIX: Forza il percorso di storage per node-persist
+      const storagePathForSession = process.env.OPENWA_SESSION_DATA_PATH || path.join(os.tmpdir(), 'wa-storage');
+      
+      console.log(`📍 CRITICAL CONFIG: sessionDataPath = ${storagePathForSession}`);
+
       // Configurazione OpenWA ottimizzata basata sulla documentazione
       const config = {
         sessionId,
@@ -223,7 +228,10 @@ class WhatsappService {
         authTimeout: 30,
         cacheEnabled: false,
         hostNotificationLang: 'IT',
-        sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH,
+        
+        // CRITICAL: Configura esplicitamente sessionDataPath per forzare node-persist
+        sessionDataPath: storagePathForSession,
+        
         devtools: false,
         
         // Configurazione node-persist per evitare errori di permesso
@@ -231,8 +239,8 @@ class WhatsappService {
         killProcessOnBrowserClose: true,
         
         // Configurazioni aggiuntive per forzare il percorso di storage
-        dataPath: process.env.OPENWA_SESSION_DATA_PATH,
-        persistDataDir: process.env.NODE_PERSIST_DIR,
+        dataPath: storagePathForSession,
+        persistDataDir: path.join(storagePathForSession, 'node-persist'),
         
         // Opzioni per gestire meglio l'ambiente headless
         bypassCSP: true,
@@ -576,11 +584,14 @@ class WhatsappService {
         try {
           console.log(`🔄 Riconnessione sessione: ${session.sessionId}`);
           
+          // CRITICAL FIX: Forza il percorso di storage per riconnessione
+          const storagePathForReconnect = process.env.OPENWA_SESSION_DATA_PATH || path.join(os.tmpdir(), 'wa-storage');
+          
           const config = {
             sessionId: session.sessionId,
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
-            sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH,
+            sessionDataPath: storagePathForReconnect,
             disableSpins: true,
             killProcessOnBrowserClose: true,
 

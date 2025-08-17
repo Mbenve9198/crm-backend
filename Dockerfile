@@ -26,8 +26,9 @@ COPY . .
 
 # Create session data directory and temporary directories for node-persist
 RUN mkdir -p /app/wa-sessions && chown -R node:node /app/wa-sessions
-RUN mkdir -p /tmp/wa-storage /tmp/wa-storage/node-persist /tmp/wa-storage/sessions && chown -R node:node /tmp/wa-storage
-RUN chmod -R 755 /tmp/wa-storage
+RUN mkdir -p /tmp/wa-storage /tmp/wa-storage/node-persist /tmp/wa-storage/sessions
+RUN chmod -R 777 /tmp/wa-storage
+RUN chown -R node:node /tmp/wa-storage
 
 # Set environment variables for OpenWA
 ENV NODE_ENV=production

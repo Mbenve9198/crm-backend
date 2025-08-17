@@ -19,6 +19,16 @@ Il servizio `whatsappService.js` ora configura automaticamente il percorso di st
 - **Produzione (Railway)**: Usa `/tmp/wa-storage` (directory temporanea con permessi di scrittura)
 - **Sviluppo**: Usa `./wa-storage` nella directory del progetto
 
+### CRITICAL FIX: Configurazione sessionDataPath Esplicita
+
+**Basato su ricerca Perplexity**: Il problema principale è che @open-wa/wa-automate usa node-persist internamente, e anche se impostiamo variabili d'ambiente, dobbiamo configurare **esplicitamente** `sessionDataPath` nel metodo `create()` di OpenWA:
+
+```javascript
+create({
+  sessionDataPath: '/tmp/wa-storage' // Percorso esplicito per node-persist
+});
+```
+
 ### 2. Variabili d'Ambiente Richieste
 
 Aggiungi queste variabili al tuo progetto Railway:
@@ -57,6 +67,9 @@ Le configurazioni OpenWA ora includono:
 ### 1. Test Locale
 
 ```bash
+# Testa la configurazione OpenWA
+npm run test-openwa-config
+
 # Testa il fix completo
 npm run test-node-persist
 
@@ -86,6 +99,7 @@ NODE_ENV=production npm start
    ```
 
 3. **Verifica i log**:
+   - Cerca nel log: "📍 CRITICAL CONFIG: sessionDataPath = /tmp/wa-storage"
    - Cerca nel log: "📁 Directory storage WhatsApp creata"
    - Verifica che non ci siano più errori EACCES
 
