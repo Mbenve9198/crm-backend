@@ -258,8 +258,17 @@ class WhatsappService {
         skipBrokenMethodsCheck: true,
 
         // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
-        ...(process.env.NODE_ENV === 'production' ? 
-          this.getProductionConfig() : 
+        ...(process.env.NODE_ENV === 'production' ? {
+          // Fix per Railway: usa Chrome installato nel container
+          executablePath: process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+          useChrome: true,
+          browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
+          headless: true,
+          cacheEnabled: false,
+          // Fix per Puppeteer compatibility
+          skipBrokenMethodsCheck: true,
+          browserWSEndpoint: false
+        } : 
           (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
           (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
           executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
@@ -625,8 +634,17 @@ class WhatsappService {
             killProcessOnBrowserClose: true,
 
             // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
-            ...(process.env.NODE_ENV === 'production' ? 
-              this.getProductionConfig() : 
+            ...(process.env.NODE_ENV === 'production' ? {
+              // Fix per Railway: usa Chrome installato nel container
+              executablePath: process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+              useChrome: true,
+              browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
+              headless: true,
+              cacheEnabled: false,
+              // Fix per Puppeteer compatibility
+              skipBrokenMethodsCheck: true,
+              browserWSEndpoint: false
+            } : 
               (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
               (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
               executablePath: process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH,
