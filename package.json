@@ -17,6 +17,7 @@
     "clean-calls": "node scripts/cleanStuckCalls.js",
     "clean-all-calls": "node scripts/cleanAllActiveCalls.js",
     "fix-node-persist": "node scripts/fixNodePersistPermissions.js",
+    "test-node-persist": "node scripts/testNodePersistFix.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

@@ -57,6 +57,9 @@ Le configurazioni OpenWA ora includono:
 ### 1. Test Locale
 
 ```bash
+# Testa il fix completo
+npm run test-node-persist
+
 # Testa lo script di fix
 npm run fix-node-persist
 
@@ -141,4 +144,29 @@ Se hai ancora problemi:
 
 - **v1.0.0**: Implementazione fix EACCES node-persist
 - **v1.0.1**: Aggiunto fallback automatico
-- **v1.0.2**: Ottimizzazioni per Railway deployment 
+- **v1.0.2**: Ottimizzazioni per Railway deployment
+- **v1.1.0**: CRITICAL FIX - Override fs.mkdir per intercettare node-persist
+- **v1.1.1**: Aggiunto test script completo e configurazione Dockerfile
+- **v1.1.2**: Fix pre-import setup e configurazione variabili d'ambiente
+
+## Fixes Implementati in questa Versione
+
+### 1. Override fs.mkdir() 
+- Intercetta tutte le chiamate a `mkdir('.node-persist')`
+- Redirecta automaticamente a `/tmp/wa-storage/node-persist`
+- Funziona sia per fs.mkdir che fs.mkdirSync
+
+### 2. Pre-import Setup
+- Configurazione storage path PRIMA dell'import di OpenWA
+- Creazione directory immediate nel server.js
+- Variabili d'ambiente impostate all'avvio
+
+### 3. Dockerfile Ottimizzato
+- Directory temporanee create nel build
+- Permessi corretti per l'utente `node`
+- Variabili d'ambiente pre-configurate
+
+### 4. Test Completo
+- Script `npm run test-node-persist` per verificare il fix
+- Test permessi, directory e configurazione
+- Simulazione comportamento node-persist 
