@@ -235,10 +235,23 @@ class WhatsappService {
         sessionId,
         headless: process.env.OPENWA_HEADLESS === 'true' || true,
         autoRefresh: true,
-        qrTimeout: 30,
-        authTimeout: 30,
+        qrTimeout: 120,  // Aumentato per Railway
+        authTimeout: 120,  // Aumentato per Railway
         cacheEnabled: false,
         hostNotificationLang: 'IT',
+        
+        // Fix per timeout su Railway
+        waitForRipeSession: 60000,
+        chromiumArgs: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--single-process',
+          '--disable-gpu'
+        ],
         
         // CRITICAL: Configura esplicitamente sessionDataPath per forzare node-persist
         sessionDataPath: storagePathForSession,
@@ -270,9 +283,20 @@ class WhatsappService {
           skipBrokenMethodsCheck: true,
           browserWSEndpoint: false,
           // Disabilita auto-download di Chromium
-          autoRefresh: false,
-          qrTimeout: 60,
-          authTimeout: 60
+          autoRefresh: true,
+          qrTimeout: 120,
+          authTimeout: 120,
+          waitForRipeSession: 60000,
+          chromiumArgs: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+          ]
         } : 
           (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
           (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
@@ -637,6 +661,21 @@ class WhatsappService {
             sessionDataPath: storagePathForReconnect,
             disableSpins: true,
             killProcessOnBrowserClose: true,
+            
+            // Fix per timeout durante riconnessione
+            qrTimeout: 120,
+            authTimeout: 120,
+            waitForRipeSession: 60000,
+            chromiumArgs: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              '--disable-accelerated-2d-canvas',
+              '--no-first-run',
+              '--no-zygote',
+              '--single-process',
+              '--disable-gpu'
+            ],
 
             // Chrome configuration: Fix per Railway con Puppeteer compatibility
             ...(process.env.NODE_ENV === 'production' ? {
