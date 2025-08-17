@@ -257,17 +257,22 @@ class WhatsappService {
         bypassCSP: true,
         skipBrokenMethodsCheck: true,
 
-        // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
+        // Chrome configuration: Fix per Railway con Puppeteer compatibility
         ...(process.env.NODE_ENV === 'production' ? {
           // Fix per Railway: usa Chrome installato nel container
           executablePath: process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
           useChrome: true,
-          browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
+          // CRITICAL: Disabilita browserRevision per evitare createBrowserFetcher
+          // browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
           headless: true,
           cacheEnabled: false,
           // Fix per Puppeteer compatibility
           skipBrokenMethodsCheck: true,
-          browserWSEndpoint: false
+          browserWSEndpoint: false,
+          // Disabilita auto-download di Chromium
+          autoRefresh: false,
+          qrTimeout: 60,
+          authTimeout: 60
         } : 
           (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
           (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
@@ -633,17 +638,22 @@ class WhatsappService {
             disableSpins: true,
             killProcessOnBrowserClose: true,
 
-            // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
+            // Chrome configuration: Fix per Railway con Puppeteer compatibility
             ...(process.env.NODE_ENV === 'production' ? {
               // Fix per Railway: usa Chrome installato nel container
               executablePath: process.env.CHROME_BIN || process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
               useChrome: true,
-              browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
+              // CRITICAL: Disabilita browserRevision per evitare createBrowserFetcher
+              // browserRevision: process.env.OPENWA_BROWSER_REVISION || '737027',
               headless: true,
               cacheEnabled: false,
               // Fix per Puppeteer compatibility
               skipBrokenMethodsCheck: true,
-              browserWSEndpoint: false
+              browserWSEndpoint: false,
+              // Disabilita auto-download di Chromium
+              autoRefresh: false,
+              qrTimeout: 60,
+              authTimeout: 60
             } : 
               (process.env.CHROME_PATH && require('fs').existsSync(process.env.CHROME_PATH)) || 
               (process.env.PUPPETEER_EXECUTABLE_PATH && require('fs').existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) ? {
