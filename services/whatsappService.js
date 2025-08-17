@@ -219,6 +219,17 @@ class WhatsappService {
       
       console.log(`📍 CRITICAL CONFIG: sessionDataPath = ${storagePathForSession}`);
 
+      // EXTREME FIX: Cambia working directory temporaneamente
+      const originalCwd = process.cwd();
+      console.log(`🔄 EXTREME FIX: Cambio working directory da ${originalCwd} a ${storagePathForSession}`);
+      
+      try {
+        process.chdir(storagePathForSession);
+        console.log(`✅ EXTREME FIX: Working directory cambiata a ${process.cwd()}`);
+      } catch (error) {
+        console.warn(`⚠️ EXTREME FIX: Errore cambio directory: ${error.message}`);
+      }
+
       // Configurazione OpenWA ottimizzata basata sulla documentazione
       const config = {
         sessionId,
@@ -268,6 +279,14 @@ class WhatsappService {
       // Crea la sessione OpenWA
       const client = await create(config);
       
+      // EXTREME FIX: Ripristina working directory originale
+      try {
+        process.chdir(originalCwd);
+        console.log(`🔄 EXTREME FIX: Working directory ripristinata a ${process.cwd()}`);
+      } catch (error) {
+        console.warn(`⚠️ EXTREME FIX: Errore ripristino directory: ${error.message}`);
+      }
+      
       // Salva il client nella mappa
       this.sessions.set(sessionId, client);
       
@@ -279,6 +298,16 @@ class WhatsappService {
 
     } catch (error) {
       console.error(`❌ Errore creazione sessione ${sessionId}:`, error);
+      
+      // EXTREME FIX: Ripristina working directory anche in caso di errore
+      try {
+        if (typeof originalCwd !== 'undefined') {
+          process.chdir(originalCwd);
+          console.log(`🔄 EXTREME FIX: Working directory ripristinata dopo errore a ${process.cwd()}`);
+        }
+      } catch (chdirError) {
+        console.warn(`⚠️ EXTREME FIX: Errore ripristino directory dopo errore: ${chdirError.message}`);
+      }
       
       // Aggiorna lo stato in caso di errore
       await WhatsappSession.findOneAndUpdate(
