@@ -24,13 +24,16 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
-# Create session data directory
+# Create session data directory and temporary directories for node-persist
 RUN mkdir -p /app/wa-sessions && chown -R node:node /app/wa-sessions
+RUN mkdir -p /tmp/wa-storage /tmp/wa-storage/node-persist /tmp/wa-storage/sessions && chown -R node:node /tmp/wa-storage
+RUN chmod -R 755 /tmp/wa-storage
 
 # Set environment variables for OpenWA
 ENV NODE_ENV=production
 ENV OPENWA_HEADLESS=true
-ENV OPENWA_SESSION_DATA_PATH=/app/wa-sessions
+ENV OPENWA_SESSION_DATA_PATH=/tmp/wa-storage
+ENV OPENWA_STORAGE_PATH=/tmp/wa-storage
 # Non impostare CHROME_PATH per permettere auto-detection
 
 # Switch to non-root user

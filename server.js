@@ -2,8 +2,6 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
 import cookieParser from 'cookie-parser';
 import contactRoutes from './routes/contactRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -20,6 +18,69 @@ import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
 
 // Carica le variabili d'ambiente
 dotenv.config();
+
+// CRITICAL FIX: Configura il percorso per node-persist PRIMA di qualsiasi import OpenWA
+import path from 'path';
+import os from 'os';
+
+// Determina e imposta il percorso di storage per node-persist
+const isProduction = process.env.NODE_ENV === 'production';
+const storagePath = isProduction 
+  ? path.join(os.tmpdir(), 'wa-storage')
+  : path.join(process.cwd(), 'wa-storage');
+
+// Imposta le variabili d'ambiente per node-persist e OpenWA
+process.env.OPENWA_SESSION_DATA_PATH = storagePath;
+process.env.NODE_PERSIST_DIR = path.join(storagePath, 'node-persist');
+
+console.log(`🔧 CRITICAL FIX: Storage path impostato a ${storagePath}`);
+console.log(`🔧 CRITICAL FIX: NODE_PERSIST_DIR impostato a ${process.env.NODE_PERSIST_DIR}`);
+
+// CRITICAL FIX: Intercepta le chiamate a mkdir di node-persist
+import fsModule from 'fs';
+const originalMkdir = fsModule.mkdir;
+const originalMkdirSync = fsModule.mkdirSync;
+
+// Override fs.mkdir per redirectare .node-persist alla directory corretta
+fsModule.mkdir = function(pathToCreate, options, callback) {
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  
+  // Se sta cercando di creare .node-persist nella directory corrente, redirecta
+  if (pathToCreate === '.node-persist' || pathToCreate.endsWith('/.node-persist')) {
+    const redirectedPath = path.join(storagePath, 'node-persist');
+    console.log(`🔀 REDIRECT: ${pathToCreate} -> ${redirectedPath}`);
+    pathToCreate = redirectedPath;
+  }
+  
+  return originalMkdir.call(this, pathToCreate, { recursive: true, ...options }, callback);
+};
+
+// Override fs.mkdirSync per redirectare .node-persist alla directory corretta
+fsModule.mkdirSync = function(pathToCreate, options = {}) {
+  // Se sta cercando di creare .node-persist nella directory corrente, redirecta
+  if (pathToCreate === '.node-persist' || pathToCreate.endsWith('/.node-persist')) {
+    const redirectedPath = path.join(storagePath, 'node-persist');
+    console.log(`🔀 REDIRECT SYNC: ${pathToCreate} -> ${redirectedPath}`);
+    pathToCreate = redirectedPath;
+  }
+  
+  return originalMkdirSync.call(this, pathToCreate, { recursive: true, ...options });
+};
+
+console.log('🛠️ CRITICAL FIX: Override fs.mkdir applicato per node-persist');
+
+// CRITICAL FIX: Crea immediatamente le directory necessarie
+try {
+  fsModule.mkdirSync(storagePath, { recursive: true });
+  fsModule.mkdirSync(path.join(storagePath, 'node-persist'), { recursive: true });
+  fsModule.mkdirSync(path.join(storagePath, 'wa-sessions'), { recursive: true });
+  console.log(`✅ CRITICAL FIX: Directory storage create: ${storagePath}`);
+} catch (error) {
+  console.warn(`⚠️ CRITICAL FIX: Avviso creazione directory: ${error.message}`);
+}
 
 /**
  * SERVER PRINCIPALE PER MENUCHAT CRM
@@ -157,8 +218,8 @@ if (process.env.NODE_ENV === 'development') {
 
 // Crea la cartella uploads se non esiste (per i file CSV)
 const uploadsDir = './uploads';
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+if (!fsModule.existsSync(uploadsDir)) {
+  fsModule.mkdirSync(uploadsDir, { recursive: true });
   console.log('📁 Cartella uploads creata');
 }
 

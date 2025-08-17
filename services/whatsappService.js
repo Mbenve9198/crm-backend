@@ -17,14 +17,14 @@ class WhatsappService {
     this.messageProcessors = new Map(); // sessionId -> message processor interval
     this.isInitialized = false;
     
-    // Configura il percorso di storage per node-persist (usato da OpenWA internamente)
-    this.setupStoragePath();
+    // Configura immediatamente il percorso di storage per node-persist
+    this.setupStoragePathSync();
   }
 
   /**
-   * Configura il percorso di storage per node-persist e OpenWA
+   * Configura immediatamente il percorso di storage per node-persist e OpenWA (sincrono)
    */
-  async setupStoragePath() {
+  setupStoragePathSync() {
     try {
       // Determina il percorso di storage appropriato per l'ambiente
       let storagePath;
@@ -37,9 +37,44 @@ class WhatsappService {
         storagePath = process.env.OPENWA_STORAGE_PATH || path.join(process.cwd(), 'wa-storage');
       }
 
+      // Setta immediatamente la variabile d'ambiente per OpenWA PRIMA di qualsiasi altra inizializzazione
+      process.env.OPENWA_SESSION_DATA_PATH = storagePath;
+      
+      console.log(`📁 Storage path configurato: ${storagePath}`);
+      
+      // Configura variabili d'ambiente aggiuntive per forzare l'uso del percorso corretto
+      process.env.NODE_PERSIST_DIR = path.join(storagePath, 'node-persist');
+      
+      console.log(`🔧 NODE_PERSIST_DIR impostato: ${process.env.NODE_PERSIST_DIR}`);
+      
+    } catch (error) {
+      console.error('❌ Errore setup storage path sincrono:', error);
+      // Fallback alla directory temporanea di sistema
+      const fallbackPath = path.join(os.tmpdir(), 'wa-fallback');
+      process.env.OPENWA_SESSION_DATA_PATH = fallbackPath;
+      process.env.NODE_PERSIST_DIR = path.join(fallbackPath, 'node-persist');
+      console.log(`🔄 Fallback storage path: ${fallbackPath}`);
+    }
+  }
+
+  /**
+   * Configura il percorso di storage per node-persist e OpenWA (asincrono per creazione directory)
+   */
+  async setupStoragePath() {
+    try {
+      const storagePath = process.env.OPENWA_SESSION_DATA_PATH;
+      
+      if (!storagePath) {
+        console.warn('⚠️ OPENWA_SESSION_DATA_PATH non configurato, uso setupStoragePathSync');
+        this.setupStoragePathSync();
+        return;
+      }
+
       // Crea la directory se non esiste
       try {
         await fs.mkdir(storagePath, { recursive: true });
+        await fs.mkdir(path.join(storagePath, 'node-persist'), { recursive: true });
+        await fs.mkdir(path.join(storagePath, 'sessions'), { recursive: true });
         console.log(`📁 Directory storage WhatsApp creata: ${storagePath}`);
       } catch (error) {
         if (error.code !== 'EEXIST') {
@@ -60,16 +95,9 @@ class WhatsappService {
         });
         console.log('🔧 node-persist configurato per OpenWA');
       }
-
-      // Setta la variabile d'ambiente per OpenWA
-      process.env.OPENWA_SESSION_DATA_PATH = storagePath;
       
     } catch (error) {
-      console.error('❌ Errore setup storage path:', error);
-      // Fallback alla directory temporanea di sistema
-      const fallbackPath = path.join(os.tmpdir(), 'wa-fallback');
-      process.env.OPENWA_SESSION_DATA_PATH = fallbackPath;
-      console.log(`🔄 Fallback storage path: ${fallbackPath}`);
+      console.error('❌ Errore setup storage path asincrono:', error);
     }
   }
 
@@ -166,6 +194,15 @@ class WhatsappService {
     console.log(`🔄 Creazione sessione WhatsApp: ${sessionId}`);
 
     try {
+      // Assicurati che il percorso di storage sia configurato PRIMA di creare la sessione
+      if (!process.env.OPENWA_SESSION_DATA_PATH) {
+        console.log('🔧 Configurazione storage path di emergenza...');
+        this.setupStoragePathSync();
+      }
+
+      // Crea le directory necessarie se non esistono
+      await this.setupStoragePath();
+
       // Salva la sessione nel database
       const session = new WhatsappSession({
         sessionId,
@@ -192,6 +229,14 @@ class WhatsappService {
         // Configurazione node-persist per evitare errori di permesso
         disableSpins: true,
         killProcessOnBrowserClose: true,
+        
+        // Configurazioni aggiuntive per forzare il percorso di storage
+        dataPath: process.env.OPENWA_SESSION_DATA_PATH,
+        persistDataDir: process.env.NODE_PERSIST_DIR,
+        
+        // Opzioni per gestire meglio l'ambiente headless
+        bypassCSP: true,
+        skipBrokenMethodsCheck: true,
 
         // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
         ...(process.env.NODE_ENV === 'production' ? 
