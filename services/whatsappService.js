@@ -5,6 +5,7 @@ import Contact from '../models/contactModel.js';
 import Activity from '../models/activityModel.js';
 import fs from 'fs/promises';
 import path from 'path';
+import os from 'os';
 
 /**
  * Servizio per gestire le connessioni WhatsApp con OpenWA
@@ -15,6 +16,61 @@ class WhatsappService {
     this.qrCodeListeners = new Map(); // sessionId -> QR callback
     this.messageProcessors = new Map(); // sessionId -> message processor interval
     this.isInitialized = false;
+    
+    // Configura il percorso di storage per node-persist (usato da OpenWA internamente)
+    this.setupStoragePath();
+  }
+
+  /**
+   * Configura il percorso di storage per node-persist e OpenWA
+   */
+  async setupStoragePath() {
+    try {
+      // Determina il percorso di storage appropriato per l'ambiente
+      let storagePath;
+      
+      if (process.env.NODE_ENV === 'production') {
+        // In produzione (Railway), usa la directory tmp che ha permessi di scrittura
+        storagePath = process.env.OPENWA_STORAGE_PATH || path.join(os.tmpdir(), 'wa-storage');
+      } else {
+        // In sviluppo, usa la directory del progetto
+        storagePath = process.env.OPENWA_STORAGE_PATH || path.join(process.cwd(), 'wa-storage');
+      }
+
+      // Crea la directory se non esiste
+      try {
+        await fs.mkdir(storagePath, { recursive: true });
+        console.log(`📁 Directory storage WhatsApp creata: ${storagePath}`);
+      } catch (error) {
+        if (error.code !== 'EEXIST') {
+          console.warn(`⚠️ Avviso creazione directory storage: ${error.message}`);
+        }
+      }
+
+      // Configura node-persist per OpenWA (se disponibile)
+      if (global.nodeStorage) {
+        await global.nodeStorage.init({
+          dir: path.join(storagePath, 'node-persist'),
+          stringify: JSON.stringify,
+          parse: JSON.parse,
+          encoding: 'utf8',
+          logging: false,
+          ttl: false,
+          forgiveParseErrors: true
+        });
+        console.log('🔧 node-persist configurato per OpenWA');
+      }
+
+      // Setta la variabile d'ambiente per OpenWA
+      process.env.OPENWA_SESSION_DATA_PATH = storagePath;
+      
+    } catch (error) {
+      console.error('❌ Errore setup storage path:', error);
+      // Fallback alla directory temporanea di sistema
+      const fallbackPath = path.join(os.tmpdir(), 'wa-fallback');
+      process.env.OPENWA_SESSION_DATA_PATH = fallbackPath;
+      console.log(`🔄 Fallback storage path: ${fallbackPath}`);
+    }
   }
 
   /**
@@ -47,6 +103,9 @@ class WhatsappService {
     if (this.isInitialized) return;
 
     console.log('🟢 Inizializzazione WhatsApp Service...');
+    
+    // Setup del percorso di storage per node-persist
+    await this.setupStoragePath();
     
     // Verifica licenza OpenWA
     if (process.env.OPENWA_LICENSE_KEY) {
@@ -127,8 +186,12 @@ class WhatsappService {
         authTimeout: 30,
         cacheEnabled: false,
         hostNotificationLang: 'IT',
-        sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
+        sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH,
         devtools: false,
+        
+        // Configurazione node-persist per evitare errori di permesso
+        disableSpins: true,
+        killProcessOnBrowserClose: true,
 
         // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
         ...(process.env.NODE_ENV === 'production' ? 
@@ -472,7 +535,9 @@ class WhatsappService {
             sessionId: session.sessionId,
             headless: process.env.OPENWA_HEADLESS === 'true' || true,
             autoRefresh: true,
-            sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH || './wa-sessions',
+            sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH,
+            disableSpins: true,
+            killProcessOnBrowserClose: true,
 
             // Chrome configuration: SEMPRE browserRevision in produzione, chrome paths solo se esistono
             ...(process.env.NODE_ENV === 'production' ? 

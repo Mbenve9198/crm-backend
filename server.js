@@ -16,6 +16,7 @@ import whatsappSessionRoutes from './routes/whatsappSessionRoutes.js';
 import whatsappCampaignRoutes from './routes/whatsappCampaignRoutes.js';
 import { statusCallback, recordingStatusCallback, testWebhook, answerCall, dialComplete, getRecordingProxy } from './controllers/callController.js';
 import whatsappService from './services/whatsappService.js';
+import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
 
 // Carica le variabili d'ambiente
 dotenv.config();
@@ -465,6 +466,13 @@ const server = app.listen(PORT, () => {
   console.log(`📚 Documentazione API: http://localhost:${PORT}/api-docs`);
   console.log(`❤️  Health check: http://localhost:${PORT}/health`);
   console.log('🚀 ========================================');
+  
+  // Fix permessi node-persist per OpenWA (solo in produzione)
+  if (process.env.NODE_ENV === 'production') {
+    fixNodePersistPermissions().catch(error => {
+      console.warn('⚠️ Avviso fix permessi node-persist:', error.message);
+    });
+  }
   
   // Inizializza il servizio WhatsApp
   whatsappService.initialize().catch(error => {
