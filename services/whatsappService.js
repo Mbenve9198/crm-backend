@@ -239,6 +239,11 @@ class WhatsappService {
         
         // Fix per timeout su Railway
         waitForRipeSession: 60000,
+        
+        // CRITICAL FIX: Aggiungi timeout per Puppeteer su Railway
+        protocolTimeout: 120000, // 2 minuti per le operazioni Puppeteer
+        defaultViewport: null,
+        
         chromiumArgs: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -284,6 +289,11 @@ class WhatsappService {
           qrTimeout: 120,
           authTimeout: 120,
           waitForRipeSession: 60000,
+          
+          // CRITICAL FIX: Timeout specifici per Railway/produzione
+          protocolTimeout: 180000, // 3 minuti per produzione
+          slowMo: 100, // Rallenta le operazioni per stabilità
+          
           chromiumArgs: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -344,10 +354,32 @@ class WhatsappService {
         console.warn(`⚠️ EXTREME FIX: Errore ripristino directory dopo errore: ${chdirError.message}`);
       }
       
+      // Gestione specifica per errori di timeout Puppeteer
+      let errorMessage = 'Errore generico nella creazione sessione';
+      if (error.message && error.message.includes('protocolTimeout')) {
+        errorMessage = 'Timeout comunicazione browser - sessione potrebbe essere ancora attiva';
+        console.warn(`⚠️ Timeout Puppeteer per ${sessionId} - la sessione potrebbe essere comunque attiva`);
+      } else if (error.message && error.message.includes('Target closed')) {
+        errorMessage = 'Browser chiuso inaspettatamente';
+      }
+      
       // Aggiorna lo stato in caso di errore
       await WhatsappSession.findOneAndUpdate(
         { sessionId },
-        { status: 'error', lastActivity: new Date() }
+        { 
+          status: 'error', 
+          lastActivity: new Date(),
+          // Aggiungi informazioni sull'errore
+          eventLogs: {
+            $push: {
+              event: 'error',
+              data: {
+                error: errorMessage,
+                timestamp: new Date()
+              }
+            }
+          }
+        }
       );
       
       throw error;
