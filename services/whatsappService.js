@@ -203,16 +203,13 @@ class WhatsappService {
       // Crea le directory necessarie se non esistono
       await this.setupStoragePath();
 
-      // Salva la sessione nel database
-      const session = new WhatsappSession({
-        sessionId,
-        name,
-        phoneNumber: 'In attesa di connessione...',
-        owner,
-        createdBy: owner,
-        status: 'connecting'
-      });
-      await session.save();
+      // Trova la sessione esistente nel database (creata dal controller)
+      const session = await WhatsappSession.findOne({ sessionId });
+      if (!session) {
+        throw new Error(`Sessione ${sessionId} non trovata nel database`);
+      }
+
+      console.log('📋 Sessione trovata nel database, procedo con OpenWA...');
 
       // CRITICAL FIX: Forza il percorso di storage per node-persist
       const storagePathForSession = process.env.OPENWA_SESSION_DATA_PATH || path.join(os.tmpdir(), 'wa-storage');

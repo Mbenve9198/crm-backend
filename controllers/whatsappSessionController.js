@@ -125,24 +125,48 @@ export const createSession = async (req, res) => {
       });
     }
 
-    // Crea la sessione tramite il servizio
-    console.log('🔄 Chiamando whatsappService.createSession...');
-    const session = await whatsappService.createSession({
+    // Salva la sessione nel database PRIMA di avviare OpenWA
+    console.log('💾 Salvando sessione nel database...');
+    const session = new WhatsappSession({
       sessionId,
       name,
-      owner: userId
+      phoneNumber: 'In attesa di connessione...',
+      owner: userId,
+      createdBy: userId,
+      status: 'connecting'
     });
+    await session.save();
 
-    console.log('✅ Sessione creata nel servizio:', session._id);
-    console.log('📤 Inviando risposta al frontend...');
+    console.log('✅ Sessione salvata nel database:', session._id);
+    console.log('📤 Inviando risposta immediata al frontend...');
 
+    // RISPONDE IMMEDIATAMENTE al frontend
     res.status(201).json({
       success: true,
       data: session,
-      message: 'Sessione creata con successo. Scannerizza il QR code per connettere.'
+      message: 'Sessione creata con successo. OpenWA si sta avviando...'
     });
 
     console.log('✅ Risposta inviata al frontend');
+
+    // AVVIA OpenWA in background (non aspetta il completamento)
+    console.log('🚀 Avviando OpenWA in background...');
+    whatsappService.createSession({
+      sessionId,
+      name,
+      owner: userId
+    }).then(() => {
+      console.log('✅ OpenWA avviato con successo per sessione:', sessionId);
+    }).catch(error => {
+      console.error('❌ Errore avvio OpenWA per sessione:', sessionId, error);
+      // Aggiorna lo stato in caso di errore
+      WhatsappSession.findOneAndUpdate(
+        { sessionId },
+        { status: 'error', lastActivity: new Date() }
+      ).catch(updateError => {
+        console.error('❌ Errore aggiornamento stato errore:', updateError);
+      });
+    });
 
   } catch (error) {
     console.error('Errore creazione sessione:', error);
