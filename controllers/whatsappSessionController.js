@@ -67,12 +67,41 @@ export const getSession = async (req, res) => {
     // Ottieni stato aggiornato
     const status = await whatsappService.getSessionStatus(sessionId);
 
+    // NUOVO: Forza sincronizzazione database se lo stato è cambiato
+    let updatedSession = session;
+    if (status.clientConnected && status.phoneNumber && 
+        status.phoneNumber !== 'In attesa di connessione...' && 
+        session.status !== 'connected') {
+      
+      console.log(`🔄 Aggiornamento automatico stato sessione ${sessionId}: ${session.status} → connected`);
+      
+      updatedSession = await WhatsappSession.findOneAndUpdate(
+        { sessionId },
+        { 
+          status: 'connected',
+          phoneNumber: status.phoneNumber,
+          lastActivity: new Date(),
+          connectionInfo: {
+            ...session.connectionInfo,
+            connectedAt: session.connectionInfo?.connectedAt || new Date(),
+            lastSeen: new Date(),
+            platform: 'WhatsApp Web'
+          },
+          qrCode: null, // Rimuovi QR code quando connesso
+          qrGeneratedAt: null
+        },
+        { new: true }
+      ).populate('owner', 'firstName lastName email');
+      
+      console.log(`✅ Sessione ${sessionId} aggiornata a connected`);
+    }
+
     res.json({
       success: true,
       data: {
-        ...session.toObject(),
+        ...updatedSession.toObject(),
         clientConnected: status.clientConnected || false,
-        isExpired: session.isExpired()
+        isExpired: updatedSession.isExpired()
       }
     });
 
