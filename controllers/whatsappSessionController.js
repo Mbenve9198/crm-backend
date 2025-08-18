@@ -157,12 +157,36 @@ export const createSession = async (req, res) => {
       owner: userId
     }).then(() => {
       console.log('✅ OpenWA avviato con successo per sessione:', sessionId);
+      
+      // Forza controllo immediato della sessione dopo 10 secondi
+      setTimeout(async () => {
+        try {
+          const { default: sessionMonitorService } = await import('../services/sessionMonitorService.js');
+          await sessionMonitorService.checkSession(sessionId);
+          console.log(`🔍 Controllo post-creazione completato per ${sessionId}`);
+        } catch (error) {
+          console.error(`❌ Errore controllo post-creazione ${sessionId}:`, error);
+        }
+      }, 10000);
+      
     }).catch(error => {
       console.error('❌ Errore avvio OpenWA per sessione:', sessionId, error);
       // Aggiorna lo stato in caso di errore
       WhatsappSession.findOneAndUpdate(
         { sessionId },
-        { status: 'error', lastActivity: new Date() }
+        { 
+          status: 'error', 
+          lastActivity: new Date(),
+          $push: {
+            eventLogs: {
+              event: 'openwa_error',
+              data: {
+                error: error.message,
+                timestamp: new Date()
+              }
+            }
+          }
+        }
       ).catch(updateError => {
         console.error('❌ Errore aggiornamento stato errore:', updateError);
       });

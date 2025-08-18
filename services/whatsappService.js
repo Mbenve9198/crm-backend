@@ -152,6 +152,9 @@ class WhatsappService {
     // Avvia il processore delle campagne
     this.startCampaignProcessor();
     
+    // Avvia il monitor delle sessioni
+    this.startSessionMonitor();
+    
     this.isInitialized = true;
     console.log('✅ WhatsApp Service inizializzato');
   }
@@ -941,10 +944,31 @@ class WhatsappService {
   }
 
   /**
+   * Avvia il monitor delle sessioni
+   */
+  startSessionMonitor() {
+    // Importa dinamicamente per evitare dipendenze circolari
+    import('./sessionMonitorService.js').then(({ default: sessionMonitorService }) => {
+      sessionMonitorService.start();
+      console.log('📡 Monitor sessioni avviato');
+    }).catch(error => {
+      console.error('❌ Errore avvio monitor sessioni:', error);
+    });
+  }
+
+  /**
    * Cleanup del servizio
    */
   async cleanup() {
     console.log('🧹 Cleanup WhatsApp Service...');
+    
+    // Ferma il monitor delle sessioni
+    try {
+      const { default: sessionMonitorService } = await import('./sessionMonitorService.js');
+      sessionMonitorService.stop();
+    } catch (error) {
+      console.error('❌ Errore stop monitor sessioni:', error);
+    }
     
     // Disconnetti tutte le sessioni
     for (const [sessionId, client] of this.sessions) {
