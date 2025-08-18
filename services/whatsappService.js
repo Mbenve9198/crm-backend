@@ -628,7 +628,7 @@ class WhatsappService {
   }
 
   /**
-   * Ottiene lo stato di una sessione
+   * Ottiene lo stato di una sessione (stato reale OpenWA + database)
    */
   async getSessionStatus(sessionId) {
     try {
@@ -639,10 +639,30 @@ class WhatsappService {
 
       const client = this.sessions.get(sessionId);
       const isClientActive = client ? await client.isConnected() : false;
+      
+      // NUOVO: Ottieni informazioni reali dal client OpenWA
+      let realPhoneNumber = session.phoneNumber;
+      let realStatus = session.status;
+      
+      if (client && isClientActive) {
+        try {
+          // Ottieni il numero reale da OpenWA
+          const hostNumber = await client.getHostNumber();
+          if (hostNumber && hostNumber !== 'In attesa di connessione...') {
+            realPhoneNumber = hostNumber;
+            realStatus = 'connected'; // Se ha numero e client attivo = connected
+          }
+        } catch (error) {
+          console.warn(`⚠️ Errore ottenimento hostNumber per ${sessionId}:`, error.message);
+        }
+      }
 
       return {
         ...session.toObject(),
-        clientConnected: isClientActive
+        clientConnected: isClientActive,
+        phoneNumber: realPhoneNumber, // Numero reale da OpenWA
+        status: realStatus, // Stato reale calcolato
+        realStatus: realStatus // Stato reale esplicito
       };
     } catch (error) {
       console.error(`Errore ottenimento stato ${sessionId}:`, error);

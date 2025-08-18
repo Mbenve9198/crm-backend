@@ -66,19 +66,18 @@ export const getSession = async (req, res) => {
 
     // Ottieni stato aggiornato
     const status = await whatsappService.getSessionStatus(sessionId);
+    console.log(`🔍 getSession ${sessionId} - DB: ${session.status}, Real: ${status.realStatus}, Connected: ${status.clientConnected}`);
 
     // NUOVO: Forza sincronizzazione database se lo stato è cambiato
     let updatedSession = session;
-    if (status.clientConnected && status.phoneNumber && 
-        status.phoneNumber !== 'In attesa di connessione...' && 
-        session.status !== 'connected') {
+    if (status.clientConnected && status.realStatus === 'connected' && session.status !== 'connected') {
       
-      console.log(`🔄 Aggiornamento automatico stato sessione ${sessionId}: ${session.status} → connected`);
+      console.log(`🔄 Aggiornamento automatico stato sessione ${sessionId}: ${session.status} → ${status.realStatus}`);
       
       updatedSession = await WhatsappSession.findOneAndUpdate(
         { sessionId },
         { 
-          status: 'connected',
+          status: status.realStatus,
           phoneNumber: status.phoneNumber,
           lastActivity: new Date(),
           connectionInfo: {
