@@ -90,11 +90,17 @@ export const getSession = async (req, res) => {
  * POST /whatsapp-sessions
  */
 export const createSession = async (req, res) => {
+  console.log('📥 Richiesta creazione sessione ricevuta:', { name: req.body.name, sessionId: req.body.sessionId });
+  
   try {
     const userId = req.user._id;
     const { name, sessionId } = req.body;
 
+    console.log('👤 User ID:', userId);
+    console.log('📝 Dati sessione:', { name, sessionId });
+
     if (!name || !sessionId) {
+      console.log('❌ Dati mancanti');
       return res.status(400).json({
         success: false,
         message: 'Nome e Session ID sono obbligatori'
@@ -120,17 +126,23 @@ export const createSession = async (req, res) => {
     }
 
     // Crea la sessione tramite il servizio
+    console.log('🔄 Chiamando whatsappService.createSession...');
     const session = await whatsappService.createSession({
       sessionId,
       name,
       owner: userId
     });
 
+    console.log('✅ Sessione creata nel servizio:', session._id);
+    console.log('📤 Inviando risposta al frontend...');
+
     res.status(201).json({
       success: true,
       data: session,
       message: 'Sessione creata con successo. Scannerizza il QR code per connettere.'
     });
+
+    console.log('✅ Risposta inviata al frontend');
 
   } catch (error) {
     console.error('Errore creazione sessione:', error);
