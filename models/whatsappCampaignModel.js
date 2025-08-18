@@ -115,18 +115,28 @@ const whatsappCampaignSchema = new mongoose.Schema({
       max: [3600, 'Intervallo massimo 1 ora']
     },
     
-    // Limite messaggi per ora
-    messagesPerHour: {
-      type: Number,
-      default: 60,
-      min: [1, 'Minimo 1 messaggio per ora'],
-      max: [200, 'Massimo 200 messaggi per ora']
-    },
-    
-    // Orario di invio (opzionale)
+    // Fascia oraria di invio (obbligatoria)
     schedule: {
-      startTime: String, // HH:MM
-      endTime: String,   // HH:MM
+      startTime: {
+        type: String,
+        required: [true, 'Orario di inizio obbligatorio'],
+        validate: {
+          validator: function(v) {
+            return /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v);
+          },
+          message: 'Formato orario non valido (HH:MM)'
+        }
+      },
+      endTime: {
+        type: String,
+        required: [true, 'Orario di fine obbligatorio'],
+        validate: {
+          validator: function(v) {
+            return /^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(v);
+          },
+          message: 'Formato orario non valido (HH:MM)'
+        }
+      },
       timezone: {
         type: String,
         default: 'Europe/Rome'
@@ -290,6 +300,11 @@ whatsappCampaignSchema.methods.updateStats = function() {
 whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
   const now = new Date();
   
+  // Controlla fascia oraria prima di restituire messaggi
+  if (!this.isInAllowedTimeframe()) {
+    return []; // Nessun messaggio se fuori fascia oraria
+  }
+  
   return this.messageQueue
     .filter(m => {
       if (m.status !== 'pending') return false;
@@ -358,6 +373,31 @@ whatsappCampaignSchema.methods.canStart = function() {
  */
 whatsappCampaignSchema.methods.isActive = function() {
   return this.status === 'running';
+};
+
+/**
+ * Verifica se siamo nella fascia oraria consentita per l'invio
+ */
+whatsappCampaignSchema.methods.isInAllowedTimeframe = function() {
+  if (!this.timing.schedule.startTime || !this.timing.schedule.endTime) {
+    return true; // Se non c'è fascia oraria configurata, sempre permesso
+  }
+  
+  const now = new Date();
+  const timezone = this.timing.schedule.timezone || 'Europe/Rome';
+  
+  // Ottieni l'ora attuale nel fuso orario della campagna
+  const currentTimeInTimezone = new Intl.DateTimeFormat('it-IT', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).format(now);
+  
+  const startTime = this.timing.schedule.startTime;
+  const endTime = this.timing.schedule.endTime;
+  
+  return currentTimeInTimezone >= startTime && currentTimeInTimezone <= endTime;
 };
 
 /**

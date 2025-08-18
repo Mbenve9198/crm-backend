@@ -871,15 +871,9 @@ class WhatsappService {
         return;
       }
 
-      // Controlla limite di velocità
-      const now = new Date();
-      const lastHour = new Date(now.getTime() - 60 * 60 * 1000);
-      const sentInLastHour = campaign.messageQueue.filter(m => 
-        m.sentAt && m.sentAt >= lastHour
-      ).length;
-
-      if (sentInLastHour >= campaign.timing.messagesPerHour) {
-        console.log(`⏰ Limite velocità raggiunto per campagna: ${campaign.name}`);
+      // Controlla fascia oraria di invio (la logica è nel modello)
+      if (!campaign.isInAllowedTimeframe()) {
+        console.log(`⏰ Fuori fascia oraria per campagna: ${campaign.name}`);
         return;
       }
 
