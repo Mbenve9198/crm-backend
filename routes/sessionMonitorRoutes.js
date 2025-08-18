@@ -1,5 +1,5 @@
 import express from 'express';
-import auth from '../middleware/auth.js';
+import { protect } from '../controllers/authController.js';
 import { 
   checkAllSessions,
   checkSession,
@@ -11,7 +11,7 @@ import {
 const router = express.Router();
 
 // Tutte le routes richiedono autenticazione
-router.use(auth);
+router.use(protect);
 
 // Monitor generale
 router.post('/check-all', checkAllSessions);
