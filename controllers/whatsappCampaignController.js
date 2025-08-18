@@ -143,6 +143,7 @@ export const createCampaign = async (req, res) => {
       targetList,
       contactFilters,
       messageTemplate,
+      messageSequences, // NUOVO: Sequenze di messaggi di follow-up
       timing,
       scheduledStartAt
     } = req.body;
@@ -168,8 +169,17 @@ export const createCampaign = async (req, res) => {
       });
     }
 
-    // Estrai variabili dal template
+    // Estrai variabili dal template principale
     const templateVariables = extractTemplateVariables(messageTemplate);
+
+    // Processa le sequenze di messaggi se presenti
+    let processedSequences = [];
+    if (messageSequences && Array.isArray(messageSequences) && messageSequences.length > 0) {
+      processedSequences = messageSequences.map(seq => ({
+        ...seq,
+        templateVariables: extractTemplateVariables(seq.messageTemplate)
+      }));
+    }
 
     // Ottieni contatti target
     const contacts = await getTargetContacts(targetList, contactFilters, userId);
@@ -194,6 +204,7 @@ export const createCampaign = async (req, res) => {
       contactFilters,
       messageTemplate,
       templateVariables,
+      messageSequences: processedSequences, // NUOVO: Include le sequenze
       timing,
       scheduledStartAt: scheduledStartAt ? new Date(scheduledStartAt) : null,
       messageQueue,
@@ -709,7 +720,10 @@ async function compileMessageQueue(contacts, messageTemplate, templateVariables)
       contactId: contact._id,
       phoneNumber: contact.phone,
       compiledMessage,
-      status: 'pending'
+      status: 'pending',
+      sequenceId: 'main', // NUOVO: Messaggio principale
+      sequenceIndex: 0,   // NUOVO: Primo messaggio della sequenza
+      hasReceivedResponse: false // NUOVO: Inizialmente nessuna risposta
     };
   });
 }

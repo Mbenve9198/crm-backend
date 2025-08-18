@@ -547,7 +547,7 @@ class WhatsappService {
   }
 
   /**
-   * Aggiorna statistiche risposte per le campagne
+   * Aggiorna statistiche risposte per le campagne (include tracking per sequenze)
    */
   async updateCampaignReplies(sessionId, contactId) {
     try {
@@ -558,7 +558,14 @@ class WhatsappService {
       });
 
       for (const campaign of campaigns) {
+        // Aggiorna le statistiche generali
         campaign.stats.repliesReceived += 1;
+        
+        // NUOVO: Marca la risposta ricevuta per questo contatto (disabilita follow-up condizionali)
+        campaign.markResponseReceived(contactId);
+        
+        console.log(`💬 Risposta ricevuta da contatto ${contactId} - follow-up condizionali disabilitati`);
+        
         await campaign.save();
       }
     } catch (error) {
@@ -894,6 +901,12 @@ class WhatsappService {
 
       // Aggiorna stato messaggio
       campaign.markMessageSent(messageData.contactId, messageId);
+
+      // NUOVO: Se è un messaggio principale (sequenceIndex = 0), programma i follow-up
+      if (messageData.sequenceIndex === 0 && campaign.messageSequences && campaign.messageSequences.length > 0) {
+        await campaign.scheduleFollowUps(messageData.contactId, contact.phone);
+        console.log(`📅 Follow-up programmati per ${contact.name} (${campaign.messageSequences.length} sequenze)`);
+      }
 
       // Crea activity
       const activity = new Activity({
