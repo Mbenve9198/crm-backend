@@ -144,6 +144,7 @@ export const createCampaign = async (req, res) => {
       contactFilters,
       messageTemplate,
       messageSequences, // NUOVO: Sequenze di messaggi di follow-up
+      priority, // ✅ Sistema priorità
       timing,
       scheduledStartAt
     } = req.body;
@@ -205,6 +206,7 @@ export const createCampaign = async (req, res) => {
       messageTemplate,
       templateVariables,
       messageSequences: processedSequences, // NUOVO: Include le sequenze
+      priority: priority || 'media', // ✅ Default priorità media
       timing,
       scheduledStartAt: scheduledStartAt ? new Date(scheduledStartAt) : null,
       messageQueue,

@@ -3,6 +3,9 @@ import WhatsappSession from '../models/whatsappSessionModel.js';
 import WhatsappCampaign from '../models/whatsappCampaignModel.js';
 import Contact from '../models/contactModel.js';
 import Activity from '../models/activityModel.js';
+import redisManager from '../config/redis.js';
+import messageLockingService from './messageLocking.js';
+import smartRateLimiter from './smartRateLimiter.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -130,10 +133,13 @@ class WhatsappService {
   async initialize() {
     if (this.isInitialized) return;
 
-    console.log('🟢 Inizializzazione WhatsApp Service...');
+    console.log('🟢 Inizializzazione WhatsApp Service v2...');
     
     // Setup del percorso di storage per node-persist
     await this.setupStoragePath();
+    
+    // Inizializza Redis per locking e rate limiting
+    await this.initializeRedis();
     
     // Verifica licenza OpenWA
     if (process.env.OPENWA_LICENSE_KEY) {
@@ -149,14 +155,27 @@ class WhatsappService {
     // Riconnetti le sessioni esistenti
     await this.reconnectExistingSessions();
     
-    // Avvia il processore delle campagne
-    this.startCampaignProcessor();
+    // Avvia il processore delle campagne (migliorato)
+    this.startSmartCampaignProcessor();
     
     // Avvia il monitor delle sessioni
     this.startSessionMonitor();
     
     this.isInitialized = true;
-    console.log('✅ WhatsApp Service inizializzato');
+    console.log('✅ WhatsApp Service v2 inizializzato con Redis + Smart Rate Limiting');
+  }
+
+  /**
+   * Inizializza Redis per il sistema
+   */
+  async initializeRedis() {
+    try {
+      await redisManager.initialize();
+      console.log('✅ Redis initialized for WhatsApp service');
+    } catch (error) {
+      console.warn('⚠️ Redis initialization failed, continuing without Redis features');
+      console.warn('Features disabled: message locking, distributed rate limiting');
+    }
   }
 
   /**
@@ -785,25 +804,25 @@ class WhatsappService {
   }
 
   /**
-   * Avvia il processore delle campagne
+   * Avvia il processore smart delle campagne
    */
-  startCampaignProcessor() {
+  startSmartCampaignProcessor() {
     // Controlla ogni 30 secondi per campagne da eseguire
     setInterval(async () => {
       try {
-        await this.processCampaigns();
+        await this.processSmartCampaigns();
       } catch (error) {
-        console.error('Errore processore campagne:', error);
+        console.error('❌ Errore processore smart campagne:', error);
       }
     }, 30000);
 
-    console.log('📧 Processore campagne avviato');
+    console.log('📧 Smart Campaign Processor avviato con Redis + Rate Limiting');
   }
 
   /**
-   * Processa le campagne attive
+   * Processa le campagne attive con sistema smart
    */
-  async processCampaigns() {
+  async processSmartCampaigns() {
     try {
       // Trova campagne programmate da avviare
       const scheduledCampaigns = await WhatsappCampaign.findScheduledToRun();
@@ -811,14 +830,114 @@ class WhatsappService {
         await this.startCampaign(campaign._id);
       }
 
-      // Processa campagne in esecuzione
+      // Processa campagne in esecuzione con smart rate limiting
       const runningCampaigns = await WhatsappCampaign.find({ status: 'running' });
       for (const campaign of runningCampaigns) {
-        await this.processCampaignMessages(campaign);
+        await this.processSmartCampaignMessages(campaign);
       }
 
     } catch (error) {
-      console.error('Errore processamento campagne:', error);
+      console.error('❌ Errore processamento smart campagne:', error);
+    }
+  }
+
+  /**
+   * Processa messaggi di una campagna con smart rate limiting e locking
+   */
+  async processSmartCampaignMessages(campaign) {
+    try {
+      // Ottieni priorità campagna (default media se non specificata)
+      const priority = campaign.priority || 'media';
+      const config = smartRateLimiter.getConfigForPriority(priority);
+      
+      // Ottieni messaggi da inviare con batch size intelligente
+      const pendingMessages = campaign.getNextMessages(config.batchSize);
+      
+      if (pendingMessages.length === 0) {
+        // Verifica se la campagna è completata
+        const allSent = campaign.messageQueue.every(m => 
+          ['sent', 'delivered', 'read', 'failed'].includes(m.status)
+        );
+        
+        if (allSent) {
+          campaign.status = 'completed';
+          campaign.completedAt = new Date();
+          await campaign.save();
+          console.log(`✅ Campagna completata: ${campaign.name}`);
+        }
+        
+        return;
+      }
+
+      // Controlla fascia oraria di invio
+      if (!campaign.isInAllowedTimeframe()) {
+        console.log(`⏰ Fuori fascia oraria per campagna: ${campaign.name}`);
+        return;
+      }
+
+      // Verifica rate limiting globale per la sessione
+      const rateLimitCheck = await smartRateLimiter.canSendMessage(
+        campaign.whatsappSessionId, 
+        priority
+      );
+
+      if (!rateLimitCheck.allowed) {
+        console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - campagna: ${campaign.name}`);
+        return;
+      }
+
+      console.log(`📊 Processing ${pendingMessages.length} messages for campaign: ${campaign.name} (priority: ${priority})`);
+
+      // Invia messaggi con locking per prevenire duplicati
+      let messagesSentInBatch = 0;
+      
+      for (const messageData of pendingMessages) {
+        try {
+          // Verifica rate limit prima di ogni messaggio
+          const currentRateCheck = await smartRateLimiter.canSendMessage(
+            campaign.whatsappSessionId, 
+            priority
+          );
+
+          if (!currentRateCheck.allowed) {
+            console.log(`⏳ Rate limit raggiunto dopo ${messagesSentInBatch} messaggi`);
+            break;
+          }
+
+          // Usa message locking per prevenire duplicati
+          const result = await messageLockingService.withLock(
+            campaign._id.toString(),
+            messageData.contactId.toString(),
+            messageData.sequenceIndex,
+            async () => {
+              return await this.sendSmartCampaignMessage(campaign, messageData, priority);
+            }
+          );
+
+          if (result) {
+            messagesSentInBatch++;
+            
+            // Attendi l'intervallo configurato per la priorità
+            if (messagesSentInBatch < pendingMessages.length) {
+              console.log(`⏱️ Waiting ${config.intervalSeconds}s before next message...`);
+              await this.sleep(config.intervalSeconds * 1000);
+            }
+          }
+          
+        } catch (error) {
+          console.error(`❌ Errore invio messaggio smart:`, error);
+          campaign.markMessageFailed(messageData.contactId, error.message);
+        }
+      }
+
+      // Salva aggiornamenti campagna
+      if (messagesSentInBatch > 0) {
+        await campaign.save();
+        console.log(`📤 Sent ${messagesSentInBatch} messages for campaign: ${campaign.name}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Errore processamento smart messaggi campagna:', error);
     }
   }
 
@@ -899,16 +1018,27 @@ class WhatsappService {
   }
 
   /**
-   * Invia un singolo messaggio di campagna
+   * Invia un singolo messaggio di campagna con smart rate limiting
    */
-  async sendCampaignMessage(campaign, messageData) {
+  async sendSmartCampaignMessage(campaign, messageData, priority = 'media') {
     try {
       const contact = await Contact.findById(messageData.contactId);
       if (!contact || !contact.phone) {
         throw new Error('Contatto non valido o senza numero');
       }
 
-      // Invia il messaggio
+      // Ricontrolla che il messaggio non sia già stato inviato (double-check dopo lock)
+      const currentMessage = campaign.messageQueue.find(m => 
+        m.contactId.toString() === messageData.contactId.toString() &&
+        m.sequenceIndex === messageData.sequenceIndex
+      );
+
+      if (!currentMessage || currentMessage.status !== 'pending') {
+        console.log(`⏭️ Message already processed for ${contact.name} (sequence: ${messageData.sequenceIndex})`);
+        return null;
+      }
+
+      // Invia il messaggio via OpenWA
       const messageId = await this.sendMessage(
         campaign.whatsappSessionId,
         contact.phone,
@@ -916,16 +1046,19 @@ class WhatsappService {
         campaign.attachments
       );
 
-      // Aggiorna stato messaggio
+      // Aggiorna stato messaggio IMMEDIATAMENTE
       campaign.markMessageSent(messageData.contactId, messageId);
 
-      // NUOVO: Se è un messaggio principale (sequenceIndex = 0), programma i follow-up
+      // Registra nel rate limiter
+      await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
+
+      // Se è un messaggio principale (sequenceIndex = 0), programma i follow-up
       if (messageData.sequenceIndex === 0 && campaign.messageSequences && campaign.messageSequences.length > 0) {
         await campaign.scheduleFollowUps(messageData.contactId, contact.phone);
         console.log(`📅 Follow-up programmati per ${contact.name} (${campaign.messageSequences.length} sequenze)`);
       }
 
-      // Crea activity
+      // Crea activity log
       const activity = new Activity({
         contact: contact._id,
         type: 'whatsapp',
@@ -936,18 +1069,35 @@ class WhatsappService {
           messageId: messageId,
           campaignId: campaign._id,
           campaignName: campaign.name,
-          sessionId: campaign.whatsappSessionId
+          sessionId: campaign.whatsappSessionId,
+          priority: priority,
+          sequenceIndex: messageData.sequenceIndex
         },
         createdBy: campaign.owner
       });
       await activity.save();
 
-      console.log(`📧 Messaggio campagna inviato a ${contact.name}`);
+      console.log(`📧 Smart message sent to ${contact.name} (priority: ${priority}, sequence: ${messageData.sequenceIndex})`);
+      
+      return {
+        messageId,
+        contact: contact.name,
+        priority,
+        sequenceIndex: messageData.sequenceIndex
+      };
 
     } catch (error) {
-      console.error('Errore invio messaggio campagna:', error);
+      console.error('❌ Errore invio smart messaggio campagna:', error);
       throw error;
     }
+  }
+
+  /**
+   * Invia un singolo messaggio di campagna (metodo legacy per backward compatibility)
+   */
+  async sendCampaignMessage(campaign, messageData) {
+    // Wrapper per backward compatibility - usa il metodo smart
+    return await this.sendSmartCampaignMessage(campaign, messageData, 'media');
   }
 
   /**

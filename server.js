@@ -546,6 +546,22 @@ const server = app.listen(PORT, () => {
   
   // Preparazione per futura integrazione Twilio
   console.log('📞 Preparato per integrazione Twilio (funzionalità dialing future)');
+
+  // Graceful shutdown per Redis
+  process.on('SIGINT', async () => {
+    console.log('\n🔄 Graceful shutdown initiated...');
+    
+    try {
+      // Importa redisManager per shutdown
+      const { default: redisManager } = await import('./config/redis.js');
+      await redisManager.disconnect();
+    } catch (error) {
+      console.error('❌ Error during Redis shutdown:', error.message);
+    }
+    
+    console.log('✅ Shutdown completed');
+    process.exit(0);
+  });
 });
 
 /**

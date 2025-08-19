@@ -105,14 +105,22 @@ const whatsappCampaignSchema = new mongoose.Schema({
     caption: String
   }],
   
-  // Configurazione timing
+  // Priorità campagna (gestisce automaticamente timing e rate limiting)
+  priority: {
+    type: String,
+    enum: ['alta', 'media', 'bassa'],
+    default: 'media'
+  },
+
+  // Configurazione timing (mantenuta per backward compatibility)
   timing: {
-    // Intervallo tra messaggi (in secondi)
+    // Intervallo tra messaggi (in secondi) - DEPRECATED: ora gestito da priority
     intervalBetweenMessages: {
       type: Number,
-      required: true,
+      required: false, // Reso opzionale
       min: [5, 'Intervallo minimo 5 secondi'],
-      max: [3600, 'Intervallo massimo 1 ora']
+      max: [3600, 'Intervallo massimo 1 ora'],
+      default: 120 // Default 2 minuti per backward compatibility
     },
     
     // Fascia oraria di invio (obbligatoria)
