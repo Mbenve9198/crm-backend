@@ -262,8 +262,9 @@ class WhatsappService {
         // Fix per timeout su Railway
         waitForRipeSession: 60000,
         
-        // CRITICAL FIX: Aggiungi timeout per Puppeteer su Railway
-        protocolTimeout: 120000, // 2 minuti per le operazioni Puppeteer
+        // CRITICAL FIX: Timeout configurazione basata su documentazione OpenWA
+        callTimeout: 300000, // 5 minuti per metodi client OpenWA (deve essere > protocolTimeout)
+        protocolTimeout: 180000, // 3 minuti per operazioni Puppeteer
         defaultViewport: null,
         
         chromiumArgs: [
@@ -312,8 +313,9 @@ class WhatsappService {
           authTimeout: 120,
           waitForRipeSession: 60000,
           
-          // CRITICAL FIX: Timeout specifici per Railway/produzione
-          protocolTimeout: 180000, // 3 minuti per produzione
+          // CRITICAL FIX: Timeout specifici per Railway/produzione basati su OpenWA docs
+          callTimeout: 360000, // 6 minuti per metodi client in produzione
+          protocolTimeout: 240000, // 4 minuti per Puppeteer in produzione
           slowMo: 100, // Rallenta le operazioni per stabilità
           
           chromiumArgs: [
@@ -740,7 +742,9 @@ class WhatsappService {
             disableSpins: true,
             killProcessOnBrowserClose: true,
             
-            // Fix per timeout durante riconnessione
+            // Fix per timeout durante riconnessione basato su OpenWA docs
+            callTimeout: 300000, // 5 minuti per metodi client durante riconnessione
+            protocolTimeout: 180000, // 3 minuti per Puppeteer durante riconnessione
             qrTimeout: 120,
             authTimeout: 120,
             waitForRipeSession: 60000,
