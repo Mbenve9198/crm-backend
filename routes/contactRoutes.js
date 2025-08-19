@@ -15,6 +15,7 @@ import {
   getDynamicProperties,
   getContactLists,
   addContactsToListBulk,
+  removeContactsFromListBulk,
   updateContactStatus
 } from '../controllers/contactController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
@@ -80,6 +81,9 @@ router.get('/lists', getContactLists);
 
 // Aggiunge contatti multipli a una lista (bulk)
 router.post('/lists/:listName/bulk-add', restrictTo('agent', 'manager', 'admin'), addContactsToListBulk);
+
+// Rimuove contatti multipli da una lista (bulk)
+router.post('/lists/:listName/bulk-remove', restrictTo('agent', 'manager', 'admin'), removeContactsFromListBulk);
 
 // Aggiunge un contatto a una lista
 router.post('/lists/:listName/contacts/:id', addContactToList);

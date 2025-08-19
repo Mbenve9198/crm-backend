@@ -619,6 +619,73 @@ export const addContactsToListBulk = async (req, res) => {
 };
 
 /**
+ * Rimuove contatti multipli da una lista
+ * POST /contacts/lists/:listName/bulk-remove
+ */
+export const removeContactsFromListBulk = async (req, res) => {
+  try {
+    const { listName } = req.params;
+    const { contactIds } = req.body;
+
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Array di ID contatti richiesto'
+      });
+    }
+
+    // Trova i contatti che l'utente può modificare
+    let filter = { _id: { $in: contactIds } };
+    
+    // Permessi: agent può modificare solo i propri contatti
+    if (req.user.role === 'agent') {
+      filter.owner = req.user._id;
+    }
+
+    const contacts = await Contact.find(filter);
+
+    if (contacts.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun contatto trovato o permessi insufficienti'
+      });
+    }
+
+    let removedCount = 0;
+    let notInList = 0;
+
+    // Rimuove ogni contatto dalla lista
+    for (const contact of contacts) {
+      const wasRemoved = contact.removeFromList(listName);
+      if (wasRemoved) {
+        removedCount++;
+        await contact.save();
+      } else {
+        notInList++;
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `${removedCount} contatti rimossi dalla lista "${listName}". ${notInList} non erano presenti nella lista.`,
+      data: {
+        removedCount,
+        notInList,
+        totalProcessed: contacts.length,
+        totalRequested: contactIds.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nella rimozione bulk dalla lista:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * IMPORTAZIONE CSV CON MAPPATURA DINAMICA
  * Gestisce l'importazione di contatti da file CSV in due fasi:
  * 1. Analisi preliminare del CSV e restituzione delle colonne
