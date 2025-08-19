@@ -71,7 +71,9 @@ class RedisManager {
         retryDelayOnFailover: 100,
         enableReadyCheck: true,
         maxRetriesPerRequest: 3,
-        lazyConnect: true
+        lazyConnect: true,
+        connectTimeout: 10000,
+        commandTimeout: 5000
       };
     }
 
@@ -84,7 +86,9 @@ class RedisManager {
       retryDelayOnFailover: 100,
       enableReadyCheck: true,
       maxRetriesPerRequest: 3,
-      lazyConnect: true
+      lazyConnect: true,
+      connectTimeout: 10000,
+      commandTimeout: 5000
     };
   }
 
