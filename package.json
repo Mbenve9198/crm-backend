@@ -23,6 +23,7 @@
     "test-uploads": "node scripts/testUploadsPermissions.js",
     "test-csv-mapping": "node scripts/testCsvMappingFeature.js",
     "test-advanced-filters": "node scripts/testAdvancedFilters.js",
+    "test-bulk-deletion": "node scripts/testBulkDeletion.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

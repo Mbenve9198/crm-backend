@@ -8,6 +8,7 @@ import {
   updateContact,
   deleteContact,
   deleteContactsBulk,
+  deleteAllContacts,
   addContactToList,
   removeContactFromList,
   handleCsvImport,
@@ -110,6 +111,7 @@ router.post('/import-csv',
 router.post('/', restrictTo('agent', 'manager', 'admin'), createContact);     // Crea nuovo contatto
 router.get('/', getContacts);                                                 // Lista contatti 
 router.delete('/bulk', restrictTo('agent', 'manager', 'admin'), deleteContactsBulk); // Elimina contatti in bulk
+router.delete('/delete-all', restrictTo('manager', 'admin'), deleteAllContacts);   // Elimina TUTTI i contatti (solo manager/admin)
 
 // Aggiorna status contatto (prima di /:id per evitare conflitti)
 router.put('/:id/status', restrictTo('agent', 'manager', 'admin'), updateContactStatus);

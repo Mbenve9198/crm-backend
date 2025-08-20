@@ -477,6 +477,19 @@ app.get('/api-docs', (req, res) => {
       'DELETE /api/contacts/:id': {
         description: 'Elimina contatto'
       },
+      'DELETE /api/contacts/bulk': {
+        description: 'Elimina contatti multipli (fino a 10,000)',
+        body: {
+          contactIds: 'array of strings (contact IDs)'
+        }
+      },
+      'DELETE /api/contacts/delete-all': {
+        description: 'Elimina TUTTI i contatti (solo manager/admin)',
+        body: {
+          confirmText: 'string (deve essere "DELETE ALL CONTACTS")',
+          onlyMyContacts: 'boolean (opzionale, solo per manager/admin)'
+        }
+      },
       'POST /api/contacts/lists/:listName/contacts/:id': {
         description: 'Aggiunge contatto a lista'
       },

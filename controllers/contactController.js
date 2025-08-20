@@ -468,56 +468,72 @@ export const deleteContactsBulk = async (req, res) => {
       });
     }
 
-    if (contactIds.length > 100) {
+    // Limite ragionevole per evitare sovraccarico del server (massimo 10,000 contatti)
+    if (contactIds.length > 10000) {
       return res.status(400).json({
         success: false,
-        message: 'Massimo 100 contatti per operazione bulk'
+        message: 'Massimo 10,000 contatti per operazione di eliminazione massiva. Per operazioni più grandi, contattare l\'amministratore.'
       });
     }
 
-    // Trova tutti i contatti per verificare i permessi
-    const contacts = await Contact.find({ _id: { $in: contactIds } });
-    
-    if (contacts.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Nessun contatto trovato con gli ID forniti'
-      });
+    // Log per operazioni massive
+    if (contactIds.length > 1000) {
+      console.log(`⚠️ Eliminazione massiva richiesta: ${contactIds.length} contatti da utente ${req.user.email}`);
     }
 
-    // Verifica permessi per ogni contatto
+    // Per operazioni grandi, elabora a batch per evitare timeout
+    const batchSize = 1000;
+    let totalDeleted = 0;
+    let totalUnauthorized = 0;
     const unauthorizedContacts = [];
-    const authorizedContactIds = [];
 
-    contacts.forEach(contact => {
-      if (req.user.canModifyContact(contact)) {
-        authorizedContactIds.push(contact._id);
-      } else {
-        unauthorizedContacts.push(contact.name);
+    // Elabora gli ID a batch
+    for (let i = 0; i < contactIds.length; i += batchSize) {
+      const batch = contactIds.slice(i, i + batchSize);
+      
+      // Trova i contatti del batch e verifica permessi
+      const contacts = await Contact.find({ _id: { $in: batch } });
+      
+      const authorizedContactIds = [];
+      
+      contacts.forEach(contact => {
+        if (req.user.canModifyContact(contact)) {
+          authorizedContactIds.push(contact._id);
+        } else {
+          unauthorizedContacts.push(contact.name);
+          totalUnauthorized++;
+        }
+      });
+
+      // Elimina i contatti autorizzati del batch
+      if (authorizedContactIds.length > 0) {
+        const result = await Contact.deleteMany({ _id: { $in: authorizedContactIds } });
+        totalDeleted += result.deletedCount;
+        
+        console.log(`🗑️ Batch ${Math.floor(i / batchSize) + 1}: ${result.deletedCount} contatti eliminati`);
       }
-    });
+    }
 
-    if (authorizedContactIds.length === 0) {
+    if (totalDeleted === 0) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per eliminare nessuno dei contatti selezionati'
       });
     }
 
-    // Elimina i contatti autorizzati
-    const result = await Contact.deleteMany({ _id: { $in: authorizedContactIds } });
-
-    console.log(`🗑️ Eliminazione bulk: ${result.deletedCount} contatti eliminati da utente ${req.user.email}`);
+    console.log(`🗑️ Eliminazione bulk completata: ${totalDeleted} contatti eliminati da utente ${req.user.email}`);
 
     res.json({
       success: true,
-      message: `Eliminazione bulk completata`,
+      message: `Eliminazione bulk completata: ${totalDeleted} contatti eliminati`,
       data: {
-        deletedCount: result.deletedCount,
+        deletedCount: totalDeleted,
         requestedCount: contactIds.length,
-        unauthorizedCount: unauthorizedContacts.length,
+        unauthorizedCount: totalUnauthorized,
         unauthorizedContacts: unauthorizedContacts.slice(0, 5), // Mostra max 5 nomi
-        hasMoreUnauthorized: unauthorizedContacts.length > 5
+        hasMoreUnauthorized: unauthorizedContacts.length > 5,
+        processedInBatches: contactIds.length > batchSize,
+        batchSize: contactIds.length > batchSize ? batchSize : undefined
       }
     });
 
@@ -526,6 +542,75 @@ export const deleteContactsBulk = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Elimina TUTTI i contatti dell'utente (operazione massiva)
+ * DELETE /contacts/delete-all
+ * ATTENZIONE: Operazione irreversibile
+ */
+export const deleteAllContacts = async (req, res) => {
+  try {
+    const { confirmText } = req.body;
+
+    // Richiede conferma esplicita per evitare eliminazioni accidentali
+    if (confirmText !== 'DELETE ALL CONTACTS') {
+      return res.status(400).json({
+        success: false,
+        message: 'Per confermare l\'eliminazione di tutti i contatti, invia confirmText: "DELETE ALL CONTACTS"'
+      });
+    }
+
+    // Costruisce il filtro basato sui permessi utente
+    let filter = {};
+    
+    if (req.user.role === 'agent') {
+      // Gli agent possono eliminare solo i propri contatti
+      filter.owner = req.user._id;
+    } else if (req.user.hasRole('manager')) {
+      // Manager e admin possono scegliere se eliminare tutti o solo i propri
+      if (req.body.onlyMyContacts) {
+        filter.owner = req.user._id;
+      }
+      // Altrimenti elimina tutti i contatti nel sistema
+    }
+
+    // Prima conta quanti contatti verranno eliminati
+    const countToDelete = await Contact.countDocuments(filter);
+    
+    if (countToDelete === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun contatto da eliminare trovato'
+      });
+    }
+
+    console.log(`⚠️ ELIMINAZIONE MASSIVA: ${req.user.email} sta per eliminare ${countToDelete} contatti`);
+
+    // Procede con l'eliminazione
+    const result = await Contact.deleteMany(filter);
+
+    console.log(`🗑️ ELIMINAZIONE MASSIVA COMPLETATA: ${result.deletedCount} contatti eliminati da ${req.user.email}`);
+
+    res.json({
+      success: true,
+      message: `Eliminazione massiva completata: ${result.deletedCount} contatti eliminati`,
+      data: {
+        deletedCount: result.deletedCount,
+        estimatedCount: countToDelete,
+        filter: req.user.role === 'agent' ? 'solo i tuoi contatti' : 
+                req.body.onlyMyContacts ? 'solo i tuoi contatti' : 'tutti i contatti del sistema',
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nell\'eliminazione massiva:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server durante l\'eliminazione massiva'
     });
   }
 };
