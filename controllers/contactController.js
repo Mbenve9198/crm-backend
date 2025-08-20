@@ -756,9 +756,20 @@ export const analyzeCsvFile = async (req, res) => {
 
   } catch (error) {
     console.error('Errore nell\'analisi del CSV:', error);
+    
+    // Gestione specifica per errori di permessi
+    if (error.code === 'EACCES') {
+      return res.status(500).json({
+        success: false,
+        message: 'Errore di permessi nel filesystem. Contattare l\'amministratore.',
+        details: 'Il server non ha i permessi necessari per scrivere i file temporanei.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Errore interno del server'
+      message: 'Errore interno del server',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
@@ -900,9 +911,20 @@ export const importCsvFile = async (req, res) => {
 
   } catch (error) {
     console.error('Errore nell\'importazione del CSV:', error);
+    
+    // Gestione specifica per errori di permessi
+    if (error.code === 'EACCES') {
+      return res.status(500).json({
+        success: false,
+        message: 'Errore di permessi nel filesystem. Contattare l\'amministratore.',
+        details: 'Il server non ha i permessi necessari per scrivere i file temporanei.'
+      });
+    }
+    
     res.status(500).json({
       success: false,
-      message: 'Errore interno del server'
+      message: 'Errore interno del server',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

@@ -218,11 +218,18 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 // Crea la cartella uploads se non esiste (per i file CSV)
-const uploadsDir = './uploads';
+// In produzione usa la directory temporanea per evitare problemi di permessi
+const uploadsDir = isProduction 
+  ? path.join(os.tmpdir(), 'uploads')
+  : './uploads';
+  
 if (!fsModule.existsSync(uploadsDir)) {
   fsModule.mkdirSync(uploadsDir, { recursive: true });
-  console.log('📁 Cartella uploads creata');
+  console.log(`📁 Cartella uploads creata: ${uploadsDir}`);
 }
+
+// Imposta la variabile d'ambiente per multer
+process.env.UPLOADS_DIR = uploadsDir;
 
 /**
  * ROUTES PRINCIPALI

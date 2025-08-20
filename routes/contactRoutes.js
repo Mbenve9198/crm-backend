@@ -28,7 +28,9 @@ const router = express.Router();
  */
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/'); // Assicurati che questa cartella esista
+    // Usa la directory uploads configurata nel server.js
+    const uploadsDir = process.env.UPLOADS_DIR || 'uploads/';
+    cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
     // Genera un nome unico per il file
