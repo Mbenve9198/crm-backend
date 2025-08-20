@@ -30,6 +30,11 @@ RUN mkdir -p /tmp/wa-storage /tmp/wa-storage/node-persist /tmp/wa-storage/sessio
 RUN chmod -R 777 /tmp/wa-storage
 RUN chown -R node:node /tmp/wa-storage
 
+# Create uploads directory in tmp for CSV uploads (production)
+RUN mkdir -p /tmp/uploads
+RUN chmod -R 777 /tmp/uploads
+RUN chown -R node:node /tmp/uploads
+
 # Set environment variables for OpenWA
 ENV NODE_ENV=production
 ENV OPENWA_HEADLESS=true

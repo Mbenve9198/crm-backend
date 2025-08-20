@@ -357,6 +357,61 @@ app.get('/debug/chrome', async (req, res) => {
   }
 });
 
+// DEBUG: Endpoint per verificare permessi uploads (SOLO PER DEBUG)
+app.get('/debug/uploads', async (req, res) => {
+  try {
+    const stats = {
+      uploadsDir: uploadsDir,
+      absolutePath: path.resolve(uploadsDir),
+      exists: fsModule.existsSync(uploadsDir),
+      environment: process.env.NODE_ENV,
+      uploadsEnvVar: process.env.UPLOADS_DIR
+    };
+
+    // Test scrittura se la directory esiste
+    if (stats.exists) {
+      const testFilePath = path.join(uploadsDir, 'test-debug.txt');
+      try {
+        fsModule.writeFileSync(testFilePath, 'Debug test file');
+        stats.canWrite = true;
+        fsModule.unlinkSync(testFilePath);
+        stats.canDelete = true;
+      } catch (writeError) {
+        stats.canWrite = false;
+        stats.writeError = {
+          message: writeError.message,
+          code: writeError.code
+        };
+      }
+
+      // Informazioni sui permessi
+      try {
+        const dirStats = fsModule.statSync(uploadsDir);
+        stats.permissions = {
+          mode: dirStats.mode.toString(8),
+          created: dirStats.birthtime,
+          modified: dirStats.mtime
+        };
+        
+        if (process.platform !== 'win32') {
+          stats.permissions.canRead = !!(dirStats.mode & parseInt('400', 8));
+          stats.permissions.canWrite = !!(dirStats.mode & parseInt('200', 8));
+          stats.permissions.canExecute = !!(dirStats.mode & parseInt('100', 8));
+        }
+      } catch (permError) {
+        stats.permissionsError = permError.message;
+      }
+    }
+
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
 // Routes per autenticazione
 app.use('/api/auth', authRoutes);
 
@@ -446,6 +501,12 @@ app.get('/api-docs', (req, res) => {
       },
       'GET /api/contacts/stats': {
         description: 'Statistiche sui contatti'
+      },
+      'GET /api/contacts/dynamic-properties': {
+        description: 'Lista delle proprietà dinamiche esistenti'
+      },
+      'GET /api/contacts/csv-mapping-options': {
+        description: 'Opzioni complete per la mappatura CSV con proprietà esistenti'
       }
     },
     examples: {

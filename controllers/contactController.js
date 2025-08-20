@@ -723,6 +723,39 @@ export const analyzeCsvFile = async (req, res) => {
         // Pulisce il file temporaneo
         await unlinkFile(req.file.path);
 
+        // Recupera le proprietà dinamiche esistenti dal database
+        let existingProperties = [];
+        try {
+          const propertyKeys = await Contact.aggregate([
+            { $match: { properties: { $exists: true, $ne: null } } },
+            { $project: { properties: { $objectToArray: '$properties' } } },
+            { $unwind: '$properties' },
+            { $group: { _id: '$properties.k' } },
+            { $sort: { _id: 1 } }
+          ]);
+          existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
+        } catch (error) {
+          console.warn('⚠️ Errore nel recupero delle proprietà dinamiche:', error.message);
+        }
+
+        // Costruisce le opzioni di mappatura
+        const mappingInstructions = {
+          'name': 'Campo nome del contatto (obbligatorio)',
+          'email': 'Campo email (opzionale ma unico se fornito)',
+          'phone': 'Campo telefono (opzionale)',
+          'lists': 'Liste separate da virgola (es: "lista1,lista2")',
+          'ignore': 'Ignora questa colonna'
+        };
+
+        // Aggiunge le proprietà dinamiche esistenti
+        existingProperties.forEach(prop => {
+          mappingInstructions[`properties.${prop}`] = `Proprietà esistente: ${prop}`;
+        });
+
+        // Aggiunge esempi per nuove proprietà
+        mappingInstructions['properties.company'] = 'Esempio: crea proprietà "company"';
+        mappingInstructions['properties.customField'] = 'Esempio: crea proprietà personalizzata';
+
         res.json({
           success: true,
           data: {
@@ -730,17 +763,15 @@ export const analyzeCsvFile = async (req, res) => {
             sampleRows: results,
             totalPreviewRows: results.length,
             availableFields: {
-              existing: ['name', 'email', 'phone', 'lists'],
-              properties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
+              fixed: ['name', 'email', 'phone', 'lists'],
+              existingProperties: existingProperties,
+              newProperties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
             },
-            mappingInstructions: {
-              'name': 'Campo nome del contatto (obbligatorio)',
-              'email': 'Campo email (opzionale ma unico se fornito)',
-              'phone': 'Campo telefono (opzionale)',
-              'lists': 'Liste separate da virgola (es: "lista1,lista2")',
-              'properties.company': 'Esempio: crea proprietà "company"',
-              'properties.customField': 'Esempio: crea proprietà personalizzata',
-              'ignore': 'Ignora questa colonna'
+            mappingInstructions,
+            dynamicPropertiesInfo: {
+              existing: existingProperties,
+              count: existingProperties.length,
+              usage: 'Usa "properties.nomeProp" per mappare alle proprietà esistenti o crearne di nuove'
             }
           }
         });
@@ -1026,6 +1057,71 @@ export const getDynamicProperties = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Ottieni tutte le proprietà dinamiche disponibili per la mappatura CSV
+ * GET /contacts/csv-mapping-options
+ */
+export const getCsvMappingOptions = async (req, res) => {
+  try {
+    // Recupera le proprietà dinamiche esistenti dal database
+    const propertyKeys = await Contact.aggregate([
+      { $match: { properties: { $exists: true, $ne: null } } },
+      { $project: { properties: { $objectToArray: '$properties' } } },
+      { $unwind: '$properties' },
+      { $group: { _id: '$properties.k' } },
+      { $sort: { _id: 1 } }
+    ]);
+
+    const existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
+
+    // Costruisce le opzioni di mappatura complete
+    const mappingOptions = {
+      // Campi fissi del modello Contact
+      fixed: [
+        { key: 'name', label: 'Nome', description: 'Campo nome del contatto (obbligatorio)', required: true },
+        { key: 'email', label: 'Email', description: 'Campo email (opzionale ma unico se fornito)', required: false },
+        { key: 'phone', label: 'Telefono', description: 'Campo telefono (opzionale)', required: false },
+        { key: 'lists', label: 'Liste', description: 'Liste separate da virgola (es: "lista1,lista2")', required: false }
+      ],
+      
+      // Proprietà dinamiche esistenti
+      existingProperties: existingProperties.map(prop => ({
+        key: `properties.${prop}`,
+        label: prop,
+        description: `Proprietà esistente: ${prop}`,
+        type: 'existing'
+      })),
+      
+      // Opzioni speciali
+      special: [
+        { key: 'ignore', label: 'Ignora colonna', description: 'Ignora questa colonna durante l\'importazione', type: 'ignore' }
+      ],
+      
+      // Istruzioni per nuove proprietà
+      newPropertyFormat: 'properties.nomeProprietà',
+      newPropertyDescription: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
+    };
+
+    res.json({
+      success: true,
+      data: mappingOptions,
+      summary: {
+        fixedFields: mappingOptions.fixed.length,
+        existingProperties: existingProperties.length,
+        totalOptions: mappingOptions.fixed.length + existingProperties.length + 1
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nel recupero delle opzioni di mappatura CSV:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };

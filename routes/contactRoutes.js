@@ -13,6 +13,7 @@ import {
   handleCsvImport,
   getContactStats,
   getDynamicProperties,
+  getCsvMappingOptions,
   getContactLists,
   addContactsToListBulk,
   removeContactsFromListBulk,
@@ -73,6 +74,9 @@ router.get('/stats', getContactStats);
 
 // Proprietà dinamiche disponibili (deve essere prima di /:id per evitare conflitti)
 router.get('/dynamic-properties', getDynamicProperties);
+
+// Opzioni di mappatura per CSV (deve essere prima di /:id per evitare conflitti)
+router.get('/csv-mapping-options', getCsvMappingOptions);
 
 /**
  * ROUTES PER LA GESTIONE DELLE LISTE (devono essere prima di /:id per evitare conflitti)
