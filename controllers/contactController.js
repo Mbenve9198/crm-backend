@@ -83,12 +83,104 @@ export const createContact = async (req, res) => {
 };
 
 /**
+ * Mappa una colonna frontend al campo MongoDB corrispondente
+ */
+const mapColumnToField = (column) => {
+  const columnMapping = {
+    'Contact': 'name',
+    'Email': 'email',
+    'Phone': 'phone',
+    'Owner': 'owner', // Nota: questo richiederà join logic
+    'Lists': 'lists',
+    'Created': 'createdAt',
+    'Status': 'status'
+  };
+
+  // Proprietà dinamiche (formato: prop_nomeProprietà)
+  if (column.startsWith('prop_')) {
+    const propName = column.replace('prop_', '');
+    return `properties.${propName}`;
+  }
+
+  return columnMapping[column] || column.toLowerCase();
+};
+
+/**
+ * Costruisce un filtro MongoDB da un filtro di colonna frontend
+ */
+const buildMongoFilter = (column, columnFilter) => {
+  const field = mapColumnToField(column);
+  
+  if (columnFilter.type === 'value') {
+    // Filtro per valori specifici
+    if (columnFilter.values && columnFilter.values.length > 0) {
+      return { [field]: { $in: columnFilter.values } };
+    }
+    return null;
+  }
+  
+  if (columnFilter.type === 'condition' && columnFilter.condition) {
+    const { type, value } = columnFilter.condition;
+    
+    switch (type) {
+      case 'equals':
+        return { [field]: value };
+      
+      case 'not_equals':
+        return { [field]: { $ne: value } };
+      
+      case 'contains':
+        return { [field]: { $regex: value, $options: 'i' } };
+      
+      case 'not_contains':
+        return { [field]: { $not: { $regex: value, $options: 'i' } } };
+      
+      case 'starts_with':
+        return { [field]: { $regex: `^${value}`, $options: 'i' } };
+      
+      case 'is_empty':
+        return { 
+          $or: [
+            { [field]: { $exists: false } },
+            { [field]: null },
+            { [field]: '' }
+          ]
+        };
+      
+      case 'is_not_empty':
+        return { 
+          [field]: { 
+            $exists: true, 
+            $ne: null, 
+            $ne: '' 
+          }
+        };
+      
+      default:
+        console.warn(`⚠️ Tipo di filtro non supportato: ${type}`);
+        return null;
+    }
+  }
+  
+  return null;
+};
+
+/**
  * Ottieni tutti i contatti o filtrati per lista
  * GET /contacts?list=nomeLista
  */
 export const getContacts = async (req, res) => {
   try {
-    const { list, page = 1, limit = 10, search, owner } = req.query;
+    const { 
+      list, 
+      page = 1, 
+      limit = 10, 
+      search, 
+      owner, 
+      sort_by, 
+      sort_direction,
+      column_filters 
+    } = req.query;
     const skip = (page - 1) * limit;
 
     // Costruisce il filtro di ricerca
@@ -117,6 +209,32 @@ export const getContacts = async (req, res) => {
       ];
     }
 
+    // Processa i filtri di colonna avanzati
+    if (column_filters) {
+      try {
+        const columnFilters = typeof column_filters === 'string' 
+          ? JSON.parse(column_filters) 
+          : column_filters;
+
+        for (const [column, columnFilter] of Object.entries(columnFilters)) {
+          const mongoFilter = buildMongoFilter(column, columnFilter);
+          if (mongoFilter) {
+            Object.assign(filter, mongoFilter);
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Errore nel parsing dei filtri di colonna:', error.message);
+      }
+    }
+
+    // Costruisce l'ordinamento
+    let sortOptions = { createdAt: -1 }; // Default sort
+    if (sort_by && sort_direction) {
+      const sortField = mapColumnToField(sort_by);
+      const sortDir = sort_direction === 'desc' ? -1 : 1;
+      sortOptions = { [sortField]: sortDir };
+    }
+
     // Esegue la query con paginazione e popolamento
     const contacts = await Contact.find(filter)
       .select('+properties') // Forza l'inclusione del campo properties
@@ -124,16 +242,13 @@ export const getContacts = async (req, res) => {
       .populate('createdBy', 'firstName lastName email')
       .skip(skip)
       .limit(parseInt(limit))
-      .sort({ createdAt: -1 });
+      .sort(sortOptions);
 
-    // Debug: verifica se i contatti hanno il campo properties
-    console.log('🔍 Debug contatti - primi 2 con properties:');
-    contacts.slice(0, 2).forEach((contact, i) => {
-      console.log(`Contatto ${i+1}: ${contact.name}`);
-      console.log(`  Properties presente: ${!!contact.properties}`);
-      console.log(`  Properties keys: ${Object.keys(contact.properties || {})}`);
-      console.log(`  Properties content:`, contact.properties);
-    });
+    // Debug: mostra i filtri applicati e i risultati
+    console.log('🔍 Debug query contatti:');
+    console.log('  Filtri applicati:', JSON.stringify(filter, null, 2));
+    console.log('  Ordinamento:', JSON.stringify(sortOptions, null, 2));
+    console.log(`  Risultati: ${contacts.length}/${total} contatti`);
 
     const total = await Contact.countDocuments(filter);
 
