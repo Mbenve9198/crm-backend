@@ -244,13 +244,13 @@ export const getContacts = async (req, res) => {
       .limit(parseInt(limit))
       .sort(sortOptions);
 
+    const total = await Contact.countDocuments(filter);
+
     // Debug: mostra i filtri applicati e i risultati
     console.log('🔍 Debug query contatti:');
     console.log('  Filtri applicati:', JSON.stringify(filter, null, 2));
     console.log('  Ordinamento:', JSON.stringify(sortOptions, null, 2));
     console.log(`  Risultati: ${contacts.length}/${total} contatti`);
-
-    const total = await Contact.countDocuments(filter);
 
     res.json({
       success: true,
