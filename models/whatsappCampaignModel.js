@@ -346,26 +346,73 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
 /**
  * Marca un messaggio come inviato
  */
-whatsappCampaignSchema.methods.markMessageSent = function(contactId, messageId) {
-  const message = this.messageQueue.find(m => m.contactId.toString() === contactId.toString());
+whatsappCampaignSchema.methods.markMessageSent = function(contactId, messageId, sequenceIndex = null) {
+  // Trova il messaggio specifico da marcare come inviato
+  // Priorità: messaggio pending con sequenceIndex specifico, altrimenti il primo pending
+  let message;
+  
+  if (sequenceIndex !== null) {
+    // Cerca messaggio specifico per sequenceIndex
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.sequenceIndex === sequenceIndex &&
+      m.status === 'pending'
+    );
+  }
+  
+  // Fallback: trova il primo messaggio pending per questo contatto
+  if (!message) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.status === 'pending'
+    );
+  }
+  
   if (message) {
     message.status = 'sent';
     message.sentAt = new Date();
     message.messageId = messageId;
+    console.log(`✅ Message marked as sent: contact ${contactId}, sequence ${message.sequenceIndex}, messageId ${messageId}`);
+  } else {
+    console.warn(`⚠️ No pending message found to mark as sent for contact ${contactId}, sequenceIndex ${sequenceIndex}`);
   }
+  
   return message;
 };
 
 /**
  * Marca un messaggio come fallito
  */
-whatsappCampaignSchema.methods.markMessageFailed = function(contactId, errorMessage) {
-  const message = this.messageQueue.find(m => m.contactId.toString() === contactId.toString());
+whatsappCampaignSchema.methods.markMessageFailed = function(contactId, errorMessage, sequenceIndex = null) {
+  // Trova il messaggio specifico da marcare come fallito
+  let message;
+  
+  if (sequenceIndex !== null) {
+    // Cerca messaggio specifico per sequenceIndex
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.sequenceIndex === sequenceIndex &&
+      m.status === 'pending'
+    );
+  }
+  
+  // Fallback: trova il primo messaggio pending per questo contatto
+  if (!message) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.status === 'pending'
+    );
+  }
+  
   if (message) {
     message.status = 'failed';
     message.errorMessage = errorMessage;
     message.retryCount += 1;
+    console.log(`❌ Message marked as failed: contact ${contactId}, sequence ${message.sequenceIndex}, error: ${errorMessage}`);
+  } else {
+    console.warn(`⚠️ No pending message found to mark as failed for contact ${contactId}, sequenceIndex ${sequenceIndex}`);
   }
+  
   return message;
 };
 
@@ -451,12 +498,28 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
     return; // Nessuna sequenza configurata
   }
 
+  // ✅ SOLUZIONE 2: Controlla se esistono già follow-up per questo contatto
+  const existingFollowUps = this.messageQueue.filter(m => 
+    m.contactId.toString() === contactId.toString() && 
+    m.sequenceIndex > 0
+  );
+  
+  if (existingFollowUps.length > 0) {
+    console.log(`⏭️ Follow-up già esistenti per contatto ${contactId}: ${existingFollowUps.length} sequenze già programmate`);
+    return; // Follow-up già programmati, evita duplicazione
+  }
+
   const sentTime = new Date();
+  
+  console.log(`📅 Programmazione ${this.messageSequences.length} follow-up per contatto ${contactId}`);
   
   for (let i = 0; i < this.messageSequences.length; i++) {
     const sequence = this.messageSequences[i];
     
-    if (!sequence.isActive) continue;
+    if (!sequence.isActive) {
+      console.log(`⏭️ Sequenza ${sequence.id} non attiva, saltata`);
+      continue;
+    }
 
     // Calcola quando inviare questo follow-up
     const followUpTime = new Date(sentTime.getTime() + sequence.delayMinutes * 60 * 1000);
@@ -477,7 +540,11 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
       retryCount: 0,
       condition: sequence.condition // Aggiungi la condizione per facilitare il controllo
     });
+    
+    console.log(`📝 Follow-up ${i + 1} programmato per ${followUpTime.toISOString()}, sequenza: ${sequence.id}`);
   }
+  
+  console.log(`✅ ${this.messageSequences.filter(s => s.isActive).length} follow-up programmati con successo per contatto ${contactId}`);
 };
 
 /**

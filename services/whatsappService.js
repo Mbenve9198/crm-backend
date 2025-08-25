@@ -854,6 +854,18 @@ class WhatsappService {
       const priority = campaign.priority || 'media';
       const config = smartRateLimiter.getConfigForPriority(priority);
       
+      // ✅ LOGGING MIGLIORATO: Conta messaggi per status
+      const messageStats = {
+        pending: campaign.messageQueue.filter(m => m.status === 'pending').length,
+        sent: campaign.messageQueue.filter(m => m.status === 'sent').length,
+        delivered: campaign.messageQueue.filter(m => m.status === 'delivered').length,
+        read: campaign.messageQueue.filter(m => m.status === 'read').length,
+        failed: campaign.messageQueue.filter(m => m.status === 'failed').length,
+        total: campaign.messageQueue.length
+      };
+      
+      console.log(`📊 Campaign ${campaign.name} status: ${JSON.stringify(messageStats)}`);
+      
       // Ottieni messaggi da inviare con batch size intelligente
       const pendingMessages = campaign.getNextMessages(config.batchSize);
       
@@ -867,7 +879,16 @@ class WhatsappService {
           campaign.status = 'completed';
           campaign.completedAt = new Date();
           await campaign.save();
-          console.log(`✅ Campagna completata: ${campaign.name}`);
+          console.log(`✅ Campagna completata: ${campaign.name} (${messageStats.total} messaggi totali)`);
+        } else {
+          // ✅ DEBUGGING: Log messaggi pending che non vengono processati
+          const stuckMessages = campaign.messageQueue.filter(m => m.status === 'pending');
+          if (stuckMessages.length > 0) {
+            console.warn(`⚠️ Campaign ${campaign.name} has ${stuckMessages.length} stuck pending messages`);
+            stuckMessages.slice(0, 3).forEach((msg, idx) => {
+              console.warn(`   ${idx + 1}. Contact: ${msg.contactId}, Sequence: ${msg.sequenceIndex}, ScheduledFor: ${msg.followUpScheduledFor || 'immediately'}`);
+            });
+          }
         }
         
         return;
@@ -930,7 +951,7 @@ class WhatsappService {
           
         } catch (error) {
           console.error(`❌ Errore invio messaggio smart:`, error);
-          campaign.markMessageFailed(messageData.contactId, error.message);
+          campaign.markMessageFailed(messageData.contactId, error.message, messageData.sequenceIndex);
         }
       }
 
@@ -1010,7 +1031,7 @@ class WhatsappService {
           
         } catch (error) {
           console.error(`Errore invio messaggio campagna:`, error);
-          campaign.markMessageFailed(messageData.contactId, error.message);
+          campaign.markMessageFailed(messageData.contactId, error.message, messageData.sequenceIndex);
         }
       }
 
@@ -1051,7 +1072,7 @@ class WhatsappService {
       );
 
       // Aggiorna stato messaggio IMMEDIATAMENTE
-      campaign.markMessageSent(messageData.contactId, messageId);
+      campaign.markMessageSent(messageData.contactId, messageId, messageData.sequenceIndex);
 
       // Registra nel rate limiter
       await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
