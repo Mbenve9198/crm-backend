@@ -191,22 +191,27 @@ app.use(cors({
       'http://localhost:3000',
       'http://localhost:3001', 
       'http://localhost:5173',
+      'https://crm-frontend-pied-sigma.vercel.app', // ✅ Frontend Vercel esplicito
       process.env.FRONTEND_URL
-    ];
+    ].filter(Boolean); // Rimuovi valori null/undefined
+    
+    console.log(`🌐 CORS Check - Origin: ${origin}, Allowed: ${allowedOrigins.join(', ')}`);
     
     // Permetti tutti i domini Vercel se non è specificato FRONTEND_URL
     if (!origin || 
         allowedOrigins.includes(origin) ||
         origin.includes('.vercel.app') ||
         origin.includes('crm-frontend')) {
+      console.log(`✅ CORS Allow: ${origin}`);
       callback(null, true);
     } else {
+      console.log(`❌ CORS Deny: ${origin}`);
       callback(new Error('Non permesso da CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
 // Logging delle richieste (solo in development)
