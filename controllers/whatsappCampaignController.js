@@ -699,7 +699,109 @@ async function getTargetContacts(targetList, contactFilters, userId) {
   // Filtra solo contatti con numero di telefono
   filter.phone = { $exists: true, $ne: null, $ne: '' };
   
-  return await Contact.find(filter).select('name phone email properties');
+  // ✅ LOGGING DIAGNOSTICO: Analizza perché non vengono trovati contatti
+  console.log('🔍 Debug getTargetContacts:');
+  console.log('   Filter applicato:', JSON.stringify(filter, null, 2));
+  
+  const contacts = await Contact.find(filter).select('name phone email properties');
+  
+  if (contacts.length === 0) {
+    console.warn('⚠️ Nessun contatto trovato! Analisi diagnostica:');
+    
+    // Conta contatti per step per capire dove si perde
+    const totalForUser = await Contact.countDocuments({ owner: userId });
+    console.warn(`   👤 Contatti totali per user ${userId}: ${totalForUser}`);
+    
+    if (totalForUser === 0) {
+      console.warn('   ❌ PROBLEMA: Questo utente non ha nessun contatto!');
+      return [];
+    }
+    
+    const withPhone = await Contact.countDocuments({ 
+      owner: userId,
+      phone: { $exists: true, $ne: null, $ne: '' }
+    });
+    console.warn(`   📱 Contatti con telefono: ${withPhone}`);
+    
+    if (withPhone === 0) {
+      console.warn('   ❌ PROBLEMA: Nessun contatto ha un numero di telefono valido!');
+      return [];
+    }
+    
+    if (targetList && targetList !== 'all') {
+      const inList = await Contact.countDocuments({ 
+        owner: userId,
+        phone: { $exists: true, $ne: null, $ne: '' },
+        lists: targetList
+      });
+      console.warn(`   📋 Contatti nella lista "${targetList}" con telefono: ${inList}`);
+      
+      if (inList === 0) {
+        console.warn(`   ❌ PROBLEMA: La lista "${targetList}" non contiene contatti con telefono!`);
+        
+        // Mostra liste disponibili
+        const availableLists = await Contact.aggregate([
+          { $match: { owner: userId, phone: { $exists: true, $ne: null, $ne: '' } } },
+          { $unwind: '$lists' },
+          { $group: { _id: '$lists', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]);
+        
+        if (availableLists.length > 0) {
+          console.warn('   💡 Liste disponibili con contatti validi:');
+          availableLists.forEach(list => {
+            console.warn(`      - ${list._id}: ${list.count} contatti`);
+          });
+        } else {
+          console.warn('   ❌ Nessuna lista contiene contatti con telefono!');
+        }
+        
+        return [];
+      }
+    }
+    
+    if (contactFilters && contactFilters.status && contactFilters.status.length > 0) {
+      const withStatus = await Contact.countDocuments({ 
+        owner: userId,
+        phone: { $exists: true, $ne: null, $ne: '' },
+        ...(targetList && targetList !== 'all' ? { lists: targetList } : {}),
+        status: { $in: contactFilters.status }
+      });
+      console.warn(`   🎯 Contatti con status ${contactFilters.status.join(', ')}: ${withStatus}`);
+      
+      if (withStatus === 0) {
+        console.warn('   ❌ PROBLEMA: Nessun contatto ha gli status richiesti!');
+        
+        // Mostra status disponibili
+        const availableStatuses = await Contact.aggregate([
+          { 
+            $match: { 
+              owner: userId, 
+              phone: { $exists: true, $ne: null, $ne: '' },
+              ...(targetList && targetList !== 'all' ? { lists: targetList } : {})
+            } 
+          },
+          { $group: { _id: '$status', count: { $sum: 1 } } },
+          { $sort: { count: -1 } }
+        ]);
+        
+        if (availableStatuses.length > 0) {
+          console.warn('   💡 Status disponibili:');
+          availableStatuses.forEach(status => {
+            console.warn(`      - ${status._id || 'undefined'}: ${status.count} contatti`);
+          });
+        }
+        
+        return [];
+      }
+    }
+    
+    console.warn('   ❓ PROBLEMA SCONOSCIUTO: Tutti i filtri sembrano OK ma nessun contatto trovato');
+  } else {
+    console.log(`   ✅ Trovati ${contacts.length} contatti validi per la campagna`);
+  }
+  
+  return contacts;
 }
 
 /**
