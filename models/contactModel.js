@@ -53,7 +53,7 @@ const contactSchema = new mongoose.Schema({
   // Status del contatto nel pipeline
   status: {
     type: String,
-    enum: ['da contattare', 'contattato', 'da richiamare', 'interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'],
+    enum: ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'],
     default: 'da contattare',
     index: true
   },

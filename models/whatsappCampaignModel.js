@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import Contact from './contactModel.js';
 
 /**
  * Schema per le Campagne WhatsApp
@@ -202,7 +203,7 @@ const whatsappCampaignSchema = new mongoose.Schema({
     compiledMessage: String,
     status: {
       type: String,
-      enum: ['pending', 'sent', 'delivered', 'read', 'failed'],
+      enum: ['pending', 'sent', 'delivered', 'read', 'failed', 'not_interested', 'replied'],
       default: 'pending'
     },
     scheduledAt: Date,
@@ -290,12 +291,39 @@ whatsappCampaignSchema.index({ scheduledStartAt: 1 });
  * Aggiorna le statistiche della campagna
  */
 whatsappCampaignSchema.methods.updateStats = function() {
+  const totalMessages = this.messageQueue.length;
+  const messagesSent = this.messageQueue.filter(m => ['sent', 'delivered', 'read'].includes(m.status)).length;
+  const messagesDelivered = this.messageQueue.filter(m => ['delivered', 'read'].includes(m.status)).length;
+  const messagesRead = this.messageQueue.filter(m => m.status === 'read').length;
+  const messagesFailed = this.messageQueue.filter(m => m.status === 'failed').length;
+  
+  // ✅ Nuove statistiche per gestione manuale
+  const messagesReplied = this.messageQueue.filter(m => m.status === 'replied').length;
+  const messagesNotInterested = this.messageQueue.filter(m => m.status === 'not_interested').length;
+  
+  // ✅ LOGICA CORRETTA: Include repliesReceived esistenti nel calcolo
+  const existingRepliesReceived = this.stats?.repliesReceived || 0;
+  
+  // Reply Rate: (replied manuali + not_interested + risposte automatiche) / messaggi_inviati
+  const totalResponses = messagesReplied + messagesNotInterested + existingRepliesReceived;
+  const replyRate = messagesSent > 0 ? ((totalResponses / messagesSent) * 100).toFixed(1) : 0;
+  
+  // Conversion Rate: (replied manuali + risposte automatiche) / messaggi_inviati  
+  const totalPositiveResponses = messagesReplied + existingRepliesReceived;
+  const conversionRate = messagesSent > 0 ? ((totalPositiveResponses / messagesSent) * 100).toFixed(1) : 0;
+  
   const stats = {
-    totalContacts: this.messageQueue.length,
-    messagesSent: this.messageQueue.filter(m => m.status === 'sent' || m.status === 'delivered' || m.status === 'read').length,
-    messagesDelivered: this.messageQueue.filter(m => m.status === 'delivered' || m.status === 'read').length,
-    messagesRead: this.messageQueue.filter(m => m.status === 'read').length,
-    errors: this.messageQueue.filter(m => m.status === 'failed').length
+    totalContacts: totalMessages,
+    messagesSent,
+    messagesDelivered,
+    messagesRead,
+    errors: messagesFailed,
+    repliesReceived: existingRepliesReceived, // Mantieni valore esistente
+    // ✅ Nuove statistiche
+    replied: messagesReplied,
+    notInterested: messagesNotInterested,
+    replyRate: parseFloat(replyRate),
+    conversionRate: parseFloat(conversionRate)
   };
   
   this.stats = { ...this.stats, ...stats };
@@ -346,7 +374,7 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
 /**
  * Marca un messaggio come inviato
  */
-whatsappCampaignSchema.methods.markMessageSent = function(contactId, messageId, sequenceIndex = null) {
+whatsappCampaignSchema.methods.markMessageSent = async function(contactId, messageId, sequenceIndex = null) {
   // Trova il messaggio specifico da marcare come inviato
   // Priorità: messaggio pending con sequenceIndex specifico, altrimenti il primo pending
   let message;
@@ -373,6 +401,21 @@ whatsappCampaignSchema.methods.markMessageSent = function(contactId, messageId, 
     message.sentAt = new Date();
     message.messageId = messageId;
     console.log(`✅ Message marked as sent: contact ${contactId}, sequence ${message.sequenceIndex}, messageId ${messageId}`);
+    
+    // ✅ SINCRONIZZAZIONE STATO CONTATTO: Solo per messaggi principali (sequenceIndex = 0)
+    if (message.sequenceIndex === 0) {
+      try {
+        const contact = await Contact.findById(contactId);
+        if (contact && !['won', 'lost'].includes(contact.status)) {
+          const oldStatus = contact.status;
+          contact.status = 'contattato';
+          await contact.save();
+          console.log(`📞 Contact status updated: ${contactId} ${oldStatus} → contattato`);
+        }
+      } catch (error) {
+        console.error(`❌ Error updating contact status for ${contactId}:`, error);
+      }
+    }
   } else {
     console.warn(`⚠️ No pending message found to mark as sent for contact ${contactId}, sequenceIndex ${sequenceIndex}`);
   }
@@ -414,6 +457,128 @@ whatsappCampaignSchema.methods.markMessageFailed = function(contactId, errorMess
   }
   
   return message;
+};
+
+/**
+ * Marca un messaggio come "replied" (contatto ha risposto)
+ */
+whatsappCampaignSchema.methods.markMessageAsReplied = async function(contactId, sequenceIndex = null) {
+  // Trova il messaggio specifico
+  let message;
+  
+  if (sequenceIndex !== null) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.sequenceIndex === sequenceIndex
+    );
+  }
+  
+  // Fallback: trova il primo messaggio per questo contatto
+  if (!message) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString()
+    );
+  }
+  
+  if (message) {
+    message.status = 'replied';
+    message.responseReceivedAt = new Date();
+    message.hasReceivedResponse = true;
+    console.log(`✅ Message marked as replied: contact ${contactId}, sequence ${message.sequenceIndex}`);
+    
+    // ✅ SINCRONIZZAZIONE STATO CONTATTO: Rollback a "contattato"
+    try {
+      const contact = await Contact.findById(contactId);
+      if (contact && !['won', 'lost'].includes(contact.status)) {
+        const oldStatus = contact.status;
+        contact.status = 'contattato';
+        await contact.save();
+        console.log(`✅ Contact status updated (rollback): ${contactId} ${oldStatus} → contattato`);
+      }
+    } catch (error) {
+      console.error(`❌ Error updating contact status for ${contactId}:`, error);
+    }
+    
+    // Cancella follow-up programmati per questo contatto
+    this.cancelFollowUpsForContact(contactId);
+  } else {
+    console.warn(`⚠️ No message found to mark as replied for contact ${contactId}`);
+  }
+  
+  return message;
+};
+
+/**
+ * Marca un messaggio come "not_interested" (contatto non interessato)
+ */
+whatsappCampaignSchema.methods.markMessageAsNotInterested = async function(contactId, sequenceIndex = null) {
+  // Trova il messaggio specifico
+  let message;
+  
+  if (sequenceIndex !== null) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString() && 
+      m.sequenceIndex === sequenceIndex
+    );
+  }
+  
+  // Fallback: trova il primo messaggio per questo contatto
+  if (!message) {
+    message = this.messageQueue.find(m => 
+      m.contactId.toString() === contactId.toString()
+    );
+  }
+  
+  if (message) {
+    message.status = 'not_interested';
+    message.responseReceivedAt = new Date();
+    message.hasReceivedResponse = true;
+    console.log(`🚫 Message marked as not interested: contact ${contactId}, sequence ${message.sequenceIndex}`);
+    
+    // ✅ SINCRONIZZAZIONE STATO CONTATTO: Aggiorna sempre a "non interessato"
+    try {
+      const contact = await Contact.findById(contactId);
+      if (contact) {
+        const oldStatus = contact.status;
+        contact.status = 'non interessato';
+        await contact.save();
+        console.log(`🚫 Contact status updated: ${contactId} ${oldStatus} → non interessato`);
+      }
+    } catch (error) {
+      console.error(`❌ Error updating contact status for ${contactId}:`, error);
+    }
+    
+    // Cancella follow-up programmati per questo contatto
+    this.cancelFollowUpsForContact(contactId);
+  } else {
+    console.warn(`⚠️ No message found to mark as not interested for contact ${contactId}`);
+  }
+  
+  return message;
+};
+
+/**
+ * Cancella follow-up programmati per un contatto specifico
+ */
+whatsappCampaignSchema.methods.cancelFollowUpsForContact = function(contactId) {
+  const cancelledCount = this.messageQueue.filter(m => 
+    m.contactId.toString() === contactId.toString() && 
+    m.status === 'pending' && 
+    m.sequenceIndex > 0
+  ).length;
+  
+  // Rimuovi tutti i follow-up pending per questo contatto
+  this.messageQueue = this.messageQueue.filter(m => 
+    !(m.contactId.toString() === contactId.toString() && 
+      m.status === 'pending' && 
+      m.sequenceIndex > 0)
+  );
+  
+  if (cancelledCount > 0) {
+    console.log(`🗑️ Cancelled ${cancelledCount} follow-up messages for contact ${contactId}`);
+  }
+  
+  return cancelledCount;
 };
 
 /**

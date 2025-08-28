@@ -854,8 +854,8 @@ class WhatsappService {
       const priority = campaign.priority || 'media';
       const config = smartRateLimiter.getConfigForPriority(priority);
       
-      // ✅ LOGGING MIGLIORATO: Conta messaggi per status
-      const messageStats = {
+      // ✅ Statistiche campagna per monitoring
+      const stats = {
         pending: campaign.messageQueue.filter(m => m.status === 'pending').length,
         sent: campaign.messageQueue.filter(m => m.status === 'sent').length,
         delivered: campaign.messageQueue.filter(m => m.status === 'delivered').length,
@@ -864,31 +864,29 @@ class WhatsappService {
         total: campaign.messageQueue.length
       };
       
-      console.log(`📊 Campaign ${campaign.name} status: ${JSON.stringify(messageStats)}`);
+      // Calcola quanti failed sono per "Number not linked"
+      const noWhatsAppCount = campaign.messageQueue.filter(m => 
+        m.status === 'failed' && 
+        m.errorMessage && 
+        m.errorMessage.includes('Number not linked to WhatsApp Account')
+      ).length;
+      
+      console.log(`📊 Campaign "${campaign.name}": ${stats.pending} pending, ${stats.sent} sent, ${stats.failed} failed (${noWhatsAppCount} no WhatsApp)`);
       
       // Ottieni messaggi da inviare con batch size intelligente
       const pendingMessages = campaign.getNextMessages(config.batchSize);
       
       if (pendingMessages.length === 0) {
         // Verifica se la campagna è completata
-        const allSent = campaign.messageQueue.every(m => 
-          ['sent', 'delivered', 'read', 'failed'].includes(m.status)
+        const allProcessed = campaign.messageQueue.every(m => 
+          ['sent', 'delivered', 'read', 'failed', 'replied', 'not_interested'].includes(m.status)
         );
         
-        if (allSent) {
+        if (allProcessed) {
           campaign.status = 'completed';
           campaign.completedAt = new Date();
           await campaign.save();
-          console.log(`✅ Campagna completata: ${campaign.name} (${messageStats.total} messaggi totali)`);
-        } else {
-          // ✅ DEBUGGING: Log messaggi pending che non vengono processati
-          const stuckMessages = campaign.messageQueue.filter(m => m.status === 'pending');
-          if (stuckMessages.length > 0) {
-            console.warn(`⚠️ Campaign ${campaign.name} has ${stuckMessages.length} stuck pending messages`);
-            stuckMessages.slice(0, 3).forEach((msg, idx) => {
-              console.warn(`   ${idx + 1}. Contact: ${msg.contactId}, Sequence: ${msg.sequenceIndex}, ScheduledFor: ${msg.followUpScheduledFor || 'immediately'}`);
-            });
-          }
+          console.log(`✅ Campagna completata: ${campaign.name}`);
         }
         
         return;
@@ -940,25 +938,40 @@ class WhatsappService {
           );
 
           if (result) {
-            messagesSentInBatch++;
-            
-            // Attendi l'intervallo configurato per la priorità
-            if (messagesSentInBatch < pendingMessages.length) {
-              console.log(`⏱️ Waiting ${config.intervalSeconds}s before next message...`);
-              await this.sleep(config.intervalSeconds * 1000);
+            // Se il messaggio è fallito per "Number not linked", non contarlo come inviato
+            if (result.failed && result.reason === 'Number not linked to WhatsApp Account') {
+              console.log(`📵 Skipped message to ${result.contact} - no WhatsApp account`);
+              // Non incrementare messagesSentInBatch
+              // Non attendere intervallo (non ha consumato quota)
+            } else {
+              // Messaggio inviato con successo
+              messagesSentInBatch++;
+              
+              // Attendi l'intervallo configurato per la priorità
+              if (messagesSentInBatch < pendingMessages.length) {
+                console.log(`⏱️ Waiting ${config.intervalSeconds}s before next message...`);
+                await this.sleep(config.intervalSeconds * 1000);
+              }
             }
           }
           
         } catch (error) {
           console.error(`❌ Errore invio messaggio smart:`, error);
-          campaign.markMessageFailed(messageData.contactId, error.message, messageData.sequenceIndex);
+          campaign.markMessageFailed(messageData.contactId, error.message);
         }
       }
 
       // Salva aggiornamenti campagna
       if (messagesSentInBatch > 0) {
         await campaign.save();
-        console.log(`📤 Sent ${messagesSentInBatch} messages for campaign: ${campaign.name}`);
+        console.log(`📤 Successfully sent ${messagesSentInBatch} messages for campaign: ${campaign.name}`);
+      } else {
+        // Salva comunque se ci sono stati cambi di status (es. failed)
+        const processedMessages = pendingMessages.length;
+        if (processedMessages > 0) {
+          await campaign.save();
+          console.log(`🔄 Processed ${processedMessages} messages for campaign: ${campaign.name} (0 sent, ${processedMessages} failed/skipped)`);
+        }
       }
 
     } catch (error) {
@@ -984,7 +997,7 @@ class WhatsappService {
       campaign.actualStartedAt = new Date();
       await campaign.save();
 
-      console.log(`✅ Campagna avviata: ${campaign.name}`);
+      console.log(`✅ Campagna completata: ${campaign.name}`);
 
     } catch (error) {
       console.error(`Errore avvio campagna ${campaignId}:`, error);
@@ -992,7 +1005,7 @@ class WhatsappService {
   }
 
   /**
-   * Processa i messaggi di una campagna
+   * Processa i messaggi di una campagna (metodo legacy)
    */
   async processCampaignMessages(campaign) {
     try {
@@ -1001,11 +1014,11 @@ class WhatsappService {
       
       if (pendingMessages.length === 0) {
         // Verifica se la campagna è completata
-        const allSent = campaign.messageQueue.every(m => 
-          ['sent', 'delivered', 'read', 'failed'].includes(m.status)
+        const allProcessed = campaign.messageQueue.every(m => 
+          ['sent', 'delivered', 'read', 'failed', 'replied', 'not_interested'].includes(m.status)
         );
         
-        if (allSent) {
+        if (allProcessed) {
           campaign.status = 'completed';
           campaign.completedAt = new Date();
           await campaign.save();
@@ -1031,7 +1044,7 @@ class WhatsappService {
           
         } catch (error) {
           console.error(`Errore invio messaggio campagna:`, error);
-          campaign.markMessageFailed(messageData.contactId, error.message, messageData.sequenceIndex);
+          campaign.markMessageFailed(messageData.contactId, error.message);
         }
       }
 
@@ -1071,8 +1084,26 @@ class WhatsappService {
         campaign.attachments
       );
 
-      // Aggiorna stato messaggio IMMEDIATAMENTE
-      campaign.markMessageSent(messageData.contactId, messageId, messageData.sequenceIndex);
+      // ✅ FIX: Gestisce errore "Number not linked to WhatsApp Account"
+      if (messageId && typeof messageId === 'string' && messageId.includes('Number not linked to WhatsApp Account')) {
+        console.warn(`📵 ${contact.name} - Number not linked to WhatsApp Account`);
+        
+        // Marca come FAILED invece di SENT
+        campaign.markMessageFailed(messageData.contactId, messageId, messageData.sequenceIndex);
+        
+        // NON programmare follow-up se il messaggio principale è fallito
+        // NON registrare nel rate limiter (non ha consumato quota reale)
+        
+        return {
+          failed: true,
+          reason: 'Number not linked to WhatsApp Account',
+          contact: contact.name,
+          sequenceIndex: messageData.sequenceIndex
+        };
+      }
+
+      // Aggiorna stato messaggio IMMEDIATAMENTE solo se successo
+      await campaign.markMessageSent(messageData.contactId, messageId, messageData.sequenceIndex);
 
       // Registra nel rate limiter
       await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
@@ -1176,4 +1207,4 @@ class WhatsappService {
 // Istanza singleton
 const whatsappService = new WhatsappService();
 
-export default whatsappService; 
+export default whatsappService;

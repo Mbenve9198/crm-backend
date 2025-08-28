@@ -297,6 +297,107 @@ export const updateCampaign = async (req, res) => {
 };
 
 /**
+ * Aggiorna lo stato di un messaggio specifico in una campagna
+ * PUT /whatsapp-campaigns/:campaignId/messages/:messageId/status
+ */
+export const updateMessageStatus = async (req, res) => {
+  try {
+    const { campaignId, messageId } = req.params;
+    const { status, additionalData } = req.body;
+    const userId = req.user._id;
+
+    // Valida i parametri
+    if (!campaignId || !messageId || !status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parametri mancanti: campaignId, messageId, status sono obbligatori'
+      });
+    }
+
+    // Trova la campagna
+    const campaign = await WhatsappCampaign.findOne({
+      _id: campaignId,
+      owner: userId
+    });
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: 'Campagna non trovata o non autorizzata'
+      });
+    }
+
+    // Trova il messaggio nella coda
+    const message = campaign.messageQueue.find(m => m._id.toString() === messageId);
+    
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: 'Messaggio non trovato nella campagna'
+      });
+    }
+
+    const oldStatus = message.status;
+    let updatedMessage;
+
+    // Aggiorna lo status in base al tipo
+    switch (status) {
+      case 'replied':
+        updatedMessage = await campaign.markMessageAsReplied(message.contactId, message.sequenceIndex);
+        break;
+        
+      case 'not_interested':
+        updatedMessage = await campaign.markMessageAsNotInterested(message.contactId, message.sequenceIndex);
+        break;
+        
+      case 'pending':
+      case 'sent':
+      case 'delivered':
+      case 'read':
+      case 'failed':
+        // Stati standard - aggiorna direttamente
+        message.status = status;
+        if (additionalData?.messageId) message.messageId = additionalData.messageId;
+        if (additionalData?.errorMessage) message.errorMessage = additionalData.errorMessage;
+        updatedMessage = message;
+        break;
+        
+      default:
+        return res.status(400).json({
+          success: false,
+          message: `Status non valido: ${status}`
+        });
+    }
+
+    // Aggiorna statistiche campagna
+    campaign.updateStats();
+    
+    // Salva la campagna
+    await campaign.save();
+
+    console.log(`📝 Message status updated: ${oldStatus} → ${status} for contact ${message.contactId} in campaign ${campaign.name}`);
+
+    res.json({
+      success: true,
+      message: 'Status messaggio aggiornato con successo',
+      data: {
+        messageId: messageId,
+        oldStatus: oldStatus,
+        newStatus: status,
+        cancelledFollowUps: status === 'replied' || status === 'not_interested' ? true : false
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore aggiornamento status messaggio:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * Avvia una campagna
  * POST /whatsapp-campaigns/:id/start
  */

@@ -11,7 +11,8 @@ import {
   cancelCampaign,
   deleteCampaign,
   uploadAttachments,
-  previewCampaign
+  previewCampaign,
+  updateMessageStatus
 } from '../controllers/whatsappCampaignController.js';
 
 const router = express.Router();
@@ -37,6 +38,9 @@ router.post('/', createCampaign);
 
 // PUT /api/whatsapp-campaigns/:id - Aggiorna campagna
 router.put('/:id', updateCampaign);
+
+// PUT /api/whatsapp-campaigns/:campaignId/messages/:messageId/status - Aggiorna status messaggio
+router.put('/:campaignId/messages/:messageId/status', updateMessageStatus);
 
 // POST /api/whatsapp-campaigns/:id/attachments - Upload allegati
 router.post('/:id/attachments', uploadAttachments);
