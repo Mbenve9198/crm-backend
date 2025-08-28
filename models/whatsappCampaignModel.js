@@ -189,6 +189,23 @@ const whatsappCampaignSchema = new mongoose.Schema({
     errors: {
       type: Number,
       default: 0
+    },
+    // ✅ Nuovi campi per gestione manuale stati
+    replied: {
+      type: Number,
+      default: 0
+    },
+    notInterested: {
+      type: Number,
+      default: 0
+    },
+    replyRate: {
+      type: Number,
+      default: 0
+    },
+    conversionRate: {
+      type: Number,
+      default: 0
     }
   },
   
@@ -400,7 +417,6 @@ whatsappCampaignSchema.methods.markMessageSent = async function(contactId, messa
     message.status = 'sent';
     message.sentAt = new Date();
     message.messageId = messageId;
-    console.log(`✅ Message marked as sent: contact ${contactId}, sequence ${message.sequenceIndex}, messageId ${messageId}`);
     
     // ✅ SINCRONIZZAZIONE STATO CONTATTO: Solo per messaggi principali (sequenceIndex = 0)
     if (message.sequenceIndex === 0) {
@@ -410,7 +426,6 @@ whatsappCampaignSchema.methods.markMessageSent = async function(contactId, messa
           const oldStatus = contact.status;
           contact.status = 'contattato';
           await contact.save();
-          console.log(`📞 Contact status updated: ${contactId} ${oldStatus} → contattato`);
         }
       } catch (error) {
         console.error(`❌ Error updating contact status for ${contactId}:`, error);
@@ -451,7 +466,6 @@ whatsappCampaignSchema.methods.markMessageFailed = function(contactId, errorMess
     message.status = 'failed';
     message.errorMessage = errorMessage;
     message.retryCount += 1;
-    console.log(`❌ Message marked as failed: contact ${contactId}, sequence ${message.sequenceIndex}, error: ${errorMessage}`);
   } else {
     console.warn(`⚠️ No pending message found to mark as failed for contact ${contactId}, sequenceIndex ${sequenceIndex}`);
   }
@@ -484,7 +498,6 @@ whatsappCampaignSchema.methods.markMessageAsReplied = async function(contactId, 
     message.status = 'replied';
     message.responseReceivedAt = new Date();
     message.hasReceivedResponse = true;
-    console.log(`✅ Message marked as replied: contact ${contactId}, sequence ${message.sequenceIndex}`);
     
     // ✅ SINCRONIZZAZIONE STATO CONTATTO: Rollback a "contattato"
     try {
@@ -493,7 +506,6 @@ whatsappCampaignSchema.methods.markMessageAsReplied = async function(contactId, 
         const oldStatus = contact.status;
         contact.status = 'contattato';
         await contact.save();
-        console.log(`✅ Contact status updated (rollback): ${contactId} ${oldStatus} → contattato`);
       }
     } catch (error) {
       console.error(`❌ Error updating contact status for ${contactId}:`, error);
@@ -533,7 +545,6 @@ whatsappCampaignSchema.methods.markMessageAsNotInterested = async function(conta
     message.status = 'not_interested';
     message.responseReceivedAt = new Date();
     message.hasReceivedResponse = true;
-    console.log(`🚫 Message marked as not interested: contact ${contactId}, sequence ${message.sequenceIndex}`);
     
     // ✅ SINCRONIZZAZIONE STATO CONTATTO: Aggiorna sempre a "non interessato"
     try {
@@ -542,7 +553,6 @@ whatsappCampaignSchema.methods.markMessageAsNotInterested = async function(conta
         const oldStatus = contact.status;
         contact.status = 'non interessato';
         await contact.save();
-        console.log(`🚫 Contact status updated: ${contactId} ${oldStatus} → non interessato`);
       }
     } catch (error) {
       console.error(`❌ Error updating contact status for ${contactId}:`, error);
