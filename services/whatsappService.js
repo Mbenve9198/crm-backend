@@ -254,17 +254,17 @@ class WhatsappService {
         sessionId,
         headless: process.env.OPENWA_HEADLESS === 'true' || true,
         autoRefresh: true,
-        qrTimeout: 120,  // Aumentato per Railway
-        authTimeout: 120,  // Aumentato per Railway
+        qrTimeout: 300,  // Aumentato da 120 a 300 secondi (5 minuti) per connessioni lente
+        authTimeout: 300,  // Aumentato da 120 a 300 secondi (5 minuti) per connessioni lente
         cacheEnabled: false,
         hostNotificationLang: 'IT',
         
         // Fix per timeout su Railway
-        waitForRipeSession: 60000,
+        waitForRipeSession: 120000, // Aumentato da 60 a 120 secondi per stabilità
         
         // CRITICAL FIX: Timeout configurazione basata su documentazione OpenWA
-        callTimeout: 300000, // 5 minuti per metodi client OpenWA (deve essere > protocolTimeout)
-        protocolTimeout: 180000, // 3 minuti per operazioni Puppeteer
+        callTimeout: 600000, // 10 minuti per metodi client OpenWA (deve essere > protocolTimeout)
+        protocolTimeout: 480000, // 8 minuti per operazioni Puppeteer (aumentato per risolvere timeout)
         defaultViewport: null,
         
         chromiumArgs: [
@@ -314,8 +314,8 @@ class WhatsappService {
           waitForRipeSession: 60000,
           
           // CRITICAL FIX: Timeout specifici per Railway/produzione basati su OpenWA docs
-          callTimeout: 360000, // 6 minuti per metodi client in produzione
-          protocolTimeout: 240000, // 4 minuti per Puppeteer in produzione
+          callTimeout: 720000, // 12 minuti per metodi client in produzione (aumentato per timeout issues)
+          protocolTimeout: 600000, // 10 minuti per Puppeteer in produzione (aumentato per timeout issues)
           slowMo: 100, // Rallenta le operazioni per stabilità
           
           chromiumArgs: [
@@ -381,10 +381,13 @@ class WhatsappService {
       // Gestione specifica per errori di timeout Puppeteer
       let errorMessage = 'Errore generico nella creazione sessione';
       if (error.message && error.message.includes('protocolTimeout')) {
-        errorMessage = 'Timeout comunicazione browser - sessione potrebbe essere ancora attiva';
-        console.warn(`⚠️ Timeout Puppeteer per ${sessionId} - la sessione potrebbe essere comunque attiva`);
+        errorMessage = `Timeout comunicazione browser (${error.message.includes('Runtime.evaluate') ? 'valutazione script' : 'operazione'}) - Timeout aumentato a 8-10 minuti. Se l'errore persiste, verifica la connessione internet o riprova tra qualche minuto.`;
+        console.warn(`⚠️ Timeout Puppeteer per ${sessionId} - Timeout configurato a 8-10 minuti ma insufficiente`);
+        console.warn(`💡 Suggerimento: Verifica la stabilità della connessione internet e riprova`);
       } else if (error.message && error.message.includes('Target closed')) {
         errorMessage = 'Browser chiuso inaspettatamente';
+      } else if (error.message && error.message.includes('TimeoutError')) {
+        errorMessage = 'Timeout generico - La connessione WhatsApp richiede più tempo del previsto';
       }
       
       // Aggiorna lo stato in caso di errore
@@ -743,8 +746,8 @@ class WhatsappService {
             killProcessOnBrowserClose: true,
             
             // Fix per timeout durante riconnessione basato su OpenWA docs
-            callTimeout: 300000, // 5 minuti per metodi client durante riconnessione
-            protocolTimeout: 180000, // 3 minuti per Puppeteer durante riconnessione
+            callTimeout: 600000, // 10 minuti per metodi client durante riconnessione (aumentato per timeout issues)
+            protocolTimeout: 480000, // 8 minuti per Puppeteer durante riconnessione (aumentato per timeout issues)
             qrTimeout: 120,
             authTimeout: 120,
             waitForRipeSession: 60000,
