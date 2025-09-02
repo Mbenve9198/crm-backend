@@ -309,9 +309,9 @@ class WhatsappService {
           browserWSEndpoint: false,
           // Disabilita auto-download di Chromium
           autoRefresh: true,
-          qrTimeout: 120,
-          authTimeout: 120,
-          waitForRipeSession: 60000,
+          qrTimeout: 300, // Aumentato da 120 a 300 secondi per produzione
+          authTimeout: 300, // Aumentato da 120 a 300 secondi per produzione
+          waitForRipeSession: 120000, // Aumentato da 60 a 120 secondi per produzione
           
           // CRITICAL FIX: Timeout specifici per Railway/produzione basati su OpenWA docs
           callTimeout: 720000, // 12 minuti per metodi client in produzione (aumentato per timeout issues)
@@ -338,10 +338,12 @@ class WhatsappService {
         }),
         // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
         // NOTA: chromiumArgs rimossi perché causano problemi con multi-device secondo OpenWA
-        // Aggiungi la licenza se disponibile
-        ...(process.env.OPENWA_LICENSE_KEY && { 
+        // Aggiungi la licenza se disponibile (priorità: sessione -> globale -> nessuna)
+        ...(session.config?.licenseKey ? { 
+          licenseKey: session.config.licenseKey 
+        } : process.env.OPENWA_LICENSE_KEY ? { 
           licenseKey: process.env.OPENWA_LICENSE_KEY 
-        }),
+        } : {}),
         ...session.config
       };
 
@@ -362,7 +364,11 @@ class WhatsappService {
       // Setup listener per messaggi
       this.setupMessageListeners(client, sessionId);
       
-      console.log(`✅ Sessione creata: ${sessionId}`);
+      // Log informazioni licenza per debug
+      const usedLicense = session.config?.licenseKey ? 'Licenza specifica sessione' : 
+                         process.env.OPENWA_LICENSE_KEY ? 'Licenza globale' : 'Nessuna licenza';
+      console.log(`✅ Sessione creata: ${sessionId} - Licenza: ${usedLicense}`);
+      
       return session;
 
     } catch (error) {
@@ -748,9 +754,9 @@ class WhatsappService {
             // Fix per timeout durante riconnessione basato su OpenWA docs
             callTimeout: 600000, // 10 minuti per metodi client durante riconnessione (aumentato per timeout issues)
             protocolTimeout: 480000, // 8 minuti per Puppeteer durante riconnessione (aumentato per timeout issues)
-            qrTimeout: 120,
-            authTimeout: 120,
-            waitForRipeSession: 60000,
+            qrTimeout: 300, // Aumentato da 120 a 300 secondi per riconnessione
+            authTimeout: 300, // Aumentato da 120 a 300 secondi per riconnessione
+            waitForRipeSession: 120000, // Aumentato da 60 a 120 secondi per riconnessione
             chromiumArgs: [
               '--no-sandbox',
               '--disable-setuid-sandbox',
@@ -788,10 +794,12 @@ class WhatsappService {
             }),
             // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
             // NOTA: chromiumArgs rimossi perché causano problemi con multi-device secondo OpenWA
-            // Aggiungi la licenza se disponibile
-            ...(process.env.OPENWA_LICENSE_KEY && { 
+            // Aggiungi la licenza se disponibile (priorità: sessione -> globale -> nessuna)
+            ...(session.config?.licenseKey ? { 
+              licenseKey: session.config.licenseKey 
+            } : process.env.OPENWA_LICENSE_KEY ? { 
               licenseKey: process.env.OPENWA_LICENSE_KEY 
-            }),
+            } : {}),
             ...session.config
           };
 

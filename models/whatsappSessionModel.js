@@ -91,6 +91,12 @@ const whatsappSessionSchema = new mongoose.Schema({
     authTimeout: {
       type: Number,
       default: 30
+    },
+    // Licenza OpenWA specifica per questa sessione/numero
+    licenseKey: {
+      type: String,
+      default: null,
+      trim: true
     }
   },
   
