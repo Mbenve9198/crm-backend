@@ -25,6 +25,8 @@
     "test-advanced-filters": "node scripts/testAdvancedFilters.js",
     "test-bulk-deletion": "node scripts/testBulkDeletion.js",
     "test-whatsapp-licenses": "node scripts/testWhatsappLicenses.js",
+    "debug-qr-code": "node scripts/debugQrCodeFlow.js",
+    "test-manager-permissions": "node scripts/testManagerCampaignPermissions.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

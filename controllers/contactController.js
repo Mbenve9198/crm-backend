@@ -2,6 +2,7 @@ import Contact from '../models/contactModel.js';
 import csv from 'csv-parser';
 import fs from 'fs';
 import { promisify } from 'util';
+import User from '../models/userModel.js'; // Added import for User
 
 const readFile = promisify(fs.readFile);
 const unlinkFile = promisify(fs.unlink);
@@ -1438,6 +1439,152 @@ export const updateContactStatus = async (req, res) => {
       });
     }
 
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+}; 
+
+/**
+ * Cambia owner di contatti specifici in bulk
+ * PUT /contacts/bulk-change-owner
+ */
+export const bulkChangeOwner = async (req, res) => {
+  try {
+    const { contactIds, newOwnerId } = req.body;
+    const currentUserId = req.user._id;
+
+    // Validazione input
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Array di IDs contatti obbligatorio e non vuoto'
+      });
+    }
+
+    if (!newOwnerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID del nuovo proprietario obbligatorio'
+      });
+    }
+
+    console.log(`🔄 Bulk change owner: ${contactIds.length} contatti → nuovo owner: ${newOwnerId}`);
+
+    // Verifica che il nuovo owner esista e sia attivo
+    const newOwner = await User.findById(newOwnerId);
+    if (!newOwner) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nuovo proprietario non trovato'
+      });
+    }
+
+    if (!newOwner.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il nuovo proprietario deve essere attivo'
+      });
+    }
+
+    // Verifica permessi: admin/manager possono trasferire qualsiasi contatto,
+    // agent possono trasferire solo i propri contatti
+    let contactFilter = { _id: { $in: contactIds } };
+    
+    if (req.user.role === 'agent') {
+      // Agent possono modificare solo i propri contatti
+      contactFilter.owner = currentUserId;
+      console.log(`🔒 Agent ${req.user.firstName}: limitato ai propri contatti`);
+    } else {
+      console.log(`🎯 ${req.user.role} ${req.user.firstName}: accesso a tutti i contatti`);
+    }
+
+    // Trova i contatti che l'utente può modificare
+    const contactsToUpdate = await Contact.find(contactFilter);
+    
+    if (contactsToUpdate.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun contatto trovato o non hai i permessi per modificarli'
+      });
+    }
+
+    if (contactsToUpdate.length < contactIds.length) {
+      console.warn(`⚠️ Richiesti ${contactIds.length} contatti, trovati solo ${contactsToUpdate.length} modificabili`);
+    }
+
+    // Aggiorna l'ownership dei contatti
+    const updateResult = await Contact.updateMany(
+      { _id: { $in: contactsToUpdate.map(c => c._id) } },
+      {
+        owner: newOwnerId,
+        lastModifiedBy: currentUserId,
+        updatedAt: new Date()
+      }
+    );
+
+    console.log(`✅ Aggiornati ${updateResult.modifiedCount} contatti con nuovo owner`);
+
+    // Aggiorna le statistiche degli utenti (se necessario)
+    if (updateResult.modifiedCount > 0) {
+      // Conta quanti contatti per vecchio owner
+      const ownerChanges = {};
+      contactsToUpdate.forEach(contact => {
+        const oldOwnerId = contact.owner.toString();
+        if (!ownerChanges[oldOwnerId]) {
+          ownerChanges[oldOwnerId] = 0;
+        }
+        ownerChanges[oldOwnerId]++;
+      });
+
+      // Aggiorna le statistiche
+      const statUpdates = [];
+      
+      // Rimuovi dai vecchi owner
+      for (const [oldOwnerId, count] of Object.entries(ownerChanges)) {
+        if (oldOwnerId !== newOwnerId) {
+          statUpdates.push(
+            User.findByIdAndUpdate(oldOwnerId, {
+              $inc: { 'stats.totalContacts': -count }
+            })
+          );
+        }
+      }
+      
+      // Aggiungi al nuovo owner
+      const totalTransferred = Object.values(ownerChanges).reduce((sum, count) => sum + count, 0);
+      statUpdates.push(
+        User.findByIdAndUpdate(newOwnerId, {
+          $inc: { 'stats.totalContacts': totalTransferred }
+        })
+      );
+
+      await Promise.all(statUpdates);
+    }
+
+    res.json({
+      success: true,
+      message: `Proprietario cambiato per ${updateResult.modifiedCount} contatto${updateResult.modifiedCount !== 1 ? 'i' : ''}`,
+      data: {
+        requestedCount: contactIds.length,
+        updatedCount: updateResult.modifiedCount,
+        newOwner: {
+          id: newOwner._id,
+          name: `${newOwner.firstName} ${newOwner.lastName}`,
+          email: newOwner.email
+        },
+        changedBy: {
+          id: currentUserId,
+          name: `${req.user.firstName} ${req.user.lastName}`,
+          email: req.user.email
+        },
+        changedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore nel cambio owner bulk:', error);
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'

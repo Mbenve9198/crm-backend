@@ -183,7 +183,7 @@ export const createCampaign = async (req, res) => {
     }
 
     // Ottieni contatti target
-    const contacts = await getTargetContacts(targetList, contactFilters, userId);
+    const contacts = await getTargetContacts(targetList, contactFilters, userId, req.user);
 
     if (contacts.length === 0) {
       return res.status(400).json({
@@ -719,7 +719,7 @@ export const previewCampaign = async (req, res) => {
     const { targetList, contactFilters, messageTemplate, limit = 5 } = req.body;
 
     // Ottieni contatti target
-    const contacts = await getTargetContacts(targetList, contactFilters, userId);
+    const contacts = await getTargetContacts(targetList, contactFilters, userId, req.user);
     
     if (contacts.length === 0) {
       return res.status(400).json({
@@ -776,8 +776,19 @@ function extractTemplateVariables(template) {
 /**
  * Ottieni contatti target basati sui filtri
  */
-async function getTargetContacts(targetList, contactFilters, userId) {
-  const filter = { owner: userId };
+async function getTargetContacts(targetList, contactFilters, userId, user = null) {
+  // Filtro di ownership: manager e admin possono accedere a tutti i contatti
+  const filter = {};
+  
+  // Solo agent e viewer sono limitati ai propri contatti
+  if (user && user.hasRole('manager')) {
+    // Manager e admin possono accedere a tutti i contatti
+    console.log(`🎯 ${user.firstName} ${user.lastName} (${user.role}): accesso a tutti i contatti per campagna WhatsApp`);
+  } else {
+    // Agent e viewer limitati ai propri contatti
+    filter.owner = userId;
+    console.log(`🔒 Utente limitato ai propri contatti: ${userId}`);
+  }
   
   // Filtra per lista
   if (targetList && targetList !== 'all') {
@@ -802,6 +813,8 @@ async function getTargetContacts(targetList, contactFilters, userId) {
   
   // ✅ LOGGING DIAGNOSTICO: Analizza perché non vengono trovati contatti
   console.log('🔍 Debug getTargetContacts:');
+  console.log('   UserId:', userId);
+  console.log('   User role:', user ? user.role : 'Non disponibile');
   console.log('   Filter applicato:', JSON.stringify(filter, null, 2));
   
   const contacts = await Contact.find(filter).select('name phone email properties');
