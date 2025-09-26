@@ -233,6 +233,39 @@ class WhatsappService {
 
       console.log('📋 Sessione trovata nel database, procedo con OpenWA...');
 
+      // 🔑 GESTIONE LICENZE PER UTENTE - Recupera i dati dell'utente per determinare la licenza
+      let licenseKey = process.env.OPENWA_LICENSE_KEY; // Licenza di fallback
+      
+      try {
+        const { default: User } = await import('../models/userModel.js');
+        const user = await User.findById(owner);
+        
+        if (user) {
+          console.log(`👤 Utente trovato: ${user.firstName} ${user.lastName} (${user.email})`);
+          
+          // Determina la licenza basandosi sull'email dell'utente
+          if (user.email === 'marco@menuchat.com') {
+            // Marco Benvenuti usa la licenza esistente (quella già configurata)
+            licenseKey = process.env.OPENWA_LICENSE_KEY;
+            console.log('🔑 Marco Benvenuti: usando licenza esistente');
+          } else if (user.email === 'federico@menuchat.com') {
+            // Federico Desantis usa la nuova licenza
+            licenseKey = '38E12BAB-83DE4201-9C8473A6-D094A67B';
+            console.log('🔑 Federico Desantis: usando licenza specifica');
+          } else {
+            // Altri utenti usano la licenza di default
+            console.log(`🔑 Utente ${user.email}: usando licenza di default`);
+          }
+          
+          console.log(`🎯 Licenza selezionata per ${user.firstName}: ${licenseKey ? licenseKey.substring(0, 8) + '...' : 'Nessuna'}`);
+        } else {
+          console.warn(`⚠️ Utente non trovato per ID: ${owner}, usando licenza di default`);
+        }
+      } catch (userError) {
+        console.error('❌ Errore nel recupero dati utente:', userError);
+        console.log('🔄 Fallback: usando licenza di default');
+      }
+
       // CRITICAL FIX: Forza il percorso di storage per node-persist
       const storagePathForSession = process.env.OPENWA_SESSION_DATA_PATH || path.join(os.tmpdir(), 'wa-storage');
       
@@ -338,9 +371,9 @@ class WhatsappService {
         }),
         // Configurazione per ambienti headless (rimosso chromiumArgs per multi-device)
         // NOTA: chromiumArgs rimossi perché causano problemi con multi-device secondo OpenWA
-        // Aggiungi la licenza se disponibile
-        ...(process.env.OPENWA_LICENSE_KEY && { 
-          licenseKey: process.env.OPENWA_LICENSE_KEY 
+        // Aggiungi la licenza specifica per l'utente
+        ...(licenseKey && { 
+          licenseKey: licenseKey 
         }),
         ...session.config
       };
@@ -362,7 +395,7 @@ class WhatsappService {
       // Setup listener per messaggi
       this.setupMessageListeners(client, sessionId);
       
-      console.log(`✅ Sessione creata: ${sessionId}`);
+      console.log(`✅ Sessione creata: ${sessionId} - Licenza: ${licenseKey ? 'Licenza specifica utente' : 'Nessuna licenza'}`);
       return session;
 
     } catch (error) {
