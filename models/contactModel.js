@@ -67,6 +67,27 @@ const contactSchema = new mongoose.Schema({
     }
   },
   
+  // Tipo di sorgente del contatto
+  source: {
+    type: String,
+    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_form', 'inbound_api'],
+    default: 'manual',
+    index: true
+  },
+
+  // Dati specifici per lead Rank Checker (solo se source = inbound_rank_checker)
+  rankCheckerData: {
+    placeId: String,
+    keyword: String,
+    ranking: mongoose.Schema.Types.Mixed, // Contiene mainRank, competitorsAhead, strategicResults, etc
+    hasDigitalMenu: Boolean,
+    willingToAdoptMenu: Boolean,
+    dailyCovers: Number,
+    estimatedMonthlyReviews: Number,
+    qualifiedAt: Date,
+    leadCapturedAt: Date
+  },
+  
   // Proprietà dinamiche (oggetto chiave/valore per dati personalizzati)
   properties: {
     type: mongoose.Schema.Types.Mixed,

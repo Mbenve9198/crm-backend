@@ -13,6 +13,7 @@ import whatsappTemplateRoutes from './routes/whatsappTemplateRoutes.js';
 import whatsappSessionRoutes from './routes/whatsappSessionRoutes.js';
 import whatsappCampaignRoutes from './routes/whatsappCampaignRoutes.js';
 import sessionMonitorRoutes from './routes/sessionMonitorRoutes.js';
+import inboundLeadRoutes from './routes/inboundLeadRoutes.js';
 import { statusCallback, recordingStatusCallback, testWebhook, answerCall, dialComplete, getRecordingProxy } from './controllers/callController.js';
 import whatsappService from './services/whatsappService.js';
 import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
@@ -298,6 +299,9 @@ app.get('/health', async (req, res) => {
 /**
  * WEBHOOK ROUTES PUBBLICHE (PRIMA DI TUTTO - SENZA AUTENTICAZIONE)
  */
+
+// Webhook per lead inbound da MenuChat - PUBBLICO
+app.use('/api/inbound', inboundLeadRoutes);
 
 // Webhook Twilio per stato chiamate - DEVE essere pubblico
 app.post('/api/calls/status-callback', statusCallback);
