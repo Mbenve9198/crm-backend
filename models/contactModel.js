@@ -80,6 +80,17 @@ const contactSchema = new mongoose.Schema({
     placeId: String,
     keyword: String,
     ranking: mongoose.Schema.Types.Mixed, // Contiene mainRank, competitorsAhead, strategicResults, etc
+    // Dati ristorante da Google Maps
+    restaurantData: {
+      address: String,
+      rating: Number,
+      reviewCount: Number,
+      coordinates: {
+        lat: Number,
+        lng: Number
+      }
+    },
+    // Dati di qualificazione
     hasDigitalMenu: Boolean,
     willingToAdoptMenu: Boolean,
     dailyCovers: Number,

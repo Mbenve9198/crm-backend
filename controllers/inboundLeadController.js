@@ -88,6 +88,15 @@ export const receiveRankCheckerLead = async (req, res) => {
           strategicResults: rankingResults?.strategicResults,
           fullResults: rankingResults // Salva tutto per riferimento
         },
+        restaurantData: {
+          address: rankingResults?.userRestaurant?.address || '',
+          rating: rankingResults?.userRestaurant?.rating || null,
+          reviewCount: rankingResults?.userRestaurant?.reviews || 0,
+          coordinates: {
+            lat: rankingResults?.userRestaurant?.coordinates?.lat || null,
+            lng: rankingResults?.userRestaurant?.coordinates?.lng || null
+          }
+        },
         hasDigitalMenu: qualificationData?.hasDigitalMenu,
         willingToAdoptMenu: qualificationData?.willingToAdoptMenu,
         dailyCovers: qualificationData?.dailyCovers,
