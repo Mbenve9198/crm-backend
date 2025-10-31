@@ -191,12 +191,15 @@ export const getContacts = async (req, res) => {
     if (req.user.role === 'agent') {
       // Gli agent vedono solo i loro contatti
       filter.owner = req.user._id;
-    } else if (req.user.hasRole('manager')) {
-      // Manager e admin possono filtrare per owner specifico
-      if (owner) {
+    } else if (req.user.role === 'manager' || req.user.role === 'admin') {
+      // Manager e admin possono filtrare per owner specifico O vedere tutti
+      if (owner && owner !== 'all') {
         filter.owner = owner;
       }
-      // Altrimenti vedono tutti i contatti
+      // Se owner è 'all' o undefined, non aggiungere filtro owner (vedono tutti)
+    } else {
+      // Viewer o altri ruoli - vedono solo i loro contatti per sicurezza
+      filter.owner = req.user._id;
     }
     
     if (list) {
