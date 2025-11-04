@@ -11,7 +11,7 @@ const contactSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Il nome è obbligatorio'],
     trim: true,
-    maxLength: [100, 'Il nome non può superare 100 caratteri']
+    maxLength: [500, 'Il nome non può superare 500 caratteri'] // 🚀 Aumentato per nomi lunghi da Google Maps
   },
   
   // Email del contatto (opzionale)
