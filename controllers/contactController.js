@@ -1022,7 +1022,7 @@ export const importCsvFile = async (req, res) => {
       });
     }
 
-    const { mapping, duplicateStrategy = 'skip' } = req.body;
+    const { mapping, duplicateStrategy = 'skip', targetList } = req.body;
     
     if (!mapping) {
       return res.status(400).json({
@@ -1038,6 +1038,11 @@ export const importCsvFile = async (req, res) => {
     let skippedCount = 0;
     let createdCount = 0;
     let updatedCount = 0;
+    
+    // 📋 NUOVO: Lista target per tutti i contatti importati
+    const parsedTargetList = targetList && typeof targetList === 'string' ? targetList.trim() : null;
+    console.log(`📋 Target list for import: ${parsedTargetList || 'none'}`);
+
 
     fs.createReadStream(req.file.path)
       .pipe(csv())
@@ -1056,7 +1061,7 @@ export const importCsvFile = async (req, res) => {
             if (!value) continue;
 
             if (targetField === 'lists') {
-              // Gestisce le liste separate da virgola
+              // Gestisce le liste separate da virgola dal CSV
               contactData.lists = value.split(',').map(list => list.trim()).filter(Boolean);
             } else if (targetField.startsWith('properties.')) {
               // Gestisce le proprietà dinamiche
@@ -1078,6 +1083,17 @@ export const importCsvFile = async (req, res) => {
             return;
           }
 
+          // 📋 NUOVO: Aggiungi targetList se specificata
+          if (parsedTargetList) {
+            if (!contactData.lists) {
+              contactData.lists = [];
+            }
+            // Aggiungi targetList solo se non è già presente
+            if (!contactData.lists.includes(parsedTargetList)) {
+              contactData.lists.push(parsedTargetList);
+            }
+          }
+
           // Gestisce i duplicati (solo se email è fornita)
           let existingContact = null;
           if (contactData.email && contactData.email.trim()) {
@@ -1093,6 +1109,12 @@ export const importCsvFile = async (req, res) => {
             } else if (duplicateStrategy === 'update') {
               // Aggiorna il contatto esistente
               Object.assign(existingContact, contactData);
+              
+              // 📋 Aggiungi targetList anche al contatto esistente
+              if (parsedTargetList && !existingContact.lists.includes(parsedTargetList)) {
+                existingContact.lists.push(parsedTargetList);
+              }
+              
               await existingContact.save();
               updatedCount++;
               return;
@@ -1121,7 +1143,9 @@ export const importCsvFile = async (req, res) => {
 
         res.json({
           success: true,
-          message: 'Importazione CSV completata',
+          message: parsedTargetList 
+            ? `Importazione CSV completata. ${createdCount + updatedCount} contatti aggiunti alla lista "${parsedTargetList}"`
+            : 'Importazione CSV completata',
           data: {
             summary: {
               totalProcessed: processedCount,
@@ -1131,7 +1155,8 @@ export const importCsvFile = async (req, res) => {
               errors: errors.length
             },
             errors: errors.slice(0, 10), // Mostra solo i primi 10 errori
-            duplicateStrategy
+            duplicateStrategy,
+            targetList: parsedTargetList // 📋 Info sulla lista target
           }
         });
       })
