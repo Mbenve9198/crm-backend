@@ -947,21 +947,33 @@ class WhatsappService {
       }
 
       console.log(`📊 Processing ${pendingMessages.length} messages for campaign: ${campaign.name} (priority: ${priority})`);
+      
+      // 🔍 Debug: Log dettagli messaggi
+      pendingMessages.forEach((msg, idx) => {
+        console.log(`  📬 Messaggio ${idx + 1}: Seq ${msg.sequenceIndex} (${msg.sequenceIndex === 0 ? 'PRINCIPALE' : 'FOLLOW-UP'}), contatto: ${msg.phoneNumber}, scheduled: ${msg.followUpScheduledFor || 'subito'}`);
+      });
 
       // Invia messaggi con locking per prevenire duplicati
       let messagesSentInBatch = 0;
       
       for (const messageData of pendingMessages) {
         try {
-          // Verifica rate limit prima di ogni messaggio
-          const currentRateCheck = await smartRateLimiter.canSendMessage(
-            campaign.whatsappSessionId, 
-            priority
-          );
+          // 🎤 NUOVO: Non applicare rate limiting ai follow-up dello stesso contatto
+          const isFollowUp = messageData.sequenceIndex > 0;
+          
+          if (!isFollowUp) {
+            // Solo messaggi principali rispettano il rate limiting
+            const currentRateCheck = await smartRateLimiter.canSendMessage(
+              campaign.whatsappSessionId, 
+              priority
+            );
 
-          if (!currentRateCheck.allowed) {
-            console.log(`⏳ Rate limit raggiunto dopo ${messagesSentInBatch} messaggi`);
-            break;
+            if (!currentRateCheck.allowed) {
+              console.log(`⏳ Rate limit raggiunto dopo ${messagesSentInBatch} messaggi (solo principali)`);
+              break;
+            }
+          } else {
+            console.log(`🎤 Follow-up sequenza ${messageData.sequenceIndex} - skip rate limiting`);
           }
 
           // Usa message locking per prevenire duplicati
@@ -1156,8 +1168,13 @@ class WhatsappService {
       // Aggiorna stato messaggio IMMEDIATAMENTE solo se successo
       await campaign.markMessageSent(messageData.contactId, messageId, messageData.sequenceIndex);
 
-      // Registra nel rate limiter
-      await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
+      // 🎤 NUOVO: Registra nel rate limiter SOLO i messaggi principali (non i follow-up)
+      if (messageData.sequenceIndex === 0) {
+        await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
+        console.log(`⏱️ Rate limiter aggiornato per messaggio principale`);
+      } else {
+        console.log(`🎤 Follow-up ${messageData.sequenceIndex} - rate limiter NON aggiornato`);
+      }
 
       // Se è un messaggio principale (sequenceIndex = 0), programma i follow-up
       if (messageData.sequenceIndex === 0 && campaign.messageSequences && campaign.messageSequences.length > 0) {

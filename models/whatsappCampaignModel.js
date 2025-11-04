@@ -379,12 +379,20 @@ whatsappCampaignSchema.methods.updateStats = function() {
 whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
   const now = new Date();
   
+  console.log(`🔍 getNextMessages chiamato per campagna ${this.name}, ora: ${now.toISOString()}`);
+  
   // Controlla fascia oraria prima di restituire messaggi
   if (!this.isInAllowedTimeframe()) {
+    console.log(`⏰ Fuori fascia oraria per campagna ${this.name}`);
     return []; // Nessun messaggio se fuori fascia oraria
   }
   
-  return this.messageQueue
+  // Debug: conta messaggi per tipo
+  const pendingPrimary = this.messageQueue.filter(m => m.status === 'pending' && m.sequenceIndex === 0).length;
+  const pendingFollowUps = this.messageQueue.filter(m => m.status === 'pending' && m.sequenceIndex > 0).length;
+  console.log(`📊 Messaggi pending: ${pendingPrimary} principali, ${pendingFollowUps} follow-up`);
+  
+  const messages = this.messageQueue
     .filter(m => {
       if (m.status !== 'pending') return false;
       
@@ -395,6 +403,12 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
       
       // Follow-up (sequenceIndex > 0)
       if (m.sequenceIndex > 0) {
+        // Debug per questo specifico follow-up
+        const scheduledFor = m.followUpScheduledFor ? new Date(m.followUpScheduledFor) : null;
+        const isTimeReady = scheduledFor && scheduledFor <= now;
+        
+        console.log(`  🔍 Follow-up seq ${m.sequenceIndex}: scheduled ${scheduledFor?.toISOString()}, now: ${now.toISOString()}, ready: ${isTimeReady}, hasResponse: ${m.hasReceivedResponse}`);
+        
         // Deve essere il momento giusto per il follow-up
         if (!m.followUpScheduledFor || m.followUpScheduledFor > now) {
           return false;
@@ -403,6 +417,7 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
         // Se la condizione è 'no_response', controlla che non ci sia stata risposta
         const sequence = this.messageSequences.find(seq => seq.id === m.sequenceId);
         if (sequence && sequence.condition === 'no_response' && m.hasReceivedResponse) {
+          console.log(`  ⏭️ Follow-up seq ${m.sequenceIndex} skipped - contatto ha già risposto`);
           return false;
         }
         
@@ -412,6 +427,9 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
       return false;
     })
     .slice(0, limit);
+    
+  console.log(`📬 Trovati ${messages.length} messaggi pronti da inviare`);
+  return messages;
 };
 
 /**
@@ -695,9 +713,14 @@ whatsappCampaignSchema.methods.getNextFollowUps = function(limit = 10) {
  * Programma i follow-up per un contatto dopo l'invio del messaggio principale
  */
 whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, phoneNumber) {
+  console.log(`🔍 scheduleFollowUps chiamato per contatto ${contactId}, phone: ${phoneNumber}`);
+  
   if (!this.messageSequences || this.messageSequences.length === 0) {
+    console.log(`⚠️ Nessuna sequenza configurata nella campagna ${this.name}`);
     return; // Nessuna sequenza configurata
   }
+
+  console.log(`📋 Trovate ${this.messageSequences.length} sequenze configurate`);
 
   // ✅ SOLUZIONE 2: Controlla se esistono già follow-up per questo contatto
   const existingFollowUps = this.messageQueue.filter(m => 
@@ -725,8 +748,12 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
     // Calcola quando inviare questo follow-up
     const followUpTime = new Date(sentTime.getTime() + sequence.delayMinutes * 60 * 1000);
     
+    console.log(`  ⏰ Sequenza ${i + 1}: delay ${sequence.delayMinutes} min, invio programmato: ${followUpTime.toISOString()}`);
+    
     // Compila il messaggio della sequenza
     const compiledMessage = await this.compileMessageTemplate(sequence.messageTemplate, contactId);
+    console.log(`  📝 Messaggio compilato: "${compiledMessage.substring(0, 50)}${compiledMessage.length > 50 ? '...' : ''}"`);
+
     
     // Prepara il messaggio per la coda
     const queueMessage = {
