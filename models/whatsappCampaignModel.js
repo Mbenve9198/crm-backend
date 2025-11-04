@@ -66,7 +66,8 @@ const whatsappCampaignSchema = new mongoose.Schema({
     },
     messageTemplate: {
       type: String,
-      required: true,
+      required: false, // 🎤 Opzionale se c'è un attachment vocale
+      default: '', // Default stringa vuota
       maxLength: [4000, 'Il messaggio della sequenza non può superare 4000 caratteri']
     },
     delayMinutes: {
