@@ -911,74 +911,36 @@ export const analyzeCsvFile = async (req, res) => {
 
     const results = [];
     let headers = null;
+    const SAMPLE_SIZE = 5; // Numero di righe di esempio
+    let streamDestroyed = false;
 
     // Legge solo le prime righe per analizzare la struttura
-    fs.createReadStream(req.file.path)
-      .pipe(csv())
+    const stream = fs.createReadStream(req.file.path);
+    const csvStream = csv();
+    
+    stream
+      .pipe(csvStream)
       .on('headers', (headerList) => {
         headers = headerList;
       })
       .on('data', (data) => {
-        if (results.length < 5) { // Legge solo le prime 5 righe come esempio
+        if (results.length < SAMPLE_SIZE) {
           results.push(data);
+        } else if (!streamDestroyed) {
+          // 🚀 OTTIMIZZAZIONE: Distruggi lo stream dopo aver letto le prime righe
+          streamDestroyed = true;
+          csvStream.destroy();
+          stream.destroy();
         }
       })
       .on('end', async () => {
-        // Pulisce il file temporaneo
-        await unlinkFile(req.file.path);
-
-        // Recupera le proprietà dinamiche esistenti dal database
-        let existingProperties = [];
-        try {
-          const propertyKeys = await Contact.aggregate([
-            { $match: { properties: { $exists: true, $ne: null } } },
-            { $project: { properties: { $objectToArray: '$properties' } } },
-            { $unwind: '$properties' },
-            { $group: { _id: '$properties.k' } },
-            { $sort: { _id: 1 } }
-          ]);
-          existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
-        } catch (error) {
-          console.warn('⚠️ Errore nel recupero delle proprietà dinamiche:', error.message);
+        await processAnalysisResults();
+      })
+      .on('close', async () => {
+        // 🚀 Chiamato quando lo stream viene distrutto prematuramente
+        if (streamDestroyed && results.length >= SAMPLE_SIZE) {
+          await processAnalysisResults();
         }
-
-        // Costruisce le opzioni di mappatura
-        const mappingInstructions = {
-          'name': 'Campo nome del contatto (obbligatorio)',
-          'email': 'Campo email (opzionale ma unico se fornito)',
-          'phone': 'Campo telefono (opzionale)',
-          'lists': 'Liste separate da virgola (es: "lista1,lista2")',
-          'ignore': 'Ignora questa colonna'
-        };
-
-        // Aggiunge le proprietà dinamiche esistenti
-        existingProperties.forEach(prop => {
-          mappingInstructions[`properties.${prop}`] = `Proprietà esistente: ${prop}`;
-        });
-
-        // Aggiunge esempi per nuove proprietà
-        mappingInstructions['properties.company'] = 'Esempio: crea proprietà "company"';
-        mappingInstructions['properties.customField'] = 'Esempio: crea proprietà personalizzata';
-
-        res.json({
-          success: true,
-          data: {
-            headers,
-            sampleRows: results,
-            totalPreviewRows: results.length,
-            availableFields: {
-              fixed: ['name', 'email', 'phone', 'lists'],
-              existingProperties: existingProperties,
-              newProperties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
-            },
-            mappingInstructions,
-            dynamicPropertiesInfo: {
-              existing: existingProperties,
-              count: existingProperties.length,
-              usage: 'Usa "properties.nomeProp" per mappare alle proprietà esistenti o crearne di nuove'
-            }
-          }
-        });
       })
       .on('error', async (error) => {
         console.error('Errore nell\'analisi del CSV:', error);
@@ -988,6 +950,65 @@ export const analyzeCsvFile = async (req, res) => {
           message: 'Errore nell\'analisi del file CSV'
         });
       });
+
+    // 🚀 Funzione per processare i risultati (evita duplicazione codice)
+    const processAnalysisResults = async () => {
+      // Pulisce il file temporaneo
+      await unlinkFile(req.file.path);
+
+      // Recupera le proprietà dinamiche esistenti dal database
+      let existingProperties = [];
+      try {
+        const propertyKeys = await Contact.aggregate([
+          { $match: { properties: { $exists: true, $ne: null } } },
+          { $project: { properties: { $objectToArray: '$properties' } } },
+          { $unwind: '$properties' },
+          { $group: { _id: '$properties.k' } },
+          { $sort: { _id: 1 } }
+        ]);
+        existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
+      } catch (error) {
+        console.warn('⚠️ Errore nel recupero delle proprietà dinamiche:', error.message);
+      }
+
+      // Costruisce le opzioni di mappatura
+      const mappingInstructions = {
+        'name': 'Campo nome del contatto (obbligatorio)',
+        'email': 'Campo email (opzionale ma unico se fornito)',
+        'phone': 'Campo telefono (opzionale)',
+        'lists': 'Liste separate da virgola (es: "lista1,lista2")',
+        'ignore': 'Ignora questa colonna'
+      };
+
+      // Aggiunge le proprietà dinamiche esistenti
+      existingProperties.forEach(prop => {
+        mappingInstructions[`properties.${prop}`] = `Proprietà esistente: ${prop}`;
+      });
+
+      // Aggiunge esempi per nuove proprietà
+      mappingInstructions['properties.company'] = 'Esempio: crea proprietà "company"';
+      mappingInstructions['properties.customField'] = 'Esempio: crea proprietà personalizzata';
+
+      res.json({
+        success: true,
+        data: {
+          headers,
+          sampleRows: results,
+          totalPreviewRows: results.length,
+          availableFields: {
+            fixed: ['name', 'email', 'phone', 'lists'],
+            existingProperties: existingProperties,
+            newProperties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
+          },
+          mappingInstructions,
+          dynamicPropertiesInfo: {
+            existing: existingProperties,
+            count: existingProperties.length,
+            usage: 'Usa "properties.nomeProp" per mappare alle proprietà esistenti o crearne di nuove'
+          }
+        }
+      });
+    };
 
   } catch (error) {
     console.error('Errore nell\'analisi del CSV:', error);

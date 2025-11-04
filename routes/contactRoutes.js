@@ -57,7 +57,7 @@ const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 // Limite di 5MB
+    fileSize: 100 * 1024 * 1024 // 🚀 Limite di 100MB per CSV grandi
   }
 });
 
@@ -130,7 +130,7 @@ router.use((error, req, res, next) => {
     if (error.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'Il file è troppo grande. Massimo 5MB permessi.'
+        message: 'Il file è troppo grande. Massimo 100MB permessi.'
       });
     }
     if (error.code === 'LIMIT_UNEXPECTED_FILE') {
