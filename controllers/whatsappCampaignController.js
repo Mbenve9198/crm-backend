@@ -176,9 +176,60 @@ export const createCampaign = async (req, res) => {
     // Processa le sequenze di messaggi se presenti
     let processedSequences = [];
     if (messageSequences && Array.isArray(messageSequences) && messageSequences.length > 0) {
-      processedSequences = messageSequences.map(seq => ({
-        ...seq,
-        templateVariables: extractTemplateVariables(seq.messageTemplate)
+      processedSequences = await Promise.all(messageSequences.map(async (seq) => {
+        const processed = {
+          ...seq,
+          templateVariables: extractTemplateVariables(seq.messageTemplate || '')
+        };
+        
+        // 🎤 NUOVO: Se la sequenza ha un attachment con DataURL, salvalo come file
+        if (seq.attachment && seq.attachment.url && seq.attachment.url.startsWith('data:')) {
+          try {
+            console.log(`🎤 Conversione DataURL in file per sequenza ${seq.id}...`);
+            
+            // Estrai il DataURL
+            const dataUrl = seq.attachment.url;
+            const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+            
+            if (matches) {
+              const mimeType = matches[1];
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              
+              // Determina estensione file dal mime type
+              const ext = mimeType.includes('webm') ? 'webm' 
+                        : mimeType.includes('ogg') ? 'ogg'
+                        : mimeType.includes('mp3') || mimeType.includes('mpeg') ? 'mp3'
+                        : mimeType.includes('wav') ? 'wav'
+                        : mimeType.includes('m4a') || mimeType.includes('mp4') ? 'm4a'
+                        : 'webm';
+              
+              // Genera nome file univoco
+              const filename = `audio-${Date.now()}-${Math.round(Math.random() * 1E9)}.${ext}`;
+              const uploadDir = path.join(process.cwd(), 'uploads', 'whatsapp');
+              await fs.mkdir(uploadDir, { recursive: true });
+              
+              const filePath = path.join(uploadDir, filename);
+              
+              // Salva il file
+              await fs.writeFile(filePath, buffer);
+              
+              console.log(`✅ File audio salvato: ${filename} (${(buffer.length / 1024).toFixed(2)} KB)`);
+              
+              // Aggiorna l'attachment con il percorso del file
+              processed.attachment = {
+                ...seq.attachment,
+                url: `/uploads/whatsapp/${filename}`,
+                filename: seq.attachment.filename || filename
+              };
+            }
+          } catch (error) {
+            console.error('❌ Errore conversione DataURL:', error);
+            throw new Error(`Errore nel salvataggio del vocale per la sequenza ${seq.id}`);
+          }
+        }
+        
+        return processed;
       }));
     }
 
