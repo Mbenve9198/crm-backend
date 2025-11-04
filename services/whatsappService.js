@@ -652,6 +652,10 @@ class WhatsappService {
           case 'audio':
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
+          case 'voice': // 🎤 NUOVO: Supporto messaggi vocali PTT
+            messageId = await client.sendPtt(chatId, attachment.url);
+            console.log(`🎤 Messaggio vocale inviato (${attachment.duration || '?'}s)`);
+            break;
           case 'video':
             messageId = await client.sendFile(chatId, attachment.url, attachment.filename, attachment.caption || '');
             break;
@@ -1109,12 +1113,26 @@ class WhatsappService {
         return null;
       }
 
+      // 🎤 NUOVO: Determina quali allegati inviare
+      // Se il messaggio ha un allegato specifico (sequenza), usa quello
+      // Altrimenti usa gli allegati della campagna principale
+      let attachmentsToSend = campaign.attachments || [];
+      
+      if (messageData.attachment && messageData.attachment.type && messageData.attachment.url) {
+        // Messaggio di sequenza con allegato specifico
+        attachmentsToSend = [messageData.attachment];
+        console.log(`🎤 Invio allegato ${messageData.attachment.type} per sequenza ${messageData.sequenceIndex}`);
+      } else if (messageData.sequenceIndex === 0 && campaign.attachments && campaign.attachments.length > 0) {
+        // Messaggio principale con allegati campagna
+        console.log(`📎 Invio ${campaign.attachments.length} allegati per messaggio principale`);
+      }
+
       // Invia il messaggio via OpenWA
       const messageId = await this.sendMessage(
         campaign.whatsappSessionId,
         contact.phone,
         messageData.compiledMessage,
-        campaign.attachments
+        attachmentsToSend
       );
 
       // ✅ FIX: Gestisce errore "Number not linked to WhatsApp Account"

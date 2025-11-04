@@ -33,7 +33,7 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024 // 10MB
   },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|mp3|wav|pdf|doc|docx|txt/;
+    const allowedTypes = /jpeg|jpg|png|gif|mp4|mov|avi|mp3|wav|ogg|opus|m4a|aac|webm|pdf|doc|docx|txt/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
     const mimetype = allowedTypes.test(file.mimetype);
 
@@ -710,6 +710,161 @@ export const uploadAttachments = [
 ];
 
 /**
+ * 🎤 Upload audio/vocale per una sequenza specifica
+ * POST /whatsapp-campaigns/:id/sequences/:sequenceId/audio
+ */
+export const uploadSequenceAudio = [
+  upload.single('audio'),
+  async (req, res) => {
+    try {
+      const { id: campaignId, sequenceId } = req.params;
+      const userId = req.user._id;
+
+      const campaign = await WhatsappCampaign.findOne({
+        _id: campaignId,
+        owner: userId
+      });
+
+      if (!campaign) {
+        return res.status(404).json({
+          success: false,
+          message: 'Campagna non trovata'
+        });
+      }
+
+      if (!['draft', 'scheduled'].includes(campaign.status)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Impossibile modificare una campagna in esecuzione'
+        });
+      }
+
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'File audio non fornito'
+        });
+      }
+
+      // Trova la sequenza specifica
+      const sequence = campaign.messageSequences.find(seq => seq.id === sequenceId);
+      
+      if (!sequence) {
+        return res.status(404).json({
+          success: false,
+          message: 'Sequenza non trovata'
+        });
+      }
+
+      // Crea l'oggetto allegato audio
+      const audioAttachment = {
+        type: 'voice', // Tipo specifico per vocali PTT
+        filename: req.file.originalname,
+        url: `/uploads/whatsapp/${req.file.filename}`,
+        size: req.file.size,
+        duration: req.body.duration ? parseInt(req.body.duration) : null // Durata in secondi se fornita
+      };
+
+      // Aggiungi/aggiorna l'allegato della sequenza
+      sequence.attachment = audioAttachment;
+      
+      await campaign.save();
+
+      console.log(`🎤 Audio caricato per sequenza ${sequenceId}: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)} KB)`);
+
+      res.json({
+        success: true,
+        data: {
+          attachment: audioAttachment,
+          sequenceId: sequenceId
+        },
+        message: 'Audio caricato con successo per la sequenza'
+      });
+
+    } catch (error) {
+      console.error('Errore upload audio sequenza:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Errore interno del server'
+      });
+    }
+  }
+];
+
+/**
+ * 🗑️ Rimuovi audio da una sequenza
+ * DELETE /whatsapp-campaigns/:id/sequences/:sequenceId/audio
+ */
+export const deleteSequenceAudio = async (req, res) => {
+  try {
+    const { id: campaignId, sequenceId } = req.params;
+    const userId = req.user._id;
+
+    const campaign = await WhatsappCampaign.findOne({
+      _id: campaignId,
+      owner: userId
+    });
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: 'Campagna non trovata'
+      });
+    }
+
+    if (!['draft', 'scheduled'].includes(campaign.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Impossibile modificare una campagna in esecuzione'
+      });
+    }
+
+    // Trova la sequenza specifica
+    const sequence = campaign.messageSequences.find(seq => seq.id === sequenceId);
+    
+    if (!sequence) {
+      return res.status(404).json({
+        success: false,
+        message: 'Sequenza non trovata'
+      });
+    }
+
+    if (!sequence.attachment) {
+      return res.status(404).json({
+        success: false,
+        message: 'Nessun audio associato a questa sequenza'
+      });
+    }
+
+    // Elimina il file fisico se esiste
+    try {
+      const filePath = path.join(process.cwd(), sequence.attachment.url);
+      await fs.unlink(filePath);
+      console.log(`🗑️ File audio eliminato: ${filePath}`);
+    } catch (error) {
+      console.warn('⚠️ Errore eliminazione file fisico (potrebbe non esistere):', error.message);
+    }
+
+    // Rimuovi l'allegato dalla sequenza
+    sequence.attachment = undefined;
+    
+    await campaign.save();
+
+    res.json({
+      success: true,
+      message: 'Audio rimosso dalla sequenza'
+    });
+
+  } catch (error) {
+    console.error('Errore rimozione audio sequenza:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * Anteprima campagna (compila messaggi senza salvare)
  * POST /whatsapp-campaigns/preview
  */
@@ -970,7 +1125,22 @@ function getContactVariable(contact, variable) {
  */
 function getFileType(mimetype) {
   if (mimetype.startsWith('image/')) return 'image';
-  if (mimetype.startsWith('audio/')) return 'audio';
+  if (mimetype.startsWith('audio/')) return 'audio'; // Per allegati generici
   if (mimetype.startsWith('video/')) return 'video';
   return 'document';
+}
+
+/**
+ * Determina se un file audio è un vocale (per sequenze)
+ */
+function isVoiceFile(mimetype) {
+  const voiceTypes = [
+    'audio/ogg',
+    'audio/opus', 
+    'audio/webm',
+    'audio/mpeg', // MP3
+    'audio/mp4',  // M4A
+    'audio/wav'
+  ];
+  return voiceTypes.some(type => mimetype.includes(type));
 } 

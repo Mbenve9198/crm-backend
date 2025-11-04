@@ -84,7 +84,21 @@ const whatsappCampaignSchema = new mongoose.Schema({
       type: Boolean,
       default: true
     },
-    templateVariables: [String] // Variabili rilevate nel template della sequenza
+    templateVariables: [String], // Variabili rilevate nel template della sequenza
+    
+    // 🎤 NUOVO: Supporto per allegati audio/vocali nelle sequenze
+    attachment: {
+      type: {
+        type: String,
+        enum: ['voice', 'image', 'video', 'document'],
+        required: false
+      },
+      filename: String,
+      url: String,
+      size: Number,
+      duration: Number, // Durata in secondi (per audio)
+      caption: String
+    }
   }],
   
   // Media allegati
@@ -252,6 +266,17 @@ const whatsappCampaignSchema = new mongoose.Schema({
       type: String,
       enum: ['no_response', 'always'],
       default: 'always' // Condizione per inviare il messaggio
+    },
+    // 🎤 NUOVO: Allegato per questo specifico messaggio della sequenza
+    attachment: {
+      type: {
+        type: String,
+        enum: ['voice', 'image', 'video', 'document']
+      },
+      filename: String,
+      url: String,
+      size: Number,
+      duration: Number
     }
   }],
   
@@ -702,8 +727,8 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
     // Compila il messaggio della sequenza
     const compiledMessage = await this.compileMessageTemplate(sequence.messageTemplate, contactId);
     
-    // Aggiungi alla coda
-    this.messageQueue.push({
+    // Prepara il messaggio per la coda
+    const queueMessage = {
       contactId: contactId,
       phoneNumber: phoneNumber,
       compiledMessage: compiledMessage,
@@ -714,7 +739,22 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
       hasReceivedResponse: false,
       retryCount: 0,
       condition: sequence.condition // Aggiungi la condizione per facilitare il controllo
-    });
+    };
+    
+    // 🎤 NUOVO: Copia l'allegato dalla sequenza se presente
+    if (sequence.attachment && sequence.attachment.type && sequence.attachment.url) {
+      queueMessage.attachment = {
+        type: sequence.attachment.type,
+        filename: sequence.attachment.filename,
+        url: sequence.attachment.url,
+        size: sequence.attachment.size,
+        duration: sequence.attachment.duration
+      };
+      console.log(`🎤 Allegato ${sequence.attachment.type} aggiunto al follow-up ${i + 1}`);
+    }
+    
+    // Aggiungi alla coda
+    this.messageQueue.push(queueMessage);
     
     console.log(`📝 Follow-up ${i + 1} programmato per ${followUpTime.toISOString()}, sequenza: ${sequence.id}`);
   }

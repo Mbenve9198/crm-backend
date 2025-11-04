@@ -12,7 +12,9 @@ import {
   deleteCampaign,
   uploadAttachments,
   previewCampaign,
-  updateMessageStatus
+  updateMessageStatus,
+  uploadSequenceAudio,
+  deleteSequenceAudio
 } from '../controllers/whatsappCampaignController.js';
 
 const router = express.Router();
@@ -44,6 +46,12 @@ router.put('/:campaignId/messages/:messageId/status', updateMessageStatus);
 
 // POST /api/whatsapp-campaigns/:id/attachments - Upload allegati
 router.post('/:id/attachments', uploadAttachments);
+
+// 🎤 POST /api/whatsapp-campaigns/:id/sequences/:sequenceId/audio - Upload audio per sequenza
+router.post('/:id/sequences/:sequenceId/audio', uploadSequenceAudio);
+
+// 🗑️ DELETE /api/whatsapp-campaigns/:id/sequences/:sequenceId/audio - Rimuovi audio da sequenza
+router.delete('/:id/sequences/:sequenceId/audio', deleteSequenceAudio);
 
 // POST /api/whatsapp-campaigns/:id/start - Avvia campagna
 router.post('/:id/start', startCampaign);
