@@ -5,6 +5,7 @@ import whatsappService from '../services/whatsappService.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
+import { uploadAudio, uploadAudioToImageKit } from '../config/imagekit.js'; // 🎤 NUOVO
 
 /**
  * Controller per gestire le Campagne WhatsApp
@@ -182,11 +183,10 @@ export const createCampaign = async (req, res) => {
           templateVariables: extractTemplateVariables(seq.messageTemplate || '')
         };
         
-        // 🎤 NUOVO: DataURL viene mantenuto così com'è
-        // OpenWA supporta DataURL nativamente tramite sendPtt()
-        if (seq.attachment && seq.attachment.url && seq.attachment.url.startsWith('data:')) {
-          console.log(`🎤 DataURL rilevato per sequenza ${seq.id} - verrà usato direttamente da OpenWA`);
-          // Non serve salvare il file, OpenWA gestisce DataURL nativamente
+        // 🎤 Attachment già uploadato su ImageKit dal frontend
+        // L'URL è pubblico e pronto all'uso
+        if (seq.attachment && seq.attachment.url) {
+          console.log(`🎤 Vocale ImageKit trovato per sequenza ${seq.id}: ${seq.attachment.url}`);
         }
         
         return processed;
@@ -712,6 +712,64 @@ export const uploadAttachments = [
 
     } catch (error) {
       console.error('Errore upload allegati:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Errore interno del server'
+      });
+    }
+  }
+];
+
+/**
+ * 🎤 Upload audio diretto su ImageKit (senza campaignId)
+ * POST /whatsapp-campaigns/upload-audio
+ * Usato quando si registra vocale PRIMA di creare la campagna
+ */
+export const uploadAudioDirect = [
+  uploadAudio.single('audio'),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: 'File audio non fornito'
+        });
+      }
+
+      console.log(`🎤 Upload diretto vocale: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)} KB)`);
+
+      // Upload su ImageKit
+      const imagekitResult = await uploadAudioToImageKit(
+        req.file.buffer || require('fs').readFileSync(req.file.path),
+        req.file.originalname
+      );
+
+      // Pulisci file temporaneo se exists
+      if (req.file.path) {
+        try {
+          await fs.unlink(req.file.path);
+        } catch (e) {
+          // Ignora errori cleanup
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          attachment: {
+            type: 'voice',
+            filename: req.file.originalname,
+            url: imagekitResult.url, // URL pubblico ImageKit
+            fileId: imagekitResult.fileId,
+            size: req.file.size,
+            duration: req.body.duration ? parseInt(req.body.duration) : null
+          }
+        },
+        message: 'Vocale caricato su ImageKit con successo'
+      });
+
+    } catch (error) {
+      console.error('Errore upload audio diretto:', error);
       res.status(500).json({
         success: false,
         message: 'Errore interno del server'

@@ -14,7 +14,8 @@ import {
   previewCampaign,
   updateMessageStatus,
   uploadSequenceAudio,
-  deleteSequenceAudio
+  deleteSequenceAudio,
+  uploadAudioDirect // 🎤 NUOVO
 } from '../controllers/whatsappCampaignController.js';
 
 const router = express.Router();
@@ -46,6 +47,9 @@ router.put('/:campaignId/messages/:messageId/status', updateMessageStatus);
 
 // POST /api/whatsapp-campaigns/:id/attachments - Upload allegati
 router.post('/:id/attachments', uploadAttachments);
+
+// 🎤 POST /api/whatsapp-campaigns/upload-audio - Upload audio diretto su ImageKit (no campaignId richiesto)
+router.post('/upload-audio', uploadAudioDirect);
 
 // 🎤 POST /api/whatsapp-campaigns/:id/sequences/:sequenceId/audio - Upload audio per sequenza
 router.post('/:id/sequences/:sequenceId/audio', uploadSequenceAudio);
