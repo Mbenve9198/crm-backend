@@ -461,6 +461,46 @@ export const startCampaign = async (req, res) => {
       });
     }
 
+    // 🎤 NUOVO: Validazione vocali nelle sequenze prima di avviare
+    if (campaign.messageSequences && campaign.messageSequences.length > 0) {
+      for (const sequence of campaign.messageSequences) {
+        // Controlla che ci sia almeno un messaggio o un vocale
+        const hasMessage = sequence.messageTemplate && sequence.messageTemplate.trim();
+        const hasAttachment = sequence.attachment && sequence.attachment.url;
+        
+        if (!hasMessage && !hasAttachment) {
+          return res.status(400).json({
+            success: false,
+            message: `La sequenza "${sequence.id}" deve avere almeno un messaggio di testo o un vocale`
+          });
+        }
+        
+        // Se c'è un vocale, verifica che l'URL sia valido
+        if (hasAttachment && sequence.attachment.type === 'voice') {
+          const audioUrl = sequence.attachment.url;
+          
+          // Verifica che non sia un URL trasformato da ImageKit
+          if (audioUrl.includes('/ik-video.mp4') || audioUrl.includes('/ik-audio.mp3')) {
+            return res.status(400).json({
+              success: false,
+              message: `❌ Il vocale della sequenza "${sequence.id}" ha un URL ImageKit trasformato. Ricarica il vocale in formato MP3 o M4A.`,
+              details: 'ImageKit ha applicato trasformazioni automatiche. Usa formati MP3 o M4A che non vengono trasformati.'
+            });
+          }
+          
+          // Verifica che l'URL sia ImageKit o DataURL
+          if (!audioUrl.startsWith('http') && !audioUrl.startsWith('data:')) {
+            return res.status(400).json({
+              success: false,
+              message: `URL vocale non valido nella sequenza "${sequence.id}"`
+            });
+          }
+          
+          console.log(`✅ Vocale validato per sequenza ${sequence.id}: ${audioUrl.substring(0, 100)}...`);
+        }
+      }
+    }
+
     // Avvia la campagna
     campaign.status = 'running';
     campaign.actualStartedAt = new Date();
@@ -751,25 +791,39 @@ export const uploadAudioDirect = [
 
       console.log(`🎤 Upload diretto vocale: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)} KB)`);
 
-      // Upload su ImageKit (come nel menuchat-backend)
-      const fileName = `voice-${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(req.file.originalname)}`;
+      // Upload su ImageKit
+      const ext = path.extname(req.file.originalname);
+      const fileName = `voice-${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
+      
+      console.log(`📤 Upload su ImageKit: ${fileName} (${req.file.mimetype})`);
+      
       const imagekitResult = await uploadToImageKit(
-        req.file.path, // ← Path del file temporaneo salvato da multer
+        req.file.path,
         fileName,
         'whatsapp-campaign-audio',
         {
-          // 🎤 IMPORTANTE: Specifica che è un file raw audio (no trasformazioni video)
-          useUniqueFileName: false, // Usa il nome che abbiamo dato
-          isPrivateFile: false, // Pubblico
-          tags: ['whatsapp-voice', 'campaign-audio']
+          useUniqueFileName: false,
+          isPrivateFile: false,
+          tags: ['whatsapp-voice', 'campaign-audio'],
+          // 🎤 CRITICO: Specifica che è un file NON trasformabile
+          transformation: {
+            pre: 'n-', // No transformation
+          }
         }
       );
       
-      // 🎤 CRITICO: Usa l'URL originale del file, non trasformazioni
-      // ImageKit tende a trasformare webm in mp4, ma serve l'audio originale
-      const audioUrl = imagekitResult.filePath 
-        ? `${process.env.IMAGEKIT_URL_ENDPOINT}${imagekitResult.filePath}`
-        : imagekitResult.url;
+      // 🎤 Costruisci URL senza trasformazioni usando filePath
+      const audioUrl = `${process.env.IMAGEKIT_URL_ENDPOINT}${imagekitResult.filePath}`;
+      
+      // 🎤 Verifica che l'URL non contenga trasformazioni
+      if (audioUrl.includes('/ik-video.mp4') || audioUrl.includes('/ik-audio.mp3')) {
+        console.error(`❌ ImageKit ha applicato trasformazioni: ${audioUrl}`);
+        return res.status(500).json({
+          success: false,
+          message: 'ImageKit ha trasformato il file audio. Riprova con formato MP3 o M4A.',
+          details: audioUrl
+        });
+      }
 
       console.log(`✅ Vocale uploadato su ImageKit:`);
       console.log(`   - URL originale: ${audioUrl}`);
