@@ -2,6 +2,7 @@ import ImageKit from 'imagekit';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 
 // Configurazione ImageKit
 const imagekit = new ImageKit({
@@ -11,9 +12,14 @@ const imagekit = new ImageKit({
 });
 
 // Storage locale temporaneo per processare i file
+// 🚀 Usa os.tmpdir() per compatibilità Railway (filesystem read-only)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const tempDir = 'uploads/temp';
+    const isProduction = process.env.NODE_ENV === 'production';
+    const tempDir = isProduction 
+      ? path.join(os.tmpdir(), 'uploads-temp')
+      : 'uploads/temp';
+    
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
