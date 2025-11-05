@@ -5,7 +5,7 @@ import whatsappService from '../services/whatsappService.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs/promises';
-import { uploadAudio, uploadAudioToImageKit } from '../config/imagekit.js'; // 🎤 NUOVO
+import { uploadAudio, uploadToImageKit } from '../config/imagekit.js'; // 🎤 NUOVO
 
 /**
  * Controller per gestire le Campagne WhatsApp
@@ -61,6 +61,7 @@ export const getCampaigns = async (req, res) => {
     }
 
     const campaigns = await WhatsappCampaign.find(filter)
+      .select('-messageQueue') // 🚀 CRITICO: Escludi messageQueue (può avere 30K elementi!)
       .populate('owner', 'firstName lastName email')
       .populate('createdBy', 'firstName lastName')
       .sort({ updatedAt: -1 })
@@ -102,13 +103,14 @@ export const getCampaign = async (req, res) => {
     const campaignId = req.params.id;
     const userId = req.user._id;
 
+    // 🚀 Carica campagna SENZA messageQueue (troppo grande)
     const campaign = await WhatsappCampaign.findOne({
       _id: campaignId,
       owner: userId
     })
+      .select('-messageQueue') // Escludi messageQueue dalla query principale
       .populate('owner', 'firstName lastName email')
-      .populate('createdBy', 'firstName lastName')
-      .populate('messageQueue.contactId', 'name phone email');
+      .populate('createdBy', 'firstName lastName');
 
     if (!campaign) {
       return res.status(404).json({
@@ -117,9 +119,19 @@ export const getCampaign = async (req, res) => {
       });
     }
 
+    // 🚀 Carica solo un subset della messageQueue per preview (primi 100)
+    const campaignWithQueue = await WhatsappCampaign.findById(campaignId)
+      .select('messageQueue')
+      .slice('messageQueue', 100); // Solo primi 100 messaggi
+
+    // Unisci i dati
+    const campaignData = campaign.toObject();
+    campaignData.messageQueue = campaignWithQueue?.messageQueue || [];
+    campaignData.messageQueueTruncated = campaign.stats.totalContacts > 100; // Flag per indicare che è troncato
+
     res.json({
       success: true,
-      data: campaign
+      data: campaignData
     });
 
   } catch (error) {
@@ -739,20 +751,13 @@ export const uploadAudioDirect = [
 
       console.log(`🎤 Upload diretto vocale: ${req.file.originalname} (${(req.file.size / 1024).toFixed(2)} KB)`);
 
-      // Upload su ImageKit
-      const imagekitResult = await uploadAudioToImageKit(
-        req.file.buffer || require('fs').readFileSync(req.file.path),
-        req.file.originalname
+      // Upload su ImageKit (come nel menuchat-backend)
+      const fileName = `voice-${Date.now()}-${Math.round(Math.random() * 1E9)}${path.extname(req.file.originalname)}`;
+      const imagekitResult = await uploadToImageKit(
+        req.file.path, // ← Path del file temporaneo salvato da multer
+        fileName,
+        'whatsapp-campaign-audio'
       );
-
-      // Pulisci file temporaneo se exists
-      if (req.file.path) {
-        try {
-          await fs.unlink(req.file.path);
-        } catch (e) {
-          // Ignora errori cleanup
-        }
-      }
 
       res.json({
         success: true,

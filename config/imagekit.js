@@ -234,41 +234,12 @@ const generateTwilioCompatibleImageKitUrl = (originalUrl, mimeType) => {
   return originalUrl;
 };
 
-// 🎤 NUOVO: Helper per upload vocali da buffer (Base64 o Blob)
-const uploadAudioToImageKit = async (buffer, fileName, options = {}) => {
-  try {
-    // Assicura che fileName abbia estensione
-    if (!path.extname(fileName)) {
-      fileName = fileName + '.mp3';
-    }
-
-    const uploadParams = {
-      file: buffer,
-      fileName: fileName,
-      folder: 'whatsapp-campaign-audio',
-      ...options
-    };
-
-    console.log(`🎤 Upload vocale su ImageKit: ${fileName}`);
-    
-    const result = await imagekit.upload(uploadParams);
-    
-    console.log(`✅ Vocale caricato su ImageKit: ${result.url}`);
-    return result;
-    
-  } catch (error) {
-    console.error('❌ Errore upload vocale su ImageKit:', error);
-    throw error;
-  }
-};
-
 export {
   imagekit,
   uploadPdf,
   uploadMedia,
   uploadAudio, // 🎤 NUOVO
   uploadToImageKit,
-  uploadAudioToImageKit, // 🎤 NUOVO
   deleteFromImageKit,
   getFolderPath,
   generateFileName,

@@ -327,6 +327,8 @@ whatsappCampaignSchema.index({ whatsappSessionId: 1 });
 whatsappCampaignSchema.index({ targetList: 1 });
 whatsappCampaignSchema.index({ 'messageQueue.status': 1 });
 whatsappCampaignSchema.index({ scheduledStartAt: 1 });
+whatsappCampaignSchema.index({ updatedAt: -1 }); // 🚀 Per sort su getCampaigns
+whatsappCampaignSchema.index({ owner: 1, updatedAt: -1 }); // 🚀 Indice composto ottimale
 
 // Metodi dello schema
 
