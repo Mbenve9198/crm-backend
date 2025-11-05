@@ -774,6 +774,65 @@ export const uploadAttachments = [
 ];
 
 /**
+ * 🎤 Ottieni libreria vocali da campagne esistenti
+ * GET /whatsapp-campaigns/audio-library
+ */
+export const getAudioLibrary = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Trova tutte le campagne dell'utente con sequenze che hanno vocali
+    const campaigns = await WhatsappCampaign.find({
+      owner: userId,
+      'messageSequences.attachment.type': 'voice'
+    })
+      .select('name messageSequences')
+      .lean();
+
+    // Estrai tutti i vocali unici
+    const audioLibrary = [];
+    const seenUrls = new Set();
+
+    campaigns.forEach(campaign => {
+      campaign.messageSequences?.forEach(sequence => {
+        if (sequence.attachment && sequence.attachment.type === 'voice' && sequence.attachment.url) {
+          // Evita duplicati basati sull'URL
+          if (!seenUrls.has(sequence.attachment.url)) {
+            seenUrls.add(sequence.attachment.url);
+            audioLibrary.push({
+              id: sequence.id,
+              campaignName: campaign.name,
+              filename: sequence.attachment.filename || 'vocale.m4a',
+              url: sequence.attachment.url,
+              size: sequence.attachment.size,
+              duration: sequence.attachment.duration,
+              type: 'voice'
+            });
+          }
+        }
+      });
+    });
+
+    console.log(`📚 Libreria vocali: trovati ${audioLibrary.length} vocali da ${campaigns.length} campagne`);
+
+    res.json({
+      success: true,
+      data: {
+        audios: audioLibrary,
+        total: audioLibrary.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Errore recupero libreria vocali:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * 🎤 Upload audio diretto su ImageKit (senza campaignId)
  * POST /whatsapp-campaigns/upload-audio
  * Usato quando si registra vocale PRIMA di creare la campagna
