@@ -661,8 +661,48 @@ class WhatsappService {
             console.log(`   - URL (primi 100 char): ${attachment.url.substring(0, 100)}...`);
             
             try {
-              messageId = await client.sendPtt(chatId, attachment.url);
+              let urlToSend = attachment.url;
+              
+              // 🎤 Se è DataURL, salvalo come file temporaneo (OpenWA funziona meglio con file)
+              if (isDataUrl) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const os = await import('os');
+                
+                // Estrai Base64
+                const matches = attachment.url.match(/^data:([^;]+);base64,(.+)$/);
+                if (matches) {
+                  const mimeType = matches[1];
+                  const base64Data = matches[2];
+                  const buffer = Buffer.from(base64Data, 'base64');
+                  
+                  // Salva in /tmp
+                  const ext = mimeType.includes('mp4') || mimeType.includes('m4a') ? '.m4a' 
+                            : mimeType.includes('webm') ? '.webm'
+                            : mimeType.includes('ogg') ? '.ogg'
+                            : '.mp3';
+                  const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}${ext}`);
+                  
+                  fs.writeFileSync(tempFile, buffer);
+                  console.log(`💾 DataURL salvato come file temp: ${tempFile}`);
+                  
+                  urlToSend = tempFile;
+                }
+              }
+              
+              messageId = await client.sendPtt(chatId, urlToSend);
               console.log(`✅ sendPtt completato, messageId: ${messageId}`);
+              
+              // Cleanup file temporaneo se creato
+              if (isDataUrl && urlToSend !== attachment.url) {
+                try {
+                  const fs = await import('fs');
+                  fs.unlinkSync(urlToSend);
+                  console.log(`🧹 File temp eliminato: ${urlToSend}`);
+                } catch (e) {
+                  // Ignora errori cleanup
+                }
+              }
             } catch (pttError) {
               console.error(`❌ Errore sendPtt:`, pttError);
               throw pttError;
