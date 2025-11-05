@@ -1,7 +1,7 @@
-const ImageKit = require('imagekit');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
+import ImageKit from 'imagekit';
+import multer from 'multer';
+import fs from 'fs';
+import path from 'path';
 
 // Configurazione ImageKit
 const imagekit = new ImageKit({
@@ -262,7 +262,7 @@ const uploadAudioToImageKit = async (buffer, fileName, options = {}) => {
   }
 };
 
-module.exports = {
+export {
   imagekit,
   uploadPdf,
   uploadMedia,
