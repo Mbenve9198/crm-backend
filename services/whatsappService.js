@@ -1146,18 +1146,22 @@ class WhatsappService {
         return null;
       }
 
-      // 🎤 NUOVO: Determina quali allegati inviare
-      // Se il messaggio ha un allegato specifico (sequenza), usa quello
-      // Altrimenti usa gli allegati della campagna principale
-      let attachmentsToSend = campaign.attachments || [];
+      // 🎤 OTTIMIZZATO: Determina allegati da inviare
+      let attachmentsToSend = [];
       
-      if (messageData.attachment && messageData.attachment.type && messageData.attachment.url) {
-        // Messaggio di sequenza con allegato specifico
-        attachmentsToSend = [messageData.attachment];
-        console.log(`🎤 Invio allegato ${messageData.attachment.type} per sequenza ${messageData.sequenceIndex}`);
-      } else if (messageData.sequenceIndex === 0 && campaign.attachments && campaign.attachments.length > 0) {
-        // Messaggio principale con allegati campagna
-        console.log(`📎 Invio ${campaign.attachments.length} allegati per messaggio principale`);
+      if (messageData.sequenceIndex > 0) {
+        // Follow-up: leggi attachment dalla sequenza (non da messageData)
+        const sequence = campaign.messageSequences?.find(s => s.id === messageData.sequenceId);
+        if (sequence && sequence.attachment && sequence.attachment.url) {
+          attachmentsToSend = [sequence.attachment];
+          console.log(`🎤 Follow-up ${messageData.sequenceIndex}: allegato ${sequence.attachment.type} letto dalla sequenza`);
+        }
+      } else {
+        // Messaggio principale: usa attachments della campagna
+        if (campaign.attachments && campaign.attachments.length > 0) {
+          attachmentsToSend = campaign.attachments;
+          console.log(`📎 Messaggio principale: ${campaign.attachments.length} allegati`);
+        }
       }
 
       // Invia il messaggio via OpenWA

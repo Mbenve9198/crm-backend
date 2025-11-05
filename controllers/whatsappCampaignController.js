@@ -797,17 +797,20 @@ export const uploadAudioDirect = [
       
       console.log(`📤 Upload su ImageKit: ${fileName} (${req.file.mimetype})`);
       
-      const imagekitResult = await uploadToImageKit(
-        req.file.path,
-        fileName,
-        'whatsapp-campaign-audio',
-        {
-          useUniqueFileName: false,
-          isPrivateFile: false,
-          tags: ['whatsapp-voice', 'campaign-audio']
-          // 🎤 Nessuna transformation - usa file originale
-        }
-      );
+      // 🎤 Upload diretto usando imagekit SDK
+      const fileBuffer = await fs.readFile(req.file.path);
+      
+      const imagekitResult = await imagekit.upload({
+        file: fileBuffer,
+        fileName: fileName,
+        folder: 'whatsapp-campaign-audio',
+        useUniqueFileName: false,
+        isPrivateFile: false,
+        tags: ['whatsapp-voice', 'campaign-audio']
+      });
+      
+      // Cleanup file temporaneo
+      await fs.unlink(req.file.path);
       
       // 🎤 Costruisci URL senza trasformazioni usando filePath
       const audioUrl = `${process.env.IMAGEKIT_URL_ENDPOINT}${imagekitResult.filePath}`;

@@ -267,18 +267,9 @@ const whatsappCampaignSchema = new mongoose.Schema({
       type: String,
       enum: ['no_response', 'always'],
       default: 'always' // Condizione per inviare il messaggio
-    },
-    // 🎤 NUOVO: Allegato per questo specifico messaggio della sequenza
-    attachment: {
-      type: {
-        type: String,
-        enum: ['voice', 'image', 'video', 'document']
-      },
-      filename: String,
-      url: String,
-      size: Number,
-      duration: Number
     }
+    // 🎤 NOTA: Attachment NON copiato qui (evita documenti enormi)
+    // L'attachment viene letto da messageSequences quando serve
   }],
   
   // Configurazione retry
@@ -771,19 +762,13 @@ whatsappCampaignSchema.methods.scheduleFollowUps = async function(contactId, pho
       condition: sequence.condition // Aggiungi la condizione per facilitare il controllo
     };
     
-    // 🎤 NUOVO: Copia l'allegato dalla sequenza se presente
+    // 🎤 OTTIMIZZATO: NON copiare attachment (evita documenti enormi)
+    // L'attachment verrà letto dalla sequenza quando serve
     if (sequence.attachment && sequence.attachment.type && sequence.attachment.url) {
-      queueMessage.attachment = {
-        type: sequence.attachment.type,
-        filename: sequence.attachment.filename,
-        url: sequence.attachment.url,
-        size: sequence.attachment.size,
-        duration: sequence.attachment.duration
-      };
-      console.log(`🎤 Allegato ${sequence.attachment.type} aggiunto al follow-up ${i + 1}`);
+      console.log(`🎤 Sequenza ${i + 1} ha allegato ${sequence.attachment.type} (salvato nella sequenza, non copiato)`);
     }
     
-    // Aggiungi alla coda
+    // Aggiungi alla coda (SENZA attachment copiato)
     this.messageQueue.push(queueMessage);
     
     console.log(`📝 Follow-up ${i + 1} programmato per ${followUpTime.toISOString()}, sequenza: ${sequence.id}`);
