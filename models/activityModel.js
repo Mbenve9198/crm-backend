@@ -225,8 +225,15 @@ activitySchema.pre('save', function(next) {
   }
   
   // Validazione per messaggi
-  if ((this.type === 'whatsapp' || this.type === 'instagram_dm') && !this.data?.messageText) {
-    return next(new Error('Il testo del messaggio è obbligatorio'));
+  // 🎤 AGGIORNATO: Permetti messaggi senza testo se c'è un vocale/media
+  if ((this.type === 'whatsapp' || this.type === 'instagram_dm')) {
+    const hasText = this.data?.messageText && this.data.messageText.trim();
+    const hasMedia = this.data?.hasAttachment || this.data?.attachmentType;
+    
+    if (!hasText && !hasMedia) {
+      // Solo se non c'è né testo né media
+      return next(new Error('Il messaggio deve avere testo o allegato'));
+    }
   }
   
   next();

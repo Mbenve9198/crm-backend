@@ -653,8 +653,20 @@ class WhatsappService {
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
           case 'voice': // 🎤 NUOVO: Supporto messaggi vocali PTT
-            messageId = await client.sendPtt(chatId, attachment.url);
-            console.log(`🎤 Messaggio vocale inviato (${attachment.duration || '?'}s)`);
+            const isDataUrl = attachment.url.startsWith('data:');
+            console.log(`🎤 Invio vocale PTT:`);
+            console.log(`   - Tipo: ${isDataUrl ? 'DataURL' : 'URL pubblico'}`);
+            console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
+            console.log(`   - Durata: ${attachment.duration || '?'}s`);
+            console.log(`   - URL (primi 100 char): ${attachment.url.substring(0, 100)}...`);
+            
+            try {
+              messageId = await client.sendPtt(chatId, attachment.url);
+              console.log(`✅ sendPtt completato, messageId: ${messageId}`);
+            } catch (pttError) {
+              console.error(`❌ Errore sendPtt:`, pttError);
+              throw pttError;
+            }
             break;
           case 'video':
             messageId = await client.sendFile(chatId, attachment.url, attachment.filename, attachment.caption || '');
@@ -1212,15 +1224,18 @@ class WhatsappService {
         contact: contact._id,
         type: 'whatsapp',
         title: `Campagna: ${campaign.name}`,
-        description: messageData.compiledMessage,
+        description: messageData.compiledMessage || '🎤 Messaggio vocale', // 🎤 Fallback per solo-vocali
         data: {
-          messageText: messageData.compiledMessage,
+          messageText: messageData.compiledMessage || '🎤 Messaggio vocale',
           messageId: messageId,
           campaignId: campaign._id,
           campaignName: campaign.name,
           sessionId: campaign.whatsappSessionId,
           priority: priority,
-          sequenceIndex: messageData.sequenceIndex
+          sequenceIndex: messageData.sequenceIndex,
+          // 🎤 NUOVO: Indica se c'è un attachment
+          hasAttachment: attachmentsToSend.length > 0,
+          attachmentType: attachmentsToSend[0]?.type
         },
         createdBy: campaign.owner
       });
