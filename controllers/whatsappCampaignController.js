@@ -804,11 +804,8 @@ export const uploadAudioDirect = [
         {
           useUniqueFileName: false,
           isPrivateFile: false,
-          tags: ['whatsapp-voice', 'campaign-audio'],
-          // 🎤 CRITICO: Specifica che è un file NON trasformabile
-          transformation: {
-            pre: 'n-', // No transformation
-          }
+          tags: ['whatsapp-voice', 'campaign-audio']
+          // 🎤 Nessuna transformation - usa file originale
         }
       );
       
