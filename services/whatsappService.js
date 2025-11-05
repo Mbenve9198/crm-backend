@@ -935,28 +935,44 @@ class WhatsappService {
         return;
       }
 
-      // Verifica rate limiting globale per la sessione
+      // 🎤 NUOVO: Separa follow-up da messaggi principali
+      const followUpMessages = pendingMessages.filter(m => m.sequenceIndex > 0);
+      const primaryMessages = pendingMessages.filter(m => m.sequenceIndex === 0);
+      
+      console.log(`📊 Messaggi da processare: ${primaryMessages.length} principali, ${followUpMessages.length} follow-up`);
+
+      // Verifica rate limiting SOLO per messaggi principali
       const rateLimitCheck = await smartRateLimiter.canSendMessage(
         campaign.whatsappSessionId, 
         priority
       );
 
+      // Se rate limit bloccato, processa SOLO i follow-up (se ci sono)
+      let messagesToProcess = [];
       if (!rateLimitCheck.allowed) {
-        console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - campagna: ${campaign.name}`);
-        return;
+        if (followUpMessages.length > 0) {
+          console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - ma processo ${followUpMessages.length} follow-up comunque`);
+          messagesToProcess = followUpMessages;
+        } else {
+          console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - campagna: ${campaign.name}`);
+          return;
+        }
+      } else {
+        // Rate limit OK, processa tutti i messaggi
+        messagesToProcess = pendingMessages;
       }
 
-      console.log(`📊 Processing ${pendingMessages.length} messages for campaign: ${campaign.name} (priority: ${priority})`);
+      console.log(`📊 Processing ${messagesToProcess.length} messages for campaign: ${campaign.name} (priority: ${priority})`);
       
       // 🔍 Debug: Log dettagli messaggi
-      pendingMessages.forEach((msg, idx) => {
+      messagesToProcess.forEach((msg, idx) => {
         console.log(`  📬 Messaggio ${idx + 1}: Seq ${msg.sequenceIndex} (${msg.sequenceIndex === 0 ? 'PRINCIPALE' : 'FOLLOW-UP'}), contatto: ${msg.phoneNumber}, scheduled: ${msg.followUpScheduledFor || 'subito'}`);
       });
 
       // Invia messaggi con locking per prevenire duplicati
       let messagesSentInBatch = 0;
       
-      for (const messageData of pendingMessages) {
+      for (const messageData of messagesToProcess) {
         try {
           // 🎤 NUOVO: Non applicare rate limiting ai follow-up dello stesso contatto
           const isFollowUp = messageData.sequenceIndex > 0;
@@ -996,10 +1012,15 @@ class WhatsappService {
               // Messaggio inviato con successo
               messagesSentInBatch++;
               
-              // Attendi l'intervallo configurato per la priorità
-              if (messagesSentInBatch < pendingMessages.length) {
+              // 🎤 NUOVO: Attendi intervallo SOLO tra messaggi principali
+              const nextMessage = messagesToProcess[messagesToProcess.indexOf(messageData) + 1];
+              const nextIsFollowUp = nextMessage && nextMessage.sequenceIndex > 0;
+              
+              if (messagesSentInBatch < messagesToProcess.length && !isFollowUp && !nextIsFollowUp) {
                 console.log(`⏱️ Waiting ${config.intervalSeconds}s before next message...`);
                 await this.sleep(config.intervalSeconds * 1000);
+              } else if (isFollowUp || nextIsFollowUp) {
+                console.log(`🎤 Nessuna attesa per follow-up (invio immediato)`);
               }
             }
           }

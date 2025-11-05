@@ -756,8 +756,25 @@ export const uploadAudioDirect = [
       const imagekitResult = await uploadToImageKit(
         req.file.path, // ← Path del file temporaneo salvato da multer
         fileName,
-        'whatsapp-campaign-audio'
+        'whatsapp-campaign-audio',
+        {
+          // 🎤 IMPORTANTE: Specifica che è un file raw audio (no trasformazioni video)
+          useUniqueFileName: false, // Usa il nome che abbiamo dato
+          isPrivateFile: false, // Pubblico
+          tags: ['whatsapp-voice', 'campaign-audio']
+        }
       );
+      
+      // 🎤 CRITICO: Usa l'URL originale del file, non trasformazioni
+      // ImageKit tende a trasformare webm in mp4, ma serve l'audio originale
+      const audioUrl = imagekitResult.filePath 
+        ? `${process.env.IMAGEKIT_URL_ENDPOINT}${imagekitResult.filePath}`
+        : imagekitResult.url;
+
+      console.log(`✅ Vocale uploadato su ImageKit:`);
+      console.log(`   - URL originale: ${audioUrl}`);
+      console.log(`   - fileId: ${imagekitResult.fileId}`);
+      console.log(`   - filePath: ${imagekitResult.filePath}`);
 
       res.json({
         success: true,
@@ -765,7 +782,7 @@ export const uploadAudioDirect = [
           attachment: {
             type: 'voice',
             filename: req.file.originalname,
-            url: imagekitResult.url, // URL pubblico ImageKit
+            url: audioUrl, // 🎤 URL originale (no trasformazioni)
             fileId: imagekitResult.fileId,
             size: req.file.size,
             duration: req.body.duration ? parseInt(req.body.duration) : null
