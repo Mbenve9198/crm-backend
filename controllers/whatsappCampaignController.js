@@ -65,7 +65,8 @@ export const getCampaigns = async (req, res) => {
       .populate('createdBy', 'firstName lastName')
       .sort({ updatedAt: -1 })
       .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip((page - 1) * limit)
+      .allowDiskUse(true); // 🚀 Permette sort su disco per grandi dataset
 
     const totalCampaigns = await WhatsappCampaign.countDocuments(filter);
 
