@@ -48,10 +48,11 @@ const whatsappCampaignSchema = new mongoose.Schema({
     properties: mongoose.Schema.Types.Mixed
   },
   
-  // Template messaggio
+  // Template messaggio principale
   messageTemplate: {
     type: String,
-    required: [true, 'Template messaggio obbligatorio'],
+    required: false, // 🎤 Opzionale se c'è un vocale nel messaggio principale
+    default: '',
     maxLength: [4000, 'Il messaggio non può superare 4000 caratteri']
   },
   
@@ -102,11 +103,11 @@ const whatsappCampaignSchema = new mongoose.Schema({
     }
   }],
   
-  // Media allegati
+  // Media allegati (inclusi vocali per messaggio principale)
   attachments: [{
     type: {
       type: String,
-      enum: ['image', 'audio', 'video', 'document'],
+      enum: ['image', 'audio', 'video', 'document', 'voice'], // 🎤 Aggiunto voice
       required: true
     },
     filename: {
@@ -118,6 +119,7 @@ const whatsappCampaignSchema = new mongoose.Schema({
       required: true
     },
     size: Number,
+    duration: Number, // 🎤 Per vocali
     caption: String
   }],
   

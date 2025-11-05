@@ -157,6 +157,7 @@ export const createCampaign = async (req, res) => {
       targetList,
       contactFilters,
       messageTemplate,
+      attachments, // 🎤 Attachments per messaggio principale (inclusi vocali)
       messageSequences, // NUOVO: Sequenze di messaggi di follow-up
       priority, // ✅ Sistema priorità
       timing,
@@ -184,8 +185,19 @@ export const createCampaign = async (req, res) => {
       });
     }
 
-    // Estrai variabili dal template principale
-    const templateVariables = extractTemplateVariables(messageTemplate);
+    // 🎤 Validazione: messaggio principale deve avere testo O vocale
+    const hasMainMessage = messageTemplate && messageTemplate.trim();
+    const hasMainVoice = attachments && attachments.some(a => a.type === 'voice');
+    
+    if (!hasMainMessage && !hasMainVoice) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il messaggio principale deve avere almeno un testo o un vocale'
+      });
+    }
+
+    // Estrai variabili dal template principale (se presente)
+    const templateVariables = messageTemplate ? extractTemplateVariables(messageTemplate) : [];
 
     // Processa le sequenze di messaggi se presenti
     let processedSequences = [];
@@ -227,8 +239,9 @@ export const createCampaign = async (req, res) => {
       whatsappNumber: session.phoneNumber,
       targetList,
       contactFilters,
-      messageTemplate,
+      messageTemplate: messageTemplate || '', // 🎤 Può essere vuoto se c'è vocale
       templateVariables,
+      attachments: attachments || [], // 🎤 Include vocali per messaggio principale
       messageSequences: processedSequences, // NUOVO: Include le sequenze
       priority: priority || 'media', // ✅ Default priorità media
       timing,
@@ -461,7 +474,18 @@ export const startCampaign = async (req, res) => {
       });
     }
 
-    // 🎤 NUOVO: Validazione vocali nelle sequenze prima di avviare
+    // 🎤 NUOVO: Validazione messaggio principale
+    const hasMainText = campaign.messageTemplate && campaign.messageTemplate.trim();
+    const hasMainVoice = campaign.attachments && campaign.attachments.some(a => a.type === 'voice');
+    
+    if (!hasMainText && !hasMainVoice) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il messaggio principale deve avere almeno un testo o un vocale'
+      });
+    }
+    
+    // 🎤 Validazione vocali nelle sequenze prima di avviare
     if (campaign.messageSequences && campaign.messageSequences.length > 0) {
       for (const sequence of campaign.messageSequences) {
         // Controlla che ci sia almeno un messaggio o un vocale
