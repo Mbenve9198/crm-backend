@@ -658,10 +658,8 @@ class WhatsappService {
           case 'audio':
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
-          case 'voice': // 🎤 Supporto messaggi vocali PTT
-            const isDataUrl = attachment.url && attachment.url.startsWith('data:');
-            console.log(`🎤 Invio vocale PTT:`);
-            console.log(`   - Tipo: ${isDataUrl ? 'DataURL' : 'URL/Path'}`);
+          case 'voice': // 🎤 Note vocali WhatsApp PTT (solo MP3)
+            console.log(`🎤 Invio nota vocale PTT MP3`);
             console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
             console.log(`   - Durata: ${attachment.duration || '?'}s`);
             
@@ -670,53 +668,50 @@ class WhatsappService {
                 throw new Error('URL vocale mancante');
               }
               
-              let fileToSend = attachment.url;
+              const isDataUrl = attachment.url.startsWith('data:');
               
-              // 🎤 Se DataURL, convertilo in file temp (OpenWA funziona meglio)
-              if (isDataUrl) {
-                const fs = await import('fs');
-                const path = await import('path');
-                const os = await import('os');
-                
-                // Estrai Base64
-                const matches = attachment.url.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
-                if (matches) {
-                  const mimeType = matches[1];
-                  const base64Data = matches[2];
-                  const buffer = Buffer.from(base64Data, 'base64');
-                  
-                  // Determina estensione
-                  const ext = mimeType.includes('ogg') ? '.ogg'
-                            : mimeType.includes('webm') ? '.webm'
-                            : mimeType.includes('mp4') ? '.m4a'
-                            : '.ogg';
-                  
-                  const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}${ext}`);
-                  fs.writeFileSync(tempFile, buffer);
-                  fileToSend = tempFile;
-                  
-                  console.log(`💾 DataURL → file temp: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
-                }
+              // Estrai Base64 e salva come file MP3 temp
+              const fs = await import('fs');
+              const path = await import('path');
+              const os = await import('os');
+              
+              const matches = attachment.url.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
+              if (!matches) {
+                throw new Error('DataURL non valido');
               }
               
-              console.log(`🎤 sendPtt con ${fileToSend.startsWith('/') ? 'file path' : 'DataURL'}`);
-              messageId = await client.sendPtt(chatId, fileToSend);
-              console.log(`✅ sendPtt risultato: ${messageId}`);
+              const base64Data = matches[2];
+              const buffer = Buffer.from(base64Data, 'base64');
+              const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}.mp3`);
+              
+              fs.writeFileSync(tempFile, buffer);
+              console.log(`💾 MP3 salvato in temp: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
+              
+              // 🎤 SOLUZIONE TESTATA: sendFile con ptt=true
+              console.log(`🎤 Usando sendFile con ptt=true (metodo testato e funzionante)`);
+              messageId = await client.sendFile(
+                chatId,
+                tempFile, // File locale temp
+                'voice.mp3',
+                '', // caption vuota
+                null, // quotedMsgId
+                true, // waitForId
+                true // ptt=true ← NOTA VOCALE!
+              );
+              
+              console.log(`✅ Nota vocale inviata, messageId: ${messageId}`);
               
               // Cleanup file temp
-              if (fileToSend !== attachment.url && fileToSend.startsWith('/tmp')) {
-                try {
-                  const fs = await import('fs');
-                  fs.unlinkSync(fileToSend);
-                  console.log(`🧹 File temp eliminato`);
-                } catch (e) {
-                  // Ignora errori cleanup
-                }
+              try {
+                fs.unlinkSync(tempFile);
+                console.log(`🧹 File temp eliminato`);
+              } catch (cleanupError) {
+                console.warn(`⚠️  Errore cleanup: ${cleanupError.message}`);
               }
               
-            } catch (pttError) {
-              console.error(`❌ Errore sendPtt:`, pttError);
-              throw pttError;
+            } catch (voiceError) {
+              console.error(`❌ Errore invio nota vocale:`, voiceError);
+              throw voiceError;
             }
             break;
           case 'video':

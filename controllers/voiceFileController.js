@@ -16,14 +16,22 @@ export const uploadVoiceFile = async (req, res) => {
       });
     }
 
+    // Valida che sia MP3
+    if (!dataUrl.includes('audio/mpeg') && !dataUrl.includes('audio/mp3')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Solo file MP3 sono supportati per note vocali WhatsApp'
+      });
+    }
+
     // Estrai mime type
     const mimeTypeMatch = dataUrl.match(/^data:([^;]+);/);
-    const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'audio/ogg';
+    const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'audio/mpeg';
 
     // Crea VoiceFile
     const voiceFile = new VoiceFile({
       dataUrl,
-      filename: filename || 'vocale.ogg',
+      filename: filename || 'vocale.mp3',
       size: size || 0,
       duration,
       mimeType,
@@ -33,7 +41,7 @@ export const uploadVoiceFile = async (req, res) => {
 
     await voiceFile.save();
 
-    console.log(`✅ VoiceFile salvato: ${voiceFile._id} (${(size / 1024).toFixed(2)} KB)`);
+    console.log(`✅ VoiceFile MP3 salvato: ${voiceFile._id} (${(size / 1024).toFixed(2)} KB, ${duration || '?'}s)`);
 
     res.json({
       success: true,
@@ -45,7 +53,7 @@ export const uploadVoiceFile = async (req, res) => {
         // URL pubblico per accesso (SEMPRE HTTPS per WhatsApp)
         publicUrl: `${process.env.API_URL || 'https://' + req.get('host')}/api/voice-files/${voiceFile._id}/audio`
       },
-      message: 'Vocale salvato con successo'
+      message: 'Vocale MP3 salvato con successo'
     });
 
   } catch (error) {
