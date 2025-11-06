@@ -659,37 +659,25 @@ class WhatsappService {
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
           case 'voice': // 🎤 Supporto messaggi vocali PTT
-            const isHttpUrl = attachment.url.startsWith('http://') || attachment.url.startsWith('https://');
+            const isDataUrl = attachment.url && attachment.url.startsWith('data:');
             console.log(`🎤 Invio vocale PTT:`);
-            console.log(`   - Tipo: ${isHttpUrl ? 'URL pubblico' : 'DataURL/Path'}`);
+            console.log(`   - Tipo: ${isDataUrl ? 'DataURL' : 'URL/Path'}`);
             console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
             console.log(`   - Durata: ${attachment.duration || '?'}s`);
-            console.log(`   - URL: ${attachment.url.substring(0, 100)}...`);
+            console.log(`   - URL (primi 100): ${attachment.url?.substring(0, 100)}...`);
             
             try {
-              if (isHttpUrl) {
-                // 🎤 URL pubblico: usa sendFileFromUrl con ptt=true
-                console.log(`🌐 Usando sendFileFromUrl con ptt=true`);
-                messageId = await client.sendFileFromUrl(
-                  chatId,
-                  attachment.url,
-                  attachment.filename || 'voice.ogg',
-                  '', // caption vuota
-                  null, // no quote
-                  {}, // requestConfig default
-                  false, // waitForId
-                  true // ptt=true ← CRITICO per voice note!
-                );
-              } else {
-                // DataURL o file path: usa sendPtt diretto
-                console.log(`📁 Usando sendPtt diretto`);
-                messageId = await client.sendPtt(chatId, attachment.url);
+              // 🎤 sendPtt supporta DataURL (da documentazione OpenWA)
+              if (!attachment.url) {
+                throw new Error('URL vocale mancante');
               }
               
-              console.log(`✅ Vocale inviato, messageId: ${messageId}`);
+              console.log(`🎤 Usando sendPtt con ${isDataUrl ? 'DataURL' : 'path'}`);
+              messageId = await client.sendPtt(chatId, attachment.url);
+              console.log(`✅ sendPtt completato, messageId: ${messageId}`);
               
             } catch (pttError) {
-              console.error(`❌ Errore invio vocale:`, pttError);
+              console.error(`❌ Errore sendPtt:`, pttError);
               throw pttError;
             }
             break;
@@ -1190,14 +1178,17 @@ class WhatsappService {
         // Follow-up: leggi attachment dalla sequenza (non da messageData)
         const sequence = campaign.messageSequences?.find(s => s.id === messageData.sequenceId);
         if (sequence && sequence.attachment) {
-          // 🎤 Se ha voiceFileId, costruisci URL pubblico HTTPS
+          // 🎤 Se ha voiceFileId, carica DataURL direttamente dal DB
           if (sequence.attachment.voiceFileId) {
-            const baseUrl = process.env.API_URL || process.env.RAILWAY_STATIC_URL 
-              ? `https://${process.env.RAILWAY_STATIC_URL}` 
-              : 'https://menuchat-crm-backend-production.up.railway.app';
-            const publicUrl = `${baseUrl}/api/voice-files/${sequence.attachment.voiceFileId}/audio`;
-            sequence.attachment.url = publicUrl;
-            console.log(`🎤 Follow-up ${messageData.sequenceIndex}: URL pubblico HTTPS voice file: ${publicUrl}`);
+            const VoiceFile = (await import('../models/voiceFileModel.js')).default;
+            const voiceFile = await VoiceFile.findById(sequence.attachment.voiceFileId);
+            
+            if (voiceFile && voiceFile.dataUrl) {
+              sequence.attachment.url = voiceFile.dataUrl; // DataURL diretto
+              console.log(`🎤 Follow-up ${messageData.sequenceIndex}: DataURL caricato da VoiceFile ${voiceFile._id} (${(voiceFile.dataUrl.length / 1024).toFixed(2)} KB)`);
+            } else {
+              console.error(`❌ VoiceFile ${sequence.attachment.voiceFileId} non trovato`);
+            }
           }
           
           attachmentsToSend = [sequence.attachment];
@@ -1206,21 +1197,28 @@ class WhatsappService {
       } else {
         // Messaggio principale: usa attachments della campagna
         if (campaign.attachments && campaign.attachments.length > 0) {
-          // 🎤 Costruisci URL pubblici HTTPS per voiceFileId
-          attachmentsToSend = campaign.attachments.map(att => {
-            // Converti da Mongoose document a plain object
+          // 🎤 Carica DataURL per voiceFileId
+          const processedAttachments = [];
+          
+          for (const att of campaign.attachments) {
             const plainAtt = att.toObject ? att.toObject() : { ...att };
             
             if (plainAtt.voiceFileId) {
-              const baseUrl = process.env.API_URL || process.env.RAILWAY_STATIC_URL 
-                ? `https://${process.env.RAILWAY_STATIC_URL}` 
-                : 'https://menuchat-crm-backend-production.up.railway.app';
-              const publicUrl = `${baseUrl}/api/voice-files/${plainAtt.voiceFileId}/audio`;
-              console.log(`🎤 Messaggio principale: URL pubblico HTTPS: ${publicUrl}`);
-              plainAtt.url = publicUrl;
+              const VoiceFile = (await import('../models/voiceFileModel.js')).default;
+              const voiceFile = await VoiceFile.findById(plainAtt.voiceFileId);
+              
+              if (voiceFile && voiceFile.dataUrl) {
+                plainAtt.url = voiceFile.dataUrl; // DataURL diretto
+                console.log(`🎤 Messaggio principale: DataURL caricato da VoiceFile ${voiceFile._id} (${(voiceFile.dataUrl.length / 1024).toFixed(2)} KB)`);
+              } else {
+                console.error(`❌ VoiceFile ${plainAtt.voiceFileId} non trovato`);
+              }
             }
-            return plainAtt;
-          });
+            
+            processedAttachments.push(plainAtt);
+          }
+          
+          attachmentsToSend = processedAttachments;
           console.log(`📎 Messaggio principale: ${campaign.attachments.length} allegati`);
         }
       }
