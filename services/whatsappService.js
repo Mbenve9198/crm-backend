@@ -643,6 +643,12 @@ class WhatsappService {
       const chatId = `${phoneNumber.replace(/[^0-9]/g, '')}@c.us`;
       let messageId;
 
+      // 🔍 DEBUG: Log attachments ricevuti
+      console.log(`📎 sendMessage ricevuto ${attachments.length} attachments`);
+      attachments.forEach((att, idx) => {
+        console.log(`  📎 Attachment ${idx + 1}: type=${att.type}, filename=${att.filename}, hasUrl=${!!att.url}, hasVoiceFileId=${!!att.voiceFileId}`);
+      });
+
       // Invia allegati se presenti
       for (const attachment of attachments) {
         switch (attachment.type) {
