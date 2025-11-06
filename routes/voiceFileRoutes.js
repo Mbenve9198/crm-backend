@@ -12,17 +12,8 @@ const router = express.Router();
 // POST /api/voice-files/upload - Upload vocale (AUTENTICATO)
 router.post('/upload', protect, uploadVoiceFile);
 
-// GET /api/voice-files/:id/audio - Serve file audio (PUBBLICO - NO AUTH, NO CREDENTIALS)
-// Questo endpoint DEVE essere completamente pubblico per WhatsApp/OpenWA
-router.get('/:id/audio', 
-  // CORS permissivo per questo endpoint specifico
-  cors({
-    origin: '*', // Permetti qualsiasi origin
-    credentials: false, // NO credentials (pubblico)
-    methods: ['GET', 'OPTIONS']
-  }),
-  serveVoiceFile
-);
+// GET /api/voice-files/:id/audio - Registrato in server.js PRIMA del CORS
+// (per bypassare middleware globali)
 
 // DELETE /api/voice-files/:id - Elimina file (AUTENTICATO)
 router.delete('/:id', protect, deleteVoiceFile);

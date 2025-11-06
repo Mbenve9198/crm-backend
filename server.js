@@ -185,6 +185,11 @@ app.use(express.urlencoded({ limit: '50mb', extended: true })); // 🚀 Per form
 // Cookie parser per gestione JWT
 app.use(cookieParser());
 
+// 🎤 CRITICO: Endpoint pubblico audio PRIMA del CORS globale
+// Questo endpoint DEVE essere completamente pubblico per WhatsApp/OpenWA
+import { serveVoiceFile } from './controllers/voiceFileController.js';
+app.get('/api/voice-files/:id/audio', serveVoiceFile);
+
 // CORS per permettere richieste dal frontend
 app.use(cors({
   origin: function (origin, callback) {
