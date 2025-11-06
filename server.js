@@ -15,6 +15,7 @@ import whatsappCampaignRoutes from './routes/whatsappCampaignRoutes.js';
 import sessionMonitorRoutes from './routes/sessionMonitorRoutes.js';
 import inboundLeadRoutes from './routes/inboundLeadRoutes.js';
 import voiceFileRoutes from './routes/voiceFileRoutes.js';
+import testRoutes from './routes/testRoutes.js';
 import { statusCallback, recordingStatusCallback, testWebhook, answerCall, dialComplete, getRecordingProxy } from './controllers/callController.js';
 import whatsappService from './services/whatsappService.js';
 import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
@@ -459,6 +460,9 @@ app.use('/api/voice-files', voiceFileRoutes);
 
 // Routes per il monitor sessioni (sotto /api/session-monitor)
 app.use('/api/session-monitor', sessionMonitorRoutes);
+
+// 🧪 Routes per test diagnostici (sotto /api/test)
+app.use('/api/test', testRoutes);
 
 // Endpoint per la documentazione delle API
 app.get('/api-docs', (req, res) => {
