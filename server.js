@@ -191,6 +191,10 @@ app.use(cookieParser());
 import { serveVoiceFile } from './controllers/voiceFileController.js';
 app.get('/api/voice-files/:id/audio', serveVoiceFile);
 
+// 🧪 CRITICO: Endpoint test pubblico PRIMA del CORS
+import testRoutes from './routes/testRoutes.js';
+app.use('/api/test', testRoutes);
+
 // CORS per permettere richieste dal frontend
 app.use(cors({
   origin: function (origin, callback) {
@@ -460,9 +464,6 @@ app.use('/api/voice-files', voiceFileRoutes);
 
 // Routes per il monitor sessioni (sotto /api/session-monitor)
 app.use('/api/session-monitor', sessionMonitorRoutes);
-
-// 🧪 Routes per test diagnostici (sotto /api/test)
-app.use('/api/test', testRoutes);
 
 // Endpoint per la documentazione delle API
 app.get('/api-docs', (req, res) => {
