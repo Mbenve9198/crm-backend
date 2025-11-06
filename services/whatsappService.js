@@ -1208,15 +1208,18 @@ class WhatsappService {
         if (campaign.attachments && campaign.attachments.length > 0) {
           // 🎤 Costruisci URL pubblici HTTPS per voiceFileId
           attachmentsToSend = campaign.attachments.map(att => {
-            if (att.voiceFileId) {
+            // Converti da Mongoose document a plain object
+            const plainAtt = att.toObject ? att.toObject() : { ...att };
+            
+            if (plainAtt.voiceFileId) {
               const baseUrl = process.env.API_URL || process.env.RAILWAY_STATIC_URL 
                 ? `https://${process.env.RAILWAY_STATIC_URL}` 
                 : 'https://menuchat-crm-backend-production.up.railway.app';
-              const publicUrl = `${baseUrl}/api/voice-files/${att.voiceFileId}/audio`;
+              const publicUrl = `${baseUrl}/api/voice-files/${plainAtt.voiceFileId}/audio`;
               console.log(`🎤 Messaggio principale: URL pubblico HTTPS: ${publicUrl}`);
-              return { ...att, url: publicUrl };
+              plainAtt.url = publicUrl;
             }
-            return att;
+            return plainAtt;
           });
           console.log(`📎 Messaggio principale: ${campaign.attachments.length} allegati`);
         }
