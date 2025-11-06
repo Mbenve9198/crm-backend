@@ -74,13 +74,32 @@ export const serveVoiceFile = async (req, res) => {
       });
     }
 
+    // 🔍 DEBUG: Log DataURL per vedere formato
+    console.log(`🔍 VoiceFile trovato: ${id}`);
+    console.log(`   - filename: ${voiceFile.filename}`);
+    console.log(`   - size: ${voiceFile.size}`);
+    console.log(`   - dataUrl type: ${typeof voiceFile.dataUrl}`);
+    console.log(`   - dataUrl length: ${voiceFile.dataUrl?.length || 0}`);
+    console.log(`   - dataUrl primi 100 char: ${voiceFile.dataUrl?.substring(0, 100)}`);
+    console.log(`   - dataUrl ultimi 50 char: ${voiceFile.dataUrl?.substring(voiceFile.dataUrl.length - 50)}`);
+
     // Estrai Base64 dal DataURL
     const matches = voiceFile.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
     
     if (!matches) {
+      console.error(`❌ DataURL NON matcha regex!`);
+      console.error(`   - Inizia con 'data:': ${voiceFile.dataUrl?.startsWith('data:')}`);
+      console.error(`   - Contiene ';base64,': ${voiceFile.dataUrl?.includes(';base64,')}`);
+      
       return res.status(500).json({
         success: false,
-        message: 'DataURL non valido'
+        message: 'DataURL non valido',
+        debug: {
+          hasDataUrl: !!voiceFile.dataUrl,
+          startsWithData: voiceFile.dataUrl?.startsWith('data:'),
+          hasBase64: voiceFile.dataUrl?.includes(';base64,'),
+          length: voiceFile.dataUrl?.length
+        }
       });
     }
 
