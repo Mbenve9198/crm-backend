@@ -116,7 +116,11 @@ const whatsappCampaignSchema = new mongoose.Schema({
     },
     url: {
       type: String,
-      required: true
+      required: false // 🎤 Opzionale se c'è voiceFileId
+    },
+    voiceFileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'VoiceFile' // 🎤 Riferimento a collezione separata
     },
     size: Number,
     duration: Number, // 🎤 Per vocali

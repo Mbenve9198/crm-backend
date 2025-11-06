@@ -652,60 +652,38 @@ class WhatsappService {
           case 'audio':
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
-          case 'voice': // 🎤 NUOVO: Supporto messaggi vocali PTT
-            const isDataUrl = attachment.url.startsWith('data:');
+          case 'voice': // 🎤 Supporto messaggi vocali PTT
+            const isHttpUrl = attachment.url.startsWith('http://') || attachment.url.startsWith('https://');
             console.log(`🎤 Invio vocale PTT:`);
-            console.log(`   - Tipo: ${isDataUrl ? 'DataURL' : 'URL pubblico'}`);
+            console.log(`   - Tipo: ${isHttpUrl ? 'URL pubblico' : 'DataURL/Path'}`);
             console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
             console.log(`   - Durata: ${attachment.duration || '?'}s`);
-            console.log(`   - URL (primi 100 char): ${attachment.url.substring(0, 100)}...`);
+            console.log(`   - URL: ${attachment.url.substring(0, 100)}...`);
             
             try {
-              let urlToSend = attachment.url;
-              
-              // 🎤 Se è DataURL, salvalo come file temporaneo (OpenWA funziona meglio con file)
-              if (isDataUrl) {
-                const fs = await import('fs');
-                const path = await import('path');
-                const os = await import('os');
-                
-                // Estrai Base64
-                const matches = attachment.url.match(/^data:([^;]+);base64,(.+)$/);
-                if (matches) {
-                  const mimeType = matches[1];
-                  const base64Data = matches[2];
-                  const buffer = Buffer.from(base64Data, 'base64');
-                  
-                  // Salva in /tmp con estensione corretta
-                  const ext = mimeType.includes('ogg') || mimeType.includes('opus') ? '.ogg'
-                            : mimeType.includes('webm') ? '.webm'
-                            : mimeType.includes('mp4') || mimeType.includes('m4a') ? '.m4a'
-                            : mimeType.includes('mpeg') || mimeType.includes('mp3') ? '.mp3'
-                            : '.ogg'; // Default OGG (WhatsApp codec)
-                  const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}${ext}`);
-                  
-                  fs.writeFileSync(tempFile, buffer);
-                  console.log(`💾 DataURL salvato come file temp: ${tempFile}`);
-                  
-                  urlToSend = tempFile;
-                }
+              if (isHttpUrl) {
+                // 🎤 URL pubblico: usa sendFileFromUrl con ptt=true
+                console.log(`🌐 Usando sendFileFromUrl con ptt=true`);
+                messageId = await client.sendFileFromUrl(
+                  chatId,
+                  attachment.url,
+                  attachment.filename || 'voice.ogg',
+                  '', // caption vuota
+                  null, // no quote
+                  {}, // requestConfig default
+                  false, // waitForId
+                  true // ptt=true ← CRITICO per voice note!
+                );
+              } else {
+                // DataURL o file path: usa sendPtt diretto
+                console.log(`📁 Usando sendPtt diretto`);
+                messageId = await client.sendPtt(chatId, attachment.url);
               }
               
-              messageId = await client.sendPtt(chatId, urlToSend);
-              console.log(`✅ sendPtt completato, messageId: ${messageId}`);
+              console.log(`✅ Vocale inviato, messageId: ${messageId}`);
               
-              // Cleanup file temporaneo se creato
-              if (isDataUrl && urlToSend !== attachment.url) {
-                try {
-                  const fs = await import('fs');
-                  fs.unlinkSync(urlToSend);
-                  console.log(`🧹 File temp eliminato: ${urlToSend}`);
-                } catch (e) {
-                  // Ignora errori cleanup
-                }
-              }
             } catch (pttError) {
-              console.error(`❌ Errore sendPtt:`, pttError);
+              console.error(`❌ Errore invio vocale:`, pttError);
               throw pttError;
             }
             break;
@@ -1205,14 +1183,28 @@ class WhatsappService {
       if (messageData.sequenceIndex > 0) {
         // Follow-up: leggi attachment dalla sequenza (non da messageData)
         const sequence = campaign.messageSequences?.find(s => s.id === messageData.sequenceId);
-        if (sequence && sequence.attachment && sequence.attachment.url) {
+        if (sequence && sequence.attachment) {
+          // 🎤 Se ha voiceFileId, costruisci URL pubblico
+          if (sequence.attachment.voiceFileId) {
+            const publicUrl = `${process.env.API_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/voice-files/${sequence.attachment.voiceFileId}/audio`;
+            sequence.attachment.url = publicUrl;
+            console.log(`🎤 Follow-up ${messageData.sequenceIndex}: URL pubblico voice file: ${publicUrl}`);
+          }
+          
           attachmentsToSend = [sequence.attachment];
           console.log(`🎤 Follow-up ${messageData.sequenceIndex}: allegato ${sequence.attachment.type} letto dalla sequenza`);
         }
       } else {
         // Messaggio principale: usa attachments della campagna
         if (campaign.attachments && campaign.attachments.length > 0) {
-          attachmentsToSend = campaign.attachments;
+          // 🎤 Costruisci URL pubblici per voiceFileId
+          attachmentsToSend = campaign.attachments.map(att => {
+            if (att.voiceFileId) {
+              const publicUrl = `${process.env.API_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/voice-files/${att.voiceFileId}/audio`;
+              return { ...att, url: publicUrl };
+            }
+            return att;
+          });
           console.log(`📎 Messaggio principale: ${campaign.attachments.length} allegati`);
         }
       }
