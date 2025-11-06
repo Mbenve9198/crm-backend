@@ -192,7 +192,6 @@ import { serveVoiceFile } from './controllers/voiceFileController.js';
 app.get('/api/voice-files/:id/audio', serveVoiceFile);
 
 // 🧪 CRITICO: Endpoint test pubblico PRIMA del CORS
-import testRoutes from './routes/testRoutes.js';
 app.use('/api/test', testRoutes);
 
 // CORS per permettere richieste dal frontend
