@@ -84,7 +84,8 @@ export const serveVoiceFile = async (req, res) => {
     console.log(`   - dataUrl ultimi 50 char: ${voiceFile.dataUrl?.substring(voiceFile.dataUrl.length - 50)}`);
 
     // Estrai Base64 dal DataURL
-    const matches = voiceFile.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    // Regex aggiornato per gestire codecs: data:audio/webm;codecs=opus;base64,...
+    const matches = voiceFile.dataUrl.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
     
     if (!matches) {
       console.error(`❌ DataURL NON matcha regex!`);
