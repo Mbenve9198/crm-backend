@@ -676,11 +676,12 @@ class WhatsappService {
                   const base64Data = matches[2];
                   const buffer = Buffer.from(base64Data, 'base64');
                   
-                  // Salva in /tmp
-                  const ext = mimeType.includes('mp4') || mimeType.includes('m4a') ? '.m4a' 
+                  // Salva in /tmp con estensione corretta
+                  const ext = mimeType.includes('ogg') || mimeType.includes('opus') ? '.ogg'
                             : mimeType.includes('webm') ? '.webm'
-                            : mimeType.includes('ogg') ? '.ogg'
-                            : '.mp3';
+                            : mimeType.includes('mp4') || mimeType.includes('m4a') ? '.m4a'
+                            : mimeType.includes('mpeg') || mimeType.includes('mp3') ? '.mp3'
+                            : '.ogg'; // Default OGG (WhatsApp codec)
                   const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}${ext}`);
                   
                   fs.writeFileSync(tempFile, buffer);
@@ -1006,9 +1007,9 @@ class WhatsappService {
           console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - ma processo ${followUpMessages.length} follow-up comunque`);
           messagesToProcess = followUpMessages;
         } else {
-          console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - campagna: ${campaign.name}`);
-          return;
-        }
+        console.log(`🚫 Rate limit: ${rateLimitCheck.reason} - campagna: ${campaign.name}`);
+        return;
+      }
       } else {
         // Rate limit OK, processa tutti i messaggi
         messagesToProcess = pendingMessages;
@@ -1031,14 +1032,14 @@ class WhatsappService {
           
           if (!isFollowUp) {
             // Solo messaggi principali rispettano il rate limiting
-            const currentRateCheck = await smartRateLimiter.canSendMessage(
-              campaign.whatsappSessionId, 
-              priority
-            );
+          const currentRateCheck = await smartRateLimiter.canSendMessage(
+            campaign.whatsappSessionId, 
+            priority
+          );
 
-            if (!currentRateCheck.allowed) {
+          if (!currentRateCheck.allowed) {
               console.log(`⏳ Rate limit raggiunto dopo ${messagesSentInBatch} messaggi (solo principali)`);
-              break;
+            break;
             }
           } else {
             console.log(`🎤 Follow-up sequenza ${messageData.sequenceIndex} - skip rate limiting`);
@@ -1247,7 +1248,7 @@ class WhatsappService {
 
       // 🎤 NUOVO: Registra nel rate limiter SOLO i messaggi principali (non i follow-up)
       if (messageData.sequenceIndex === 0) {
-        await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
+      await smartRateLimiter.recordMessage(campaign.whatsappSessionId, priority);
         console.log(`⏱️ Rate limiter aggiornato per messaggio principale`);
       } else {
         console.log(`🎤 Follow-up ${messageData.sequenceIndex} - rate limiter NON aggiornato`);
