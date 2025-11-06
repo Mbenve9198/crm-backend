@@ -664,17 +664,55 @@ class WhatsappService {
             console.log(`   - Tipo: ${isDataUrl ? 'DataURL' : 'URL/Path'}`);
             console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
             console.log(`   - Durata: ${attachment.duration || '?'}s`);
-            console.log(`   - URL (primi 100): ${attachment.url?.substring(0, 100)}...`);
             
             try {
-              // 🎤 sendPtt supporta DataURL (da documentazione OpenWA)
               if (!attachment.url) {
                 throw new Error('URL vocale mancante');
               }
               
-              console.log(`🎤 Usando sendPtt con ${isDataUrl ? 'DataURL' : 'path'}`);
-              messageId = await client.sendPtt(chatId, attachment.url);
-              console.log(`✅ sendPtt completato, messageId: ${messageId}`);
+              let fileToSend = attachment.url;
+              
+              // 🎤 Se DataURL, convertilo in file temp (OpenWA funziona meglio)
+              if (isDataUrl) {
+                const fs = await import('fs');
+                const path = await import('path');
+                const os = await import('os');
+                
+                // Estrai Base64
+                const matches = attachment.url.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
+                if (matches) {
+                  const mimeType = matches[1];
+                  const base64Data = matches[2];
+                  const buffer = Buffer.from(base64Data, 'base64');
+                  
+                  // Determina estensione
+                  const ext = mimeType.includes('ogg') ? '.ogg'
+                            : mimeType.includes('webm') ? '.webm'
+                            : mimeType.includes('mp4') ? '.m4a'
+                            : '.ogg';
+                  
+                  const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}${ext}`);
+                  fs.writeFileSync(tempFile, buffer);
+                  fileToSend = tempFile;
+                  
+                  console.log(`💾 DataURL → file temp: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
+                }
+              }
+              
+              console.log(`🎤 sendPtt con ${fileToSend.startsWith('/') ? 'file path' : 'DataURL'}`);
+              messageId = await client.sendPtt(chatId, fileToSend);
+              console.log(`✅ sendPtt risultato: ${messageId}`);
+              
+              // Cleanup file temp
+              if (fileToSend !== attachment.url && fileToSend.startsWith('/tmp')) {
+                try {
+                  const fs = await import('fs');
+                  fs.unlinkSync(fileToSend);
+                  console.log(`🧹 File temp eliminato`);
+                } catch (e) {
+                  // Ignora errori cleanup
+                }
+              }
               
             } catch (pttError) {
               console.error(`❌ Errore sendPtt:`, pttError);
