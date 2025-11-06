@@ -1184,11 +1184,14 @@ class WhatsappService {
         // Follow-up: leggi attachment dalla sequenza (non da messageData)
         const sequence = campaign.messageSequences?.find(s => s.id === messageData.sequenceId);
         if (sequence && sequence.attachment) {
-          // 🎤 Se ha voiceFileId, costruisci URL pubblico
+          // 🎤 Se ha voiceFileId, costruisci URL pubblico HTTPS
           if (sequence.attachment.voiceFileId) {
-            const publicUrl = `${process.env.API_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/voice-files/${sequence.attachment.voiceFileId}/audio`;
+            const baseUrl = process.env.API_URL || process.env.RAILWAY_STATIC_URL 
+              ? `https://${process.env.RAILWAY_STATIC_URL}` 
+              : 'https://menuchat-crm-backend-production.up.railway.app';
+            const publicUrl = `${baseUrl}/api/voice-files/${sequence.attachment.voiceFileId}/audio`;
             sequence.attachment.url = publicUrl;
-            console.log(`🎤 Follow-up ${messageData.sequenceIndex}: URL pubblico voice file: ${publicUrl}`);
+            console.log(`🎤 Follow-up ${messageData.sequenceIndex}: URL pubblico HTTPS voice file: ${publicUrl}`);
           }
           
           attachmentsToSend = [sequence.attachment];
@@ -1197,10 +1200,14 @@ class WhatsappService {
       } else {
         // Messaggio principale: usa attachments della campagna
         if (campaign.attachments && campaign.attachments.length > 0) {
-          // 🎤 Costruisci URL pubblici per voiceFileId
+          // 🎤 Costruisci URL pubblici HTTPS per voiceFileId
           attachmentsToSend = campaign.attachments.map(att => {
             if (att.voiceFileId) {
-              const publicUrl = `${process.env.API_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/voice-files/${att.voiceFileId}/audio`;
+              const baseUrl = process.env.API_URL || process.env.RAILWAY_STATIC_URL 
+                ? `https://${process.env.RAILWAY_STATIC_URL}` 
+                : 'https://menuchat-crm-backend-production.up.railway.app';
+              const publicUrl = `${baseUrl}/api/voice-files/${att.voiceFileId}/audio`;
+              console.log(`🎤 Messaggio principale: URL pubblico HTTPS: ${publicUrl}`);
               return { ...att, url: publicUrl };
             }
             return att;

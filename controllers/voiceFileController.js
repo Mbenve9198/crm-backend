@@ -42,8 +42,8 @@ export const uploadVoiceFile = async (req, res) => {
         filename: voiceFile.filename,
         size: voiceFile.size,
         duration: voiceFile.duration,
-        // URL pubblico per accesso
-        publicUrl: `${process.env.API_URL || req.protocol + '://' + req.get('host')}/api/voice-files/${voiceFile._id}/audio`
+        // URL pubblico per accesso (SEMPRE HTTPS per WhatsApp)
+        publicUrl: `${process.env.API_URL || 'https://' + req.get('host')}/api/voice-files/${voiceFile._id}/audio`
       },
       message: 'Vocale salvato con successo'
     });
