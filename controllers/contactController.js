@@ -953,61 +953,61 @@ export const analyzeCsvFile = async (req, res) => {
 
     // 🚀 Funzione per processare i risultati (evita duplicazione codice)
     const processAnalysisResults = async () => {
-      // Pulisce il file temporaneo
-      await unlinkFile(req.file.path);
+        // Pulisce il file temporaneo
+        await unlinkFile(req.file.path);
 
-      // Recupera le proprietà dinamiche esistenti dal database
-      let existingProperties = [];
-      try {
-        const propertyKeys = await Contact.aggregate([
-          { $match: { properties: { $exists: true, $ne: null } } },
-          { $project: { properties: { $objectToArray: '$properties' } } },
-          { $unwind: '$properties' },
-          { $group: { _id: '$properties.k' } },
-          { $sort: { _id: 1 } }
-        ]);
-        existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
-      } catch (error) {
-        console.warn('⚠️ Errore nel recupero delle proprietà dinamiche:', error.message);
-      }
-
-      // Costruisce le opzioni di mappatura
-      const mappingInstructions = {
-        'name': 'Campo nome del contatto (obbligatorio)',
-        'email': 'Campo email (opzionale ma unico se fornito)',
-        'phone': 'Campo telefono (opzionale)',
-        'lists': 'Liste separate da virgola (es: "lista1,lista2")',
-        'ignore': 'Ignora questa colonna'
-      };
-
-      // Aggiunge le proprietà dinamiche esistenti
-      existingProperties.forEach(prop => {
-        mappingInstructions[`properties.${prop}`] = `Proprietà esistente: ${prop}`;
-      });
-
-      // Aggiunge esempi per nuove proprietà
-      mappingInstructions['properties.company'] = 'Esempio: crea proprietà "company"';
-      mappingInstructions['properties.customField'] = 'Esempio: crea proprietà personalizzata';
-
-      res.json({
-        success: true,
-        data: {
-          headers,
-          sampleRows: results,
-          totalPreviewRows: results.length,
-          availableFields: {
-            fixed: ['name', 'email', 'phone', 'lists'],
-            existingProperties: existingProperties,
-            newProperties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
-          },
-          mappingInstructions,
-          dynamicPropertiesInfo: {
-            existing: existingProperties,
-            count: existingProperties.length,
-            usage: 'Usa "properties.nomeProp" per mappare alle proprietà esistenti o crearne di nuove'
-          }
+        // Recupera le proprietà dinamiche esistenti dal database
+        let existingProperties = [];
+        try {
+          const propertyKeys = await Contact.aggregate([
+            { $match: { properties: { $exists: true, $ne: null } } },
+            { $project: { properties: { $objectToArray: '$properties' } } },
+            { $unwind: '$properties' },
+            { $group: { _id: '$properties.k' } },
+            { $sort: { _id: 1 } }
+          ]);
+          existingProperties = propertyKeys.map(item => item._id).filter(Boolean);
+        } catch (error) {
+          console.warn('⚠️ Errore nel recupero delle proprietà dinamiche:', error.message);
         }
-      });
+
+        // Costruisce le opzioni di mappatura
+        const mappingInstructions = {
+          'name': 'Campo nome del contatto (obbligatorio)',
+          'email': 'Campo email (opzionale ma unico se fornito)',
+          'phone': 'Campo telefono (opzionale)',
+          'lists': 'Liste separate da virgola (es: "lista1,lista2")',
+          'ignore': 'Ignora questa colonna'
+        };
+
+        // Aggiunge le proprietà dinamiche esistenti
+        existingProperties.forEach(prop => {
+          mappingInstructions[`properties.${prop}`] = `Proprietà esistente: ${prop}`;
+        });
+
+        // Aggiunge esempi per nuove proprietà
+        mappingInstructions['properties.company'] = 'Esempio: crea proprietà "company"';
+        mappingInstructions['properties.customField'] = 'Esempio: crea proprietà personalizzata';
+
+        res.json({
+          success: true,
+          data: {
+            headers,
+            sampleRows: results,
+            totalPreviewRows: results.length,
+            availableFields: {
+              fixed: ['name', 'email', 'phone', 'lists'],
+              existingProperties: existingProperties,
+              newProperties: 'Puoi creare nuove proprietà dinamiche usando il formato "properties.nomeProprietà"'
+            },
+            mappingInstructions,
+            dynamicPropertiesInfo: {
+              existing: existingProperties,
+              count: existingProperties.length,
+              usage: 'Usa "properties.nomeProp" per mappare alle proprietà esistenti o crearne di nuove'
+            }
+          }
+        });
     };
 
   } catch (error) {

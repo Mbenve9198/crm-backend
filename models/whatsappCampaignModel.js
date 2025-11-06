@@ -393,37 +393,37 @@ whatsappCampaignSchema.methods.getNextMessages = function(limit = 10) {
   
   this.messageQueue.forEach(m => {
     if (m.status !== 'pending') return;
-    
-    // Messaggi principali (sequenceIndex = 0)
-    if (m.sequenceIndex === 0) {
+      
+      // Messaggi principali (sequenceIndex = 0)
+      if (m.sequenceIndex === 0) {
       if (!m.scheduledAt || m.scheduledAt <= now) {
         principals.push(m);
       }
       return;
-    }
-    
-    // Follow-up (sequenceIndex > 0)
-    if (m.sequenceIndex > 0) {
+      }
+      
+      // Follow-up (sequenceIndex > 0)
+      if (m.sequenceIndex > 0) {
       // Debug per questo specifico follow-up
       const scheduledFor = m.followUpScheduledFor ? new Date(m.followUpScheduledFor) : null;
       const isTimeReady = scheduledFor && scheduledFor <= now;
       
       console.log(`  🔍 Follow-up seq ${m.sequenceIndex}: scheduled ${scheduledFor?.toISOString()}, now: ${now.toISOString()}, ready: ${isTimeReady}, hasResponse: ${m.hasReceivedResponse}`);
       
-      // Deve essere il momento giusto per il follow-up
-      if (!m.followUpScheduledFor || m.followUpScheduledFor > now) {
+        // Deve essere il momento giusto per il follow-up
+        if (!m.followUpScheduledFor || m.followUpScheduledFor > now) {
         return;
-      }
-      
-      // Se la condizione è 'no_response', controlla che non ci sia stata risposta
-      const sequence = this.messageSequences.find(seq => seq.id === m.sequenceId);
-      if (sequence && sequence.condition === 'no_response' && m.hasReceivedResponse) {
+        }
+        
+        // Se la condizione è 'no_response', controlla che non ci sia stata risposta
+        const sequence = this.messageSequences.find(seq => seq.id === m.sequenceId);
+        if (sequence && sequence.condition === 'no_response' && m.hasReceivedResponse) {
         console.log(`  ⏭️ Follow-up seq ${m.sequenceIndex} skipped - contatto ha già risposto`);
         return;
-      }
-      
+        }
+        
       followUps.push(m);
-    }
+      }
   });
   
   // 🎤 PRIORITÀ: Follow-up PRIMA dei principali

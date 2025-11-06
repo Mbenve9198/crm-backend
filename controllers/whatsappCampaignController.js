@@ -204,7 +204,7 @@ export const createCampaign = async (req, res) => {
     if (messageSequences && Array.isArray(messageSequences) && messageSequences.length > 0) {
       processedSequences = await Promise.all(messageSequences.map(async (seq) => {
         const processed = {
-          ...seq,
+        ...seq,
           templateVariables: extractTemplateVariables(seq.messageTemplate || '')
         };
         
@@ -228,10 +228,8 @@ export const createCampaign = async (req, res) => {
       });
     }
 
-    // Compila la coda messaggi
-    const messageQueue = await compileMessageQueue(contacts, messageTemplate, templateVariables);
-
-    // Crea la campagna
+    // 🚀 OTTIMIZZAZIONE: Crea campagna vuota prima, compila coda dopo
+    // Con 17K+ contatti, evita timeout di 30s
     const campaign = new WhatsappCampaign({
       name,
       description,
@@ -246,18 +244,37 @@ export const createCampaign = async (req, res) => {
       priority: priority || 'media', // ✅ Default priorità media
       timing,
       scheduledStartAt: scheduledStartAt ? new Date(scheduledStartAt) : null,
-      messageQueue,
+      messageQueue: [], // ← Vuota inizialmente
       owner: userId,
       createdBy: userId,
       status: scheduledStartAt ? 'scheduled' : 'draft'
     });
 
     await campaign.save();
+    
+    console.log(`✅ Campagna creata: ${campaign.name} (${contacts.length} contatti)`);
 
+    // Rispondi subito al client (no timeout)
     res.status(201).json({
       success: true,
       data: campaign,
-      message: 'Campagna creata con successo'
+      message: `Campagna creata. Compilazione ${contacts.length} messaggi in corso...`
+    });
+    
+    // 🚀 Compila messageQueue in background (non blocca response)
+    setImmediate(async () => {
+      try {
+        console.log(`📝 Inizio compilazione messageQueue per ${contacts.length} contatti...`);
+        const messageQueue = await compileMessageQueue(contacts, messageTemplate, templateVariables);
+        
+        campaign.messageQueue = messageQueue;
+        campaign.updateStats();
+        await campaign.save();
+        
+        console.log(`✅ MessageQueue compilata: ${messageQueue.length} messaggi`);
+      } catch (error) {
+        console.error(`❌ Errore compilazione messageQueue background:`, error);
+      }
     });
 
   } catch (error) {
