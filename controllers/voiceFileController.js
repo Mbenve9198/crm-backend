@@ -54,8 +54,14 @@ export const uploadVoiceFile = async (req, res) => {
         'whatsapp-campaign-audio'
       );
       
-      // Cleanup temp
-      fs.unlinkSync(tempPath);
+      // Cleanup temp (se esiste ancora - uploadToImageKit potrebbe averlo già eliminato)
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (cleanupErr) {
+        // Ignora errori cleanup
+      }
       
       console.log(`✅ MP3 uploadato su ImageKit: ${imagekitResult.url} (${(size / 1024).toFixed(2)} KB, ${duration || '?'}s)`);
 
