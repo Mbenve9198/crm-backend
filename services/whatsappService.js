@@ -683,20 +683,17 @@ class WhatsappService {
               const base64Data = matches[2];
               const buffer = Buffer.from(base64Data, 'base64');
               
-              // 🎤 CRITICO: OpenWA richiede path RELATIVO (non assoluto!)
-              // Salviamo in /tmp ma usiamo path relativo con ../
-              const absolutePath = path.join(os.tmpdir(), `voice-${Date.now()}.mp3`);
-              const relativePath = path.relative(process.cwd(), absolutePath);
+              // 🎤 CRITICO: File DEVE essere nella directory corrente per OpenWA
+              // Test funzionante usava ./file.mp3 (stessa directory)
+              const tempFile = `./voice-${Date.now()}.mp3`;
               
-              fs.writeFileSync(absolutePath, buffer);
-              console.log(`💾 MP3 salvato: ${absolutePath}`);
-              console.log(`📍 Path relativo: ${relativePath} (richiesto da OpenWA)`);
+              fs.writeFileSync(tempFile, buffer);
+              console.log(`💾 MP3 salvato nella directory corrente: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
               
-              // 🎤 SOLUZIONE TESTATA: sendFile con path RELATIVO + ptt=true
-              console.log(`🎤 Usando sendFile con ptt=true`);
+              // 🎤 SOLUZIONE TESTATA: sendFile con path ./file.mp3 + ptt=true
               messageId = await client.sendFile(
                 chatId,
-                relativePath, // ← Path RELATIVO (richiesto da OpenWA)
+                tempFile, // ./voice-xxx.mp3 (come nel test che ha funzionato!)
                 'voice.mp3',
                 '', // caption vuota
                 null, // quotedMsgId
@@ -706,10 +703,10 @@ class WhatsappService {
               
               console.log(`✅ sendFile risultato: ${messageId}`);
               
-              // Cleanup file temp
+              // Cleanup
               try {
-                fs.unlinkSync(absolutePath);
-                console.log(`🧹 File temp eliminato`);
+                fs.unlinkSync(tempFile);
+                console.log(`🧹 File eliminato`);
               } catch (cleanupError) {
                 console.warn(`⚠️  Errore cleanup: ${cleanupError.message}`);
               }
