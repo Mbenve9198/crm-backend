@@ -682,16 +682,21 @@ class WhatsappService {
               
               const base64Data = matches[2];
               const buffer = Buffer.from(base64Data, 'base64');
-              const tempFile = path.join(os.tmpdir(), `voice-${Date.now()}.mp3`);
               
-              fs.writeFileSync(tempFile, buffer);
-              console.log(`💾 MP3 salvato in temp: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
+              // 🎤 CRITICO: OpenWA richiede path RELATIVO (non assoluto!)
+              // Salviamo in /tmp ma usiamo path relativo con ../
+              const absolutePath = path.join(os.tmpdir(), `voice-${Date.now()}.mp3`);
+              const relativePath = path.relative(process.cwd(), absolutePath);
               
-              // 🎤 SOLUZIONE TESTATA: sendFile con ptt=true
-              console.log(`🎤 Usando sendFile con ptt=true (metodo testato e funzionante)`);
+              fs.writeFileSync(absolutePath, buffer);
+              console.log(`💾 MP3 salvato: ${absolutePath}`);
+              console.log(`📍 Path relativo: ${relativePath} (richiesto da OpenWA)`);
+              
+              // 🎤 SOLUZIONE TESTATA: sendFile con path RELATIVO + ptt=true
+              console.log(`🎤 Usando sendFile con ptt=true`);
               messageId = await client.sendFile(
                 chatId,
-                tempFile, // File locale temp
+                relativePath, // ← Path RELATIVO (richiesto da OpenWA)
                 'voice.mp3',
                 '', // caption vuota
                 null, // quotedMsgId
@@ -699,11 +704,11 @@ class WhatsappService {
                 true // ptt=true ← NOTA VOCALE!
               );
               
-              console.log(`✅ Nota vocale inviata, messageId: ${messageId}`);
+              console.log(`✅ sendFile risultato: ${messageId}`);
               
               // Cleanup file temp
               try {
-                fs.unlinkSync(tempFile);
+                fs.unlinkSync(absolutePath);
                 console.log(`🧹 File temp eliminato`);
               } catch (cleanupError) {
                 console.warn(`⚠️  Errore cleanup: ${cleanupError.message}`);
