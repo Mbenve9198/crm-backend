@@ -658,8 +658,9 @@ class WhatsappService {
           case 'audio':
             messageId = await client.sendPtt(chatId, attachment.url);
             break;
-          case 'voice': // 🎤 Note vocali WhatsApp PTT (solo MP3)
+          case 'voice': // 🎤 Note vocali WhatsApp PTT (MP3 da ImageKit)
             console.log(`🎤 Invio nota vocale PTT MP3`);
+            console.log(`   - URL: ${attachment.url?.substring(0, 80)}...`);
             console.log(`   - Dimensione: ${attachment.size ? (attachment.size / 1024).toFixed(2) + ' KB' : 'N/A'}`);
             console.log(`   - Durata: ${attachment.duration || '?'}s`);
             
@@ -668,48 +669,19 @@ class WhatsappService {
                 throw new Error('URL vocale mancante');
               }
               
-              const isDataUrl = attachment.url.startsWith('data:');
-              
-              // Estrai Base64 e salva come file MP3 temp
-              const fs = await import('fs');
-              const path = await import('path');
-              const os = await import('os');
-              
-              const matches = attachment.url.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
-              if (!matches) {
-                throw new Error('DataURL non valido');
-              }
-              
-              const base64Data = matches[2];
-              const buffer = Buffer.from(base64Data, 'base64');
-              
-              // 🎤 CRITICO: File DEVE essere nella directory corrente per OpenWA
-              // Test funzionante usava ./file.mp3 (stessa directory)
-              const tempFile = `./voice-${Date.now()}.mp3`;
-              
-              fs.writeFileSync(tempFile, buffer);
-              console.log(`💾 MP3 salvato nella directory corrente: ${tempFile} (${(buffer.length / 1024).toFixed(2)} KB)`);
-              
-              // 🎤 SOLUZIONE TESTATA: sendFile con path ./file.mp3 + ptt=true
+              // 🎤 SOLUZIONE TESTATA: URL ImageKit MP3 diretto con sendFile ptt=true
+              console.log(`🎤 sendFile con URL ImageKit diretto + ptt=true`);
               messageId = await client.sendFile(
                 chatId,
-                tempFile, // ./voice-xxx.mp3 (come nel test che ha funzionato!)
+                attachment.url, // URL ImageKit diretto!
                 'voice.mp3',
-                '', // caption vuota
+                '', // caption
                 null, // quotedMsgId
                 true, // waitForId
                 true // ptt=true ← NOTA VOCALE!
               );
               
-              console.log(`✅ sendFile risultato: ${messageId}`);
-              
-              // Cleanup
-              try {
-                fs.unlinkSync(tempFile);
-                console.log(`🧹 File eliminato`);
-              } catch (cleanupError) {
-                console.warn(`⚠️  Errore cleanup: ${cleanupError.message}`);
-              }
+              console.log(`✅ Nota vocale inviata, messageId: ${messageId}`);
               
             } catch (voiceError) {
               console.error(`❌ Errore invio nota vocale:`, voiceError);
@@ -1210,29 +1182,29 @@ class WhatsappService {
       let attachmentsToSend = [];
       
       if (messageData.sequenceIndex > 0) {
-        // Follow-up: leggi attachment dalla sequenza (non da messageData)
+        // Follow-up: leggi attachment dalla sequenza
         const sequence = campaign.messageSequences?.find(s => s.id === messageData.sequenceId);
         if (sequence && sequence.attachment) {
-          // 🎤 Se ha voiceFileId, carica DataURL direttamente dal DB
+          // 🎤 Se ha voiceFileId, carica URL ImageKit dal DB
           if (sequence.attachment.voiceFileId) {
             const VoiceFile = (await import('../models/voiceFileModel.js')).default;
             const voiceFile = await VoiceFile.findById(sequence.attachment.voiceFileId);
             
             if (voiceFile && voiceFile.dataUrl) {
-              sequence.attachment.url = voiceFile.dataUrl; // DataURL diretto
-              console.log(`🎤 Follow-up ${messageData.sequenceIndex}: DataURL caricato da VoiceFile ${voiceFile._id} (${(voiceFile.dataUrl.length / 1024).toFixed(2)} KB)`);
+              sequence.attachment.url = voiceFile.dataUrl; // URL ImageKit (salvato in dataUrl)
+              console.log(`🎤 Follow-up ${messageData.sequenceIndex}: URL ImageKit caricato da VoiceFile ${voiceFile._id}`);
             } else {
               console.error(`❌ VoiceFile ${sequence.attachment.voiceFileId} non trovato`);
             }
           }
           
           attachmentsToSend = [sequence.attachment];
-          console.log(`🎤 Follow-up ${messageData.sequenceIndex}: allegato ${sequence.attachment.type} letto dalla sequenza`);
+          console.log(`🎤 Follow-up ${messageData.sequenceIndex}: allegato ${sequence.attachment.type} letto`);
         }
       } else {
         // Messaggio principale: usa attachments della campagna
         if (campaign.attachments && campaign.attachments.length > 0) {
-          // 🎤 Carica DataURL per voiceFileId
+          // 🎤 Carica URL ImageKit per voiceFileId
           const processedAttachments = [];
           
           for (const att of campaign.attachments) {
@@ -1243,8 +1215,8 @@ class WhatsappService {
               const voiceFile = await VoiceFile.findById(plainAtt.voiceFileId);
               
               if (voiceFile && voiceFile.dataUrl) {
-                plainAtt.url = voiceFile.dataUrl; // DataURL diretto
-                console.log(`🎤 Messaggio principale: DataURL caricato da VoiceFile ${voiceFile._id} (${(voiceFile.dataUrl.length / 1024).toFixed(2)} KB)`);
+                plainAtt.url = voiceFile.dataUrl; // URL ImageKit
+                console.log(`🎤 Messaggio principale: URL ImageKit caricato da VoiceFile ${voiceFile._id}`);
               } else {
                 console.error(`❌ VoiceFile ${plainAtt.voiceFileId} non trovato`);
               }

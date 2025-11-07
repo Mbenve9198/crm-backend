@@ -24,37 +24,71 @@ export const uploadVoiceFile = async (req, res) => {
       });
     }
 
-    // Estrai mime type
-    const mimeTypeMatch = dataUrl.match(/^data:([^;]+);/);
-    const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'audio/mpeg';
+    // 🎤 Upload su ImageKit invece di salvare DataURL
+    const { uploadToImageKit } = await import('../config/imagekit.js');
+    
+    // Estrai Base64 e converti in Buffer
+    const matches = dataUrl.match(/^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/);
+    if (!matches) {
+      return res.status(400).json({
+        success: false,
+        message: 'DataURL non valido'
+      });
+    }
+    
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Salva temporaneamente
+    const fs = await import('fs');
+    const path = await import('path');
+    const os = await import('os');
+    const tempPath = path.join(os.tmpdir(), `upload-${Date.now()}.mp3`);
+    fs.writeFileSync(tempPath, buffer);
+    
+    try {
+      // Upload su ImageKit
+      const imagekitResult = await uploadToImageKit(
+        tempPath,
+        `voice-${Date.now()}.mp3`,
+        'whatsapp-campaign-audio'
+      );
+      
+      // Cleanup temp
+      fs.unlinkSync(tempPath);
+      
+      console.log(`✅ MP3 uploadato su ImageKit: ${imagekitResult.url} (${(size / 1024).toFixed(2)} KB, ${duration || '?'}s)`);
 
-    // Crea VoiceFile
-    const voiceFile = new VoiceFile({
-      dataUrl,
-      filename: filename || 'vocale.mp3',
-      size: size || 0,
-      duration,
-      mimeType,
-      owner: userId,
-      createdBy: userId
-    });
+      // Salva SOLO URL ImageKit (no DataURL!)
+      const voiceFile = new VoiceFile({
+        dataUrl: imagekitResult.url, // URL ImageKit invece di DataURL!
+        filename: filename || 'vocale.mp3',
+        size: size || 0,
+        duration,
+        mimeType: 'audio/mpeg',
+        owner: userId,
+        createdBy: userId
+      });
 
-    await voiceFile.save();
+      await voiceFile.save();
 
-    console.log(`✅ VoiceFile MP3 salvato: ${voiceFile._id} (${(size / 1024).toFixed(2)} KB, ${duration || '?'}s)`);
-
-    res.json({
-      success: true,
-      data: {
-        voiceFileId: voiceFile._id,
-        filename: voiceFile.filename,
-        size: voiceFile.size,
-        duration: voiceFile.duration,
-        // URL pubblico per accesso (SEMPRE HTTPS per WhatsApp)
-        publicUrl: `${process.env.API_URL || 'https://' + req.get('host')}/api/voice-files/${voiceFile._id}/audio`
-      },
-      message: 'Vocale MP3 salvato con successo'
-    });
+      res.json({
+        success: true,
+        data: {
+          voiceFileId: voiceFile._id,
+          filename: voiceFile.filename,
+          size: voiceFile.size,
+          duration: voiceFile.duration,
+          publicUrl: imagekitResult.url // URL ImageKit diretto!
+        },
+        message: 'Vocale MP3 salvato su ImageKit'
+      });
+      
+    } catch (uploadError) {
+      // Cleanup temp in caso di errore
+      try { fs.unlinkSync(tempPath); } catch (e) {}
+      throw uploadError;
+    }
 
   } catch (error) {
     console.error('Errore upload voice file:', error);
