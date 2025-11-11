@@ -351,6 +351,117 @@ export const updateCampaign = async (req, res) => {
 };
 
 /**
+ * Cambia la sessione WhatsApp di una campagna (anche in corso)
+ * PUT /whatsapp-campaigns/:id/change-session
+ */
+export const changeCampaignSession = async (req, res) => {
+  try {
+    const campaignId = req.params.id;
+    const userId = req.user._id;
+    const { newWhatsappSessionId } = req.body;
+
+    console.log(`🔄 Richiesta cambio sessione per campagna ${campaignId}`);
+
+    // Valida input
+    if (!newWhatsappSessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'newWhatsappSessionId è obbligatorio'
+      });
+    }
+
+    // Trova la campagna
+    const campaign = await WhatsappCampaign.findOne({
+      _id: campaignId,
+      owner: userId
+    });
+
+    if (!campaign) {
+      return res.status(404).json({
+        success: false,
+        message: 'Campagna non trovata'
+      });
+    }
+
+    // ✅ PERMETTI CAMBIO ANCHE PER CAMPAGNE IN CORSO
+    // Non blocchiamo per status - è sicuro cambiare la sessione in qualsiasi momento
+    console.log(`📊 Campagna attuale: status=${campaign.status}, sessionId=${campaign.whatsappSessionId}`);
+
+    // Verifica che non stia cercando di impostare la stessa sessione
+    if (campaign.whatsappSessionId === newWhatsappSessionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'La nuova sessione è uguale a quella attuale'
+      });
+    }
+
+    // Verifica che la nuova sessione esista e sia dell'utente
+    const newSession = await WhatsappSession.findOne({
+      sessionId: newWhatsappSessionId,
+      owner: userId
+    });
+
+    if (!newSession) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nuova sessione WhatsApp non trovata o non autorizzata'
+      });
+    }
+
+    // Verifica che la nuova sessione sia connessa
+    if (!newSession.isActive()) {
+      return res.status(400).json({
+        success: false,
+        message: 'La nuova sessione WhatsApp deve essere connessa e attiva',
+        details: {
+          sessionStatus: newSession.status,
+          sessionNumber: newSession.phoneNumber
+        }
+      });
+    }
+
+    // Salva vecchia sessione per logging e risposta
+    const oldSessionId = campaign.whatsappSessionId;
+    const oldNumber = campaign.whatsappNumber;
+
+    // 🔄 Aggiorna la campagna con la nuova sessione
+    campaign.whatsappSessionId = newWhatsappSessionId;
+    campaign.whatsappNumber = newSession.phoneNumber;
+    campaign.lastModifiedBy = userId;
+    
+    await campaign.save();
+
+    console.log(`✅ Sessione cambiata con successo per campagna "${campaign.name}"`);
+    console.log(`   Da: ${oldSessionId} (${oldNumber})`);
+    console.log(`   A:  ${newWhatsappSessionId} (${newSession.phoneNumber})`);
+    console.log(`   Messaggi pending: ${campaign.messageQueue.filter(m => m.status === 'pending').length}`);
+
+    res.json({
+      success: true,
+      data: campaign,
+      message: `Sessione cambiata con successo. I messaggi rimanenti verranno inviati tramite ${newSession.phoneNumber}`,
+      changes: {
+        oldSessionId,
+        oldNumber,
+        newSessionId: newWhatsappSessionId,
+        newNumber: newSession.phoneNumber,
+        campaignStatus: campaign.status,
+        pendingMessages: campaign.messageQueue.filter(m => m.status === 'pending').length,
+        sentMessages: campaign.messageQueue.filter(m => ['sent', 'delivered', 'read'].includes(m.status)).length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore cambio sessione campagna:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
  * Aggiorna lo stato di un messaggio specifico in una campagna
  * PUT /whatsapp-campaigns/:campaignId/messages/:messageId/status
  */

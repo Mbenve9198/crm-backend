@@ -5,6 +5,7 @@ import {
   getCampaign,
   createCampaign,
   updateCampaign,
+  changeCampaignSession, // 🔄 NUOVO: Cambio sessione
   startCampaign,
   pauseCampaign,
   resumeCampaign,
@@ -41,6 +42,9 @@ router.post('/', createCampaign);
 
 // PUT /api/whatsapp-campaigns/:id - Aggiorna campagna
 router.put('/:id', updateCampaign);
+
+// 🔄 PUT /api/whatsapp-campaigns/:id/change-session - Cambia sessione WhatsApp (anche in corso)
+router.put('/:id/change-session', changeCampaignSession);
 
 // PUT /api/whatsapp-campaigns/:campaignId/messages/:messageId/status - Aggiorna status messaggio
 router.put('/:campaignId/messages/:messageId/status', updateMessageStatus);
@@ -123,6 +127,32 @@ export default router;
  * Aggiorna una campagna (solo se draft o scheduled)
  * Body: Stessi parametri del POST (parziali)
  * Response: { success: true, data: WhatsappCampaign }
+ * 
+ * 🔄 PUT /api/whatsapp-campaigns/:id/change-session (NUOVO!)
+ * Cambia la sessione WhatsApp di una campagna (ANCHE SE IN CORSO!)
+ * Permette di cambiare il numero WhatsApp usato per l'invio
+ * 
+ * Body: {
+ *   newWhatsappSessionId: string (required) // ID della nuova sessione
+ * }
+ * 
+ * Response: {
+ *   success: true,
+ *   data: WhatsappCampaign,
+ *   message: string,
+ *   changes: {
+ *     oldSessionId: string,
+ *     oldNumber: string,
+ *     newSessionId: string,
+ *     newNumber: string,
+ *     campaignStatus: string,
+ *     pendingMessages: number,
+ *     sentMessages: number
+ *   }
+ * }
+ * 
+ * NOTA: La nuova sessione DEVE essere connessa e attiva!
+ * SICURO: I messaggi già inviati restano invariati, solo i pending useranno la nuova sessione
  * 
  * POST /api/whatsapp-campaigns/preview
  * Anteprima di una campagna
