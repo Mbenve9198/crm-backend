@@ -193,7 +193,157 @@ export const receiveRankCheckerLead = async (req, res) => {
   }
 };
 
+/**
+ * Riceve e processa lead da Smartlead (campagne email outbound)
+ * POST /api/inbound/smartlead-lead
+ */
+export const receiveSmartleadLead = async (req, res) => {
+  try {
+    const { 
+      name, 
+      email, 
+      phone, 
+      lists = [],
+      status = 'da contattare',
+      source = 'smartlead_outbound',
+      properties = {}
+    } = req.body;
+
+    // Validazione base
+    if (!email || !name) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email e nome sono obbligatori'
+      });
+    }
+
+    console.log(`📥 SMARTLEAD LEAD: ${name} (${email})`);
+
+    // Trova l'owner di default per i lead inbound
+    let defaultOwner;
+    
+    if (process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL) {
+      defaultOwner = await User.findOne({ 
+        email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL.toLowerCase() 
+      });
+      
+      if (defaultOwner) {
+        console.log(`👤 Owner trovato: ${defaultOwner.firstName} ${defaultOwner.lastName}`);
+      }
+    }
+    
+    if (!defaultOwner) {
+      defaultOwner = await User.findOne({ 
+        role: { $in: ['admin', 'manager'] },
+        isActive: true 
+      }).sort({ createdAt: 1 });
+    }
+
+    if (!defaultOwner) {
+      console.error('❌ Nessun owner disponibile');
+      return res.status(500).json({
+        success: false,
+        message: 'Configurazione CRM non completa: nessun owner disponibile'
+      });
+    }
+
+    // Verifica se esiste già un contatto con questa email
+    let contact = await Contact.findOne({ email: email.toLowerCase() });
+    let isNew = false;
+    
+    if (contact) {
+      // AGGIORNA contatto esistente
+      console.log(`🔄 Contatto esistente trovato, aggiorno...`);
+      
+      // Aggiungi alle liste se non già presenti
+      lists.forEach(list => {
+        if (!contact.lists.includes(list)) {
+          contact.lists.push(list);
+        }
+      });
+      
+      // Aggiorna source solo se era manual
+      if (contact.source === 'manual') {
+        contact.source = source;
+      }
+      
+      // Aggiorna phone se non presente
+      if (!contact.phone && phone) {
+        contact.phone = phone;
+      }
+      
+      // Merge properties (conserva quelli esistenti + nuovi)
+      contact.properties = {
+        ...contact.properties,
+        ...properties
+      };
+      
+      contact.lastModifiedBy = defaultOwner._id;
+      await contact.save();
+      
+      console.log(`✅ Contatto aggiornato: ${contact.name}`);
+      
+    } else {
+      // CREA nuovo contatto
+      console.log(`🆕 Creazione nuovo contatto...`);
+      isNew = true;
+      
+      contact = new Contact({
+        name,
+        email: email.toLowerCase(),
+        phone: phone || undefined,
+        lists,
+        status,
+        source,
+        properties,
+        owner: defaultOwner._id,
+        createdBy: defaultOwner._id
+      });
+      
+      await contact.save();
+      
+      // Aggiorna statistiche dell'owner
+      await defaultOwner.updateStats({ newContact: true });
+      await defaultOwner.save();
+      
+      console.log(`✅ Nuovo contatto creato: ${contact.name}`);
+    }
+
+    return res.status(isNew ? 201 : 200).json({
+      success: true,
+      message: isNew ? 'Lead ricevuto e contatto creato' : 'Lead ricevuto e contatto aggiornato',
+      isNew,
+      contact: {
+        _id: contact._id,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        lists: contact.lists,
+        status: contact.status
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore ricezione lead Smartlead:', error);
+    
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'Contatto già esistente',
+        error: 'DUPLICATE_EMAIL'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Errore interno del server',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 export default {
-  receiveRankCheckerLead
+  receiveRankCheckerLead,
+  receiveSmartleadLead
 };
 

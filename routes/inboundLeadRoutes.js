@@ -1,5 +1,5 @@
 import express from 'express';
-import { receiveRankCheckerLead } from '../controllers/inboundLeadController.js';
+import { receiveRankCheckerLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
 
 const router = express.Router();
 
@@ -25,7 +25,25 @@ const router = express.Router();
  */
 router.post('/rank-checker-lead', receiveRankCheckerLead);
 
+/**
+ * Riceve lead da Smartlead (campagne email outbound)
+ * POST /api/inbound/smartlead-lead
+ * 
+ * Body:
+ * {
+ *   name: string,
+ *   email: string,
+ *   phone: string (opzionale),
+ *   lists: array,
+ *   status: string,
+ *   source: string,
+ *   properties: object
+ * }
+ */
+router.post('/smartlead-lead', receiveSmartleadLead);
+
 export default router;
+
 
 
 
