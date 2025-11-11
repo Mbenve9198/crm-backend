@@ -205,6 +205,7 @@ export const receiveSmartleadLead = async (req, res) => {
       phone, 
       lists = [],
       status = 'da contattare',
+      mrr = 0, // Default 0 per status 'interessato'
       source = 'smartlead_outbound',
       properties = {}
     } = req.body;
@@ -272,6 +273,23 @@ export const receiveSmartleadLead = async (req, res) => {
         contact.phone = phone;
       }
       
+      // Aggiorna status se fornito (es. 'interessato' da Smartlead)
+      // Ma solo se non è già in uno stato più avanzato
+      const statusHierarchy = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+      const currentStatusIndex = statusHierarchy.indexOf(contact.status);
+      const newStatusIndex = statusHierarchy.indexOf(status);
+      
+      if (newStatusIndex > currentStatusIndex || status === 'interessato') {
+        contact.status = status;
+        
+        // Imposta MRR se necessario
+        if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status)) {
+          if (contact.mrr === undefined || contact.mrr === null) {
+            contact.mrr = mrr;
+          }
+        }
+      }
+      
       // Merge properties (conserva quelli esistenti + nuovi)
       contact.properties = {
         ...contact.properties,
@@ -294,6 +312,7 @@ export const receiveSmartleadLead = async (req, res) => {
         phone: phone || undefined,
         lists,
         status,
+        mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status) ? mrr : undefined,
         source,
         properties,
         owner: defaultOwner._id,
