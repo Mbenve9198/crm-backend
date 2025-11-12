@@ -12,6 +12,68 @@ class SerperService {
   }
 
   /**
+   * 🆕 Trova le coordinate di un ristorante usando nome e indirizzo
+   * @param {string} restaurantName - Nome del ristorante
+   * @param {string} address - Indirizzo
+   * @param {string} city - Città
+   * @returns {Promise<Object>} - Coordinate e dati ristorante
+   */
+  async findRestaurantCoordinates(restaurantName, address, city) {
+    try {
+      if (!this.apiKey) {
+        throw new Error('SERPER_API_KEY non configurata');
+      }
+
+      // Costruisci query di ricerca
+      const searchQuery = `${restaurantName} ${address} ${city}`;
+      
+      console.log(`🔍 Serper Step 1: Ricerca coordinate per "${searchQuery}"`);
+      
+      const response = await axios.post(
+        this.apiUrl,
+        {
+          q: searchQuery,
+          num: 5 // Primi 5 risultati
+        },
+        {
+          headers: {
+            'X-API-KEY': this.apiKey,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+      
+      const places = response.data.places || [];
+      
+      if (places.length === 0) {
+        console.log('⚠️  Nessun risultato trovato');
+        return null;
+      }
+
+      // Prendi il primo risultato (dovrebbe essere il ristorante cercato)
+      const restaurant = places[0];
+      
+      console.log(`✅ Ristorante trovato: ${restaurant.title}`);
+      console.log(`📍 Coordinate: ${restaurant.latitude}, ${restaurant.longitude}`);
+      
+      return {
+        name: restaurant.title,
+        address: restaurant.address,
+        latitude: restaurant.latitude,
+        longitude: restaurant.longitude,
+        rating: restaurant.rating,
+        reviews: restaurant.reviews || restaurant.ratingCount || 0,
+        placeId: restaurant.placeId
+      };
+      
+    } catch (error) {
+      console.error(`❌ Errore ricerca coordinate:`, error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Cerca un ristorante su Google Maps e trova i competitor nelle vicinanze
    * @param {string} restaurantName - Nome del ristorante
    * @param {string} keyword - Parola chiave di ricerca (es. "ristorante italiano")
@@ -29,7 +91,7 @@ class SerperService {
       // Costruisci query e location (zoom quartiere per risultati locali)
       const ll = `@${lat},${lng},${radius}z`;
       
-      console.log(`🔍 Serper: "${keyword}" @ ${ll}`);
+      console.log(`🔍 Serper Step 2: "${keyword}" @ ${ll}`);
       
       const response = await axios.post(
         this.apiUrl,
@@ -149,28 +211,84 @@ class SerperService {
 
   /**
    * Analizza il contesto del contatto per generare dati utili al messaggio
+   * 🆕 NUOVO FLUSSO: Usa nome + indirizzo per trovare coordinate, poi cerca competitor
    * @param {Object} contact - Contatto da analizzare
    * @returns {Promise<Object>} - Dati di analisi per generazione messaggio
    */
   async analyzeContactContext(contact) {
     try {
-      // Estrai dati necessari dal contatto
-      const restaurantName = contact.properties?.restaurant_name || contact.name;
+      // Estrai dati dal contatto (CAMPI REALI: Città, Indirizzo con maiuscole!)
+      const restaurantName = contact.name; // Nome dal campo base
+      const city = contact.properties?.Città || contact.properties?.city || '';
+      const address = contact.properties?.Indirizzo || contact.properties?.address || '';
       const keyword = contact.properties?.keyword || 'ristorante';
-      const lat = contact.properties?.latitude;
-      const lng = contact.properties?.longitude;
+      
+      // Controlla se ha già coordinate
+      let lat = contact.properties?.latitude;
+      let lng = contact.properties?.longitude;
+      let userRating = parseFloat(contact.properties?.Rating || contact.properties?.rating || 0);
+      let userReviews = parseInt(contact.properties?.Recensioni || contact.properties?.reviews_count || contact.properties?.reviews || 0);
 
+      // Se non ha coordinate, cercale con Serper
       if (!lat || !lng) {
-        console.warn(`⚠️  Contatto ${contact.name} senza coordinate GPS`);
+        if (!address || !city) {
+          console.warn(`⚠️  Contatto ${contact.name} senza indirizzo o città`);
+          return {
+            hasData: false,
+            error: 'Indirizzo o città mancanti (richiesti per trovare coordinate)'
+          };
+        }
+
+        console.log(`🔍 Step 1: Cerco coordinate per ${restaurantName} a ${city}...`);
+        
+        // STEP 1: Trova coordinate del ristorante
+        const restaurantData = await this.findRestaurantCoordinates(restaurantName, address, city);
+        
+        if (!restaurantData || !restaurantData.latitude || !restaurantData.longitude) {
+          console.warn(`⚠️  Impossibile trovare coordinate per ${restaurantName}`);
+          return {
+            hasData: false,
+            error: 'Coordinate non trovate su Google Maps'
+          };
+        }
+
+        lat = restaurantData.latitude;
+        lng = restaurantData.longitude;
+        
+        // Usa anche i dati trovati se non presenti
+        if (!userRating && restaurantData.rating) {
+          userRating = restaurantData.rating;
+        }
+        if (!userReviews && restaurantData.reviews) {
+          userReviews = restaurantData.reviews;
+        }
+        
+        console.log(`✅ Coordinate trovate: ${lat}, ${lng}`);
+      } else {
+        console.log(`✅ Coordinate già presenti: ${lat}, ${lng}`);
+      }
+
+      console.log(`🔍 Step 2: Cerco competitor vicino a ${restaurantName}...`);
+
+      // STEP 2: Cerca ranking e competitor
+      const rankingData = await this.getGoogleMapsRanking(restaurantName, keyword, lat, lng);
+      
+      if (!rankingData) {
+        console.warn(`⚠️  Dati ranking non disponibili per ${restaurantName}`);
         return {
           hasData: false,
-          error: 'Coordinate GPS mancanti'
+          error: 'Dati ranking non disponibili'
         };
       }
 
-      // Ottieni competitor
-      const competitors = await this.getTopCompetitors(restaurantName, keyword, lat, lng);
-      
+      // Filtra competitor non null e ordina per numero di recensioni
+      const competitors = [
+        rankingData.competitor1,
+        rankingData.competitor2,
+        rankingData.competitor3
+      ].filter(c => c !== null)
+       .sort((a, b) => b.reviews - a.reviews);
+
       if (competitors.length === 0) {
         console.warn(`⚠️  Nessun competitor trovato per ${restaurantName}`);
         return {
@@ -184,10 +302,12 @@ class SerperService {
         restaurantName,
         keyword,
         competitors: competitors,
-        userReviews: contact.properties?.reviews || 0,
-        userRating: contact.properties?.rating || 0,
-        city: contact.properties?.city || '',
-        address: contact.properties?.address || ''
+        userRank: rankingData.userRank,
+        userReviews: rankingData.userReviews || userReviews,
+        userRating: rankingData.userRating || userRating,
+        city: city,
+        address: address,
+        coordinates: { lat, lng } // Salva per uso futuro
       };
 
     } catch (error) {
