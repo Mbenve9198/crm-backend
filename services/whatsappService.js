@@ -184,9 +184,18 @@ class WhatsappService {
    * Setup dei listener globali per gli eventi OpenWA
    */
   setupGlobalEventListeners() {
+    console.log('🎧 Configurazione listener eventi OpenWA...');
+    
+    // DEBUG: Listener per TUTTI gli eventi
+    ev.on('**.**', (data, sessionId, namespace) => {
+      console.log(`🔔 Evento OpenWA: ${namespace}.${sessionId}`);
+    });
+    
     // Listener per QR codes
     ev.on('qr.**', async (qrcode, sessionId) => {
-      console.log(`📱 QR code ricevuto per sessione: ${sessionId}`);
+      console.log(`📱 ===== QR CODE EVENTO RICEVUTO =====`);
+      console.log(`📱 SessionId: ${sessionId}`);
+      console.log(`📱 QR length: ${qrcode?.length}`);
       await this.handleQrCode(sessionId, qrcode);
     });
 
@@ -207,6 +216,8 @@ class WhatsappService {
       console.log(`🚀 Sessione pronta: ${sessionId}`);
       await this.handleReady(sessionId, data);
     });
+    
+    console.log('✅ Listener eventi OpenWA configurati');
   }
 
   /**
