@@ -38,10 +38,10 @@ class ClaudeService {
       } = context;
 
       // Default settings
-      const tone = campaignSettings.tone || 'professionale e amichevole';
-      const maxLength = campaignSettings.maxLength || 300;
+      const tone = campaignSettings.tone || 'colloquiale e amichevole';
+      const maxLength = campaignSettings.maxLength || 350; // Aumentato default
       const focusPoint = campaignSettings.focusPoint || 'visibilità su Google';
-      const cta = campaignSettings.cta || 'chiedere se sono interessati a migliorare';
+      const cta = campaignSettings.cta || 'offrire tool gratuito';
 
       // Costruisci prompt per Claude
       const prompt = this.buildPrompt({
@@ -55,7 +55,7 @@ class ClaudeService {
         maxLength,
         focusPoint,
         cta,
-        userRank: context.userRank // 🆕 Aggiungi ranking per prompt più specifico
+        userRank: context.userRank
       });
 
       console.log(`🤖 Generazione messaggio con Claude per ${restaurantName}...`);
@@ -107,36 +107,37 @@ class ClaudeService {
     // Determina posizione del ristorante
     const rankText = typeof userRank === 'number' ? `posizione ${userRank}` : 'fuori dalla top 20';
 
-    return `Sei un esperto di marketing digitale per ristoranti. Devi generare un messaggio WhatsApp colloquiale e diretto come se stessi parlando ad un amico ristoratore.
+    return `Sei un esperto di marketing digitale per ristoranti. Genera un messaggio WhatsApp colloquiale e diretto.
 
-CONTESTO RICERCA GOOGLE MAPS:
-- Ho cercato "${keyword}" su Google Maps${city ? ` a ${city}` : ''}
-- Il ristorante "${restaurantName}" esce alla ${rankText} con ${userReviews} recensioni
+DATI REALI:
+- Ristorante: "${restaurantName}"${city ? ` a ${city}` : ''}
+- Posizione Google Maps: ${rankText}  
+- Recensioni: ${userReviews}
 
-COMPETITOR PRINCIPALI (che escono PRIMA):
+TOP COMPETITOR:
 ${competitorList}
 
 STILE DEL MESSAGGIO:
 - Tono colloquiale e amichevole (come parlassi ad un amico)
-- Inizia con "Ciao ragazzi" o simile
-- Spiega CHE HAI FATTO una ricerca su Google Maps nella loro città
-- Menziona la POSIZIONE ESATTA del loro ristorante
-- Nomina almeno 1-2 competitor SPECIFICI con posizione e recensioni
+- Inizia con "Ciao ragazzi" o variante simile
+- Spiega che hai fatto una ricerca su Google Maps nella loro città
+- Menziona la POSIZIONE del loro ristorante
+- Nomina 1-2 competitor SPECIFICI con numero recensioni
 - Evidenzia che "stanno letteralmente prendendo i clienti che dovrebbero essere vostri" o concetto simile
 - Proponi un tool GRATUITO per aiutarli a migliorare la visibilità
 - Chiudi con "te lo giro? È gratis" o simile
-- Massimo ${maxLength} caratteri
+- Preferibilmente sotto ${maxLength} caratteri (ma non è rigido)
 - NO emoji
 - NO formattazione markdown
 - Linguaggio naturale e spontaneo
 
-ESEMPIO DI OUTPUT (NON copiare esattamente, ma segui questo stile):
+ESEMPIO DI OUTPUT (segui questo stile ma adatta ai dati reali):
 "Ciao ragazzi, ho fatto una ricerca su google maps a Firenze e il vostro ristorante esce fuori alla posizione 16 con 45 recensioni, mentre i vostri competitor principali tipo La Taverna è secondo con 320 recensioni, Il Vecchio Mulino è terzo con 280 recensioni. Stanno letteralmente prendendo i clienti che dovrebbero essere vostri. Ho creato un tool completamente gratuito dove potete vedere come apparire tra i primi risultati su google maps, te lo giro? È gratis"
 
 IMPORTANTE:
-- Usa i DATI REALI forniti nel contesto (nome ristorante, città, posizione, competitor)
+- Usa i DATI REALI forniti (nome ristorante, città, posizione, competitor)
 - Sii SPECIFICO con nomi e numeri
-- Mantieni un tono da "consulente amico" non da venditore aggressivo
+- Tono da "consulente amico" non da venditore aggressivo
 - Genera SOLO il messaggio, senza spiegazioni
 
 Genera il messaggio:`;
@@ -162,7 +163,7 @@ Genera il messaggio:`;
       for (let i = 0; i < numVariants; i++) {
         const settings = {
           tone: tones[i % tones.length],
-          maxLength: 280,
+          maxLength: 350,
           focusPoint: i === 0 ? 'visibilità su Google' : (i === 1 ? 'numero di recensioni' : 'competizione locale'),
           cta: 'chiedere se sono interessati a saperne di più'
         };
@@ -204,10 +205,10 @@ Genera il messaggio:`;
       issues: []
     };
 
-    // Lunghezza
-    if (message.length > 350) {
-      validation.issues.push('Messaggio troppo lungo (max 350 caratteri)');
-      validation.score -= 20;
+    // Lunghezza (warning, non error)
+    if (message.length > 400) {
+      validation.issues.push('Messaggio molto lungo (oltre 400 caratteri)');
+      validation.score -= 10;
     }
 
     // Presenza di emoji (non dovrebbero esserci)

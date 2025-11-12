@@ -127,7 +127,7 @@ class SerperService {
       console.log(`🔍 Serper: "${keyword}" @ ${ll}`);
       
       const response = await axios.post(
-        this.apiUrl,
+        this.mapsApiUrl,
         {
           q: keyword,
           ll: ll,
@@ -176,21 +176,31 @@ class SerperService {
         userRank = 'Fuori Top 20';
       }
       
-      // Estrai TOP 3 competitor CHE SONO DAVANTI (rank migliore)
-      const competitors = places
-        .filter(p => {
-          // SOLO quelli con ranking MIGLIORE (numero più basso)
-          const placeRank = p.position || (places.indexOf(p) + 1);
-          return typeof userRank === 'number' && placeRank < userRank;
-        })
-        .slice(0, 3)
-        .map((place) => ({
-          rank: place.position || (places.indexOf(place) + 1),
-          name: place.title,
-          rating: place.rating,
-          reviews: place.reviews || place.ratingCount || 0,
-          address: place.address
-        }));
+      // Estrai TOP 3 competitor
+      let competitors = [];
+      
+      if (typeof userRank === 'number') {
+        // Se abbiamo trovato il ristorante, prendi solo quelli DAVANTI
+        competitors = places
+          .filter(p => {
+            const placeRank = p.position || (places.indexOf(p) + 1);
+            return placeRank < userRank;
+          })
+          .slice(0, 3);
+      } else {
+        // Se NON trovato (Fuori Top 20), prendi i primi 3 in assoluto
+        console.log(`📊 Ristorante fuori Top 20, uso i primi 3 competitor come riferimento`);
+        competitors = places.slice(0, 3);
+      }
+      
+      // Mappa competitor
+      competitors = competitors.map((place, idx) => ({
+        rank: place.position || (places.indexOf(place) + 1),
+        name: place.title,
+        rating: place.rating,
+        reviews: place.reviews || place.ratingCount || 0,
+        address: place.address
+      }));
       
       return {
         userRank,
