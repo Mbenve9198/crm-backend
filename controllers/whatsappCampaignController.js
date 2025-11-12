@@ -651,15 +651,26 @@ export const startCampaign = async (req, res) => {
       });
     }
 
-    // 🎤 NUOVO: Validazione messaggio principale
-    const hasMainText = campaign.messageTemplate && campaign.messageTemplate.trim();
-    const hasMainVoice = campaign.attachments && campaign.attachments.some(a => a.type === 'voice');
-    
-    if (!hasMainText && !hasMainVoice) {
-      return res.status(400).json({
-        success: false,
-        message: 'Il messaggio principale deve avere almeno un testo o un vocale'
-      });
+    // 🤖 NUOVO: Validazione messaggio principale (skip per autopilot)
+    if (campaign.mode !== 'autopilot') {
+      const hasMainText = campaign.messageTemplate && campaign.messageTemplate.trim();
+      const hasMainVoice = campaign.attachments && campaign.attachments.some(a => a.type === 'voice');
+      
+      if (!hasMainText && !hasMainVoice) {
+        return res.status(400).json({
+          success: false,
+          message: 'Il messaggio principale deve avere almeno un testo o un vocale'
+        });
+      }
+    } else {
+      // Autopilot: valida configurazione
+      if (!campaign.autopilotConfig || !campaign.autopilotConfig.searchKeyword) {
+        return res.status(400).json({
+          success: false,
+          message: 'Configurazione autopilot incompleta (searchKeyword richiesto)'
+        });
+      }
+      console.log('🤖 Campagna autopilot: validazione OK, messaggi saranno generati con AI');
     }
     
     // 🎤 Validazione vocali nelle sequenze prima di avviare

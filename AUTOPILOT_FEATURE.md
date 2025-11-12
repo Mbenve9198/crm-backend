@@ -52,21 +52,27 @@ POST /api/whatsapp-campaigns
 Per ogni contatto, il sistema:
 
 1. **Estrae dati dal contatto**:
-   - Nome ristorante
-   - Coordinate GPS (lat/lng)
-   - Keyword di ricerca (es. "ristorante italiano", "pizzeria")
+   - Nome ristorante (dal campo `name`)
+   - Città (da `properties.Città`)
+   - Indirizzo (da `properties.Indirizzo`, opzionale)
+   - Keyword di ricerca (da `properties.keyword` o default "ristorante")
 
-2. **Chiama Serper API**:
+2. **Geocoding automatico** (se coordinate mancanti):
+   - Cerca ristorante su Google Maps: "Nome, Indirizzo, Città"
+   - Ottiene coordinate GPS precise
+   - Salva dati geocoding (rating, recensioni, indirizzo esatto)
+
+3. **Chiama Serper API per competitor**:
    - Cerca su Google Maps con keyword e coordinate
    - Trova i TOP 3 competitor con più recensioni
    - Calcola ranking del ristorante
 
-3. **Genera messaggio con Claude**:
+4. **Genera messaggio con Claude**:
    - Usa i dati dei competitor
-   - Crea un messaggio personalizzato
+   - Crea un messaggio personalizzato e colloquiale
    - Valida lunghezza e qualità
 
-4. **Invia via WhatsApp**:
+5. **Invia via WhatsApp**:
    - Invia il messaggio generato
    - Salva dati di analisi nel database
    - Registra attività nel CRM
@@ -123,10 +129,15 @@ SERPER_API_KEY=your-serper-api-key
 
 ### Costi Stimati
 
-- **Serper API**: ~$0.02 per ricerca
-- **Claude API**: ~$0.015 per messaggio (model: claude-3-5-sonnet)
+- **Serper Geocoding**: ~$0.02 per ricerca (solo se coordinate mancanti)
+- **Serper Competitor**: ~$0.02 per ricerca
+- **Claude Haiku**: ~$0.001 per messaggio
 
-**Esempio**: Per 100 contatti = ~$3.50
+**Esempi**:
+- **Con coordinate già presenti**: $0.021/contatto (100 contatti = $2.10)
+- **Con geocoding**: $0.041/contatto (100 contatti = $4.10)
+
+**Risparmio**: Aggiungi `latitude` e `longitude` ai contatti per dimezzare i costi!
 
 ## API Endpoints
 
