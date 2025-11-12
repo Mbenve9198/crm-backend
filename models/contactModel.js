@@ -70,7 +70,7 @@ const contactSchema = new mongoose.Schema({
   // Tipo di sorgente del contatto
   source: {
     type: String,
-    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_form', 'inbound_api'],
+    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_form', 'inbound_api', 'smartlead_outbound'],
     default: 'manual',
     index: true
   },
