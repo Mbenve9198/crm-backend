@@ -154,14 +154,19 @@ class SessionMonitorService {
       return 'authenticated';
     }
 
-    // Se ha QR code disponibile
-    if (realStatus.qrCode && realStatus.status === 'qr_ready') {
+    // Se ha QR code disponibile (priorità ALTA - controlla prima di tornare a 'connecting')
+    if (realStatus.qrCode || session.qrCode) {
       return 'qr_ready';
     }
 
-    // Se sta ancora connettendo
-    if (session.status === 'connecting' && !realStatus.clientConnected) {
+    // Se sta ancora connettendo (solo se NON c'è QR code)
+    if (session.status === 'connecting' && !realStatus.clientConnected && !session.qrCode) {
       return 'connecting';
+    }
+    
+    // Se era qr_ready, mantieni quello stato a meno che non sia connesso
+    if (session.status === 'qr_ready' && !realStatus.clientConnected) {
+      return 'qr_ready';
     }
 
     // Se era connesso ma ora non più

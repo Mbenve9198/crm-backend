@@ -464,20 +464,32 @@ class WhatsappService {
    */
   async handleQrCode(sessionId, qrcode) {
     try {
-      // Aggiorna nel database
-      await WhatsappSession.findOneAndUpdate(
+      console.log(`📱 ===== QR CODE HANDLER CHIAMATO =====`);
+      console.log(`📱 SessionId: ${sessionId}`);
+      console.log(`📱 QR Code length: ${qrcode?.length || 0}`);
+      
+      // Aggiorna nel database con opzione { new: true } per verificare
+      const updatedSession = await WhatsappSession.findOneAndUpdate(
         { sessionId },
         { 
           qrCode: qrcode,
           qrGeneratedAt: new Date(),
           status: 'qr_ready',
           lastActivity: new Date()
-        }
+        },
+        { new: true } // Ritorna documento aggiornato
       );
 
-      console.log(`📱 QR code aggiornato per sessione: ${sessionId}`);
+      if (updatedSession) {
+        console.log(`✅ QR code SALVATO per sessione: ${sessionId}`);
+        console.log(`✅ Status aggiornato a: ${updatedSession.status}`);
+        console.log(`✅ QR code presente: ${updatedSession.qrCode ? 'SI' : 'NO'}`);
+      } else {
+        console.error(`❌ SESSIONE NON TROVATA nel database: ${sessionId}`);
+      }
     } catch (error) {
-      console.error(`Errore salvataggio QR per ${sessionId}:`, error);
+      console.error(`❌ ERRORE salvataggio QR per ${sessionId}:`, error);
+      console.error(`❌ Stack trace:`, error.stack);
     }
   }
 
