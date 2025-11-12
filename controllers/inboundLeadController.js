@@ -1,5 +1,6 @@
 import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
+import Activity from '../models/activityModel.js';
 
 /**
  * Controller per la gestione dei lead inbound da MenuChat
@@ -207,7 +208,8 @@ export const receiveSmartleadLead = async (req, res) => {
       status = 'da contattare',
       mrr = 0, // Default 0 per status 'interessato'
       source = 'smartlead_outbound',
-      properties = {}
+      properties = {},
+      activityData = null // Dati opzionali per creare attività
     } = req.body;
 
     // Validazione base
@@ -328,6 +330,29 @@ export const receiveSmartleadLead = async (req, res) => {
       console.log(`✅ Nuovo contatto creato: ${contact.name}`);
     }
 
+    // Crea attività se sono stati forniti i dati
+    let activity = null;
+    if (activityData) {
+      try {
+        console.log(`📝 Creazione attività per contatto: ${contact._id}`);
+        
+        activity = new Activity({
+          contact: contact._id,
+          type: activityData.type || 'email',
+          title: activityData.title || 'Attività da Smartlead',
+          description: activityData.description || '',
+          data: activityData.data || {},
+          createdBy: defaultOwner._id
+        });
+        
+        await activity.save();
+        console.log(`✅ Attività creata: ${activity._id}`);
+      } catch (activityError) {
+        console.error('❌ Errore creazione attività:', activityError.message);
+        // Non blocchiamo il flusso se l'attività fallisce
+      }
+    }
+
     return res.status(isNew ? 201 : 200).json({
       success: true,
       message: isNew ? 'Lead ricevuto e contatto creato' : 'Lead ricevuto e contatto aggiornato',
@@ -339,7 +364,8 @@ export const receiveSmartleadLead = async (req, res) => {
         phone: contact.phone,
         lists: contact.lists,
         status: contact.status
-      }
+      },
+      activity: activity ? { _id: activity._id } : null
     });
 
   } catch (error) {
