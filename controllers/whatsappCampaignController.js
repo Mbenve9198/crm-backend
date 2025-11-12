@@ -651,19 +651,15 @@ export const startCampaign = async (req, res) => {
       });
     }
 
-    // 🤖 Validazione messaggio principale (SKIP per autopilot)
-    if (campaign.mode !== 'autopilot') {
-      const hasMainText = campaign.messageTemplate && campaign.messageTemplate.trim();
-      const hasMainVoice = campaign.attachments && campaign.attachments.some(a => a.type === 'voice');
-      
-      if (!hasMainText && !hasMainVoice) {
-        return res.status(400).json({
-          success: false,
-          message: 'Il messaggio principale deve avere almeno un testo o un vocale'
-        });
-      }
-    } else {
-      console.log('🤖 Campagna autopilot: skip validazione messaggio (sarà generato da AI)');
+    // 🎤 NUOVO: Validazione messaggio principale
+    const hasMainText = campaign.messageTemplate && campaign.messageTemplate.trim();
+    const hasMainVoice = campaign.attachments && campaign.attachments.some(a => a.type === 'voice');
+    
+    if (!hasMainText && !hasMainVoice) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il messaggio principale deve avere almeno un testo o un vocale'
+      });
     }
     
     // 🎤 Validazione vocali nelle sequenze prima di avviare

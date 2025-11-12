@@ -90,7 +90,6 @@ try {
  * SERVER PRINCIPALE PER MENUCHAT CRM
  * Backend Node.js con Express e MongoDB per gestione contatti
  * Include importazione CSV con mappatura dinamica delle colonne
- * 🤖 Sistema Autopilot WhatsApp con Claude AI + Serper API
  */
 
 const app = express();
