@@ -48,10 +48,77 @@ const whatsappCampaignSchema = new mongoose.Schema({
     properties: mongoose.Schema.Types.Mixed
   },
   
-  // Template messaggio principale
+  // 🤖 Modalità campagna: standard o autopilot
+  mode: {
+    type: String,
+    enum: ['standard', 'autopilot'],
+    default: 'standard',
+    required: true
+  },
+
+  // 🤖 Configurazione autopilot (solo per mode='autopilot')
+  autopilotConfig: {
+    // Impostazioni Claude per generazione messaggi
+    claudeSettings: {
+      tone: {
+        type: String,
+        default: 'professionale e amichevole'
+      },
+      maxLength: {
+        type: Number,
+        default: 280,
+        min: 100,
+        max: 350
+      },
+      focusPoint: {
+        type: String,
+        default: 'visibilità su Google'
+      },
+      cta: {
+        type: String,
+        default: 'chiedere se sono interessati a migliorare'
+      }
+    },
+    // Keyword per ricerca Serper (es. "ristorante italiano", "pizzeria")
+    searchKeyword: {
+      type: String,
+      default: 'ristorante'
+    },
+    // Se true, usa la keyword dal contatto (properties.keyword) se disponibile
+    useContactKeyword: {
+      type: Boolean,
+      default: true
+    },
+    // Campi necessari nei contatti per autopilot
+    requiredContactFields: {
+      nameField: {
+        type: String,
+        default: 'properties.restaurant_name' // Campo nel contatto con nome ristorante
+      },
+      latField: {
+        type: String,
+        default: 'properties.latitude'
+      },
+      lngField: {
+        type: String,
+        default: 'properties.longitude'
+      },
+      keywordField: {
+        type: String,
+        default: 'properties.keyword'
+      }
+    },
+    // Salva i dati di analisi nel contatto dopo l'invio
+    saveAnalysisToContact: {
+      type: Boolean,
+      default: true
+    }
+  },
+
+  // Template messaggio principale (usato solo in mode='standard')
   messageTemplate: {
     type: String,
-    required: false, // 🎤 Opzionale se c'è un vocale nel messaggio principale
+    required: false, // 🎤 Opzionale se c'è un vocale o se mode='autopilot'
     default: '',
     maxLength: [4000, 'Il messaggio non può superare 4000 caratteri']
   },
@@ -273,6 +340,32 @@ const whatsappCampaignSchema = new mongoose.Schema({
       type: String,
       enum: ['no_response', 'always'],
       default: 'always' // Condizione per inviare il messaggio
+    },
+    // 🤖 NUOVO: Dati autopilot per questo messaggio (solo per mode='autopilot')
+    autopilotData: {
+      // Dati Serper
+      competitors: [{
+        rank: Number,
+        name: String,
+        rating: Number,
+        reviews: Number,
+        address: String
+      }],
+      userRank: mongoose.Schema.Types.Mixed, // Può essere numero o "Fuori Top 20"
+      userReviews: Number,
+      userRating: Number,
+      // Messaggio generato da Claude
+      generatedByAI: {
+        type: Boolean,
+        default: false
+      },
+      aiModel: String, // es. "claude-3-5-sonnet-20241022"
+      generatedAt: Date,
+      // Validazione messaggio
+      messageValidation: {
+        score: Number,
+        issues: [String]
+      }
     }
     // 🎤 NOTA: Attachment NON copiato qui (evita documenti enormi)
     // L'attachment viene letto da messageSequences quando serve

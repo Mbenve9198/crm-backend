@@ -9,6 +9,8 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+crm.env
+*.env
 # Runtime data
 pids
 *.pid

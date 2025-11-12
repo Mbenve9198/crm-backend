@@ -6,6 +6,8 @@ import Activity from '../models/activityModel.js';
 import redisManager from '../config/redis.js';
 import messageLockingService from './messageLocking.js';
 import smartRateLimiter from './smartRateLimiter.js';
+import serperService from './serperService.js'; // 🤖 Nuovo servizio Serper
+import claudeService from './claudeService.js'; // 🤖 Nuovo servizio Claude
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -1158,6 +1160,125 @@ class WhatsappService {
   }
 
   /**
+   * 🤖 Processa messaggio autopilot: genera messaggio con AI basato su competitor
+   * @param {Object} campaign - Campagna
+   * @param {Object} contact - Contatto
+   * @param {Object} messageData - Dati messaggio
+   * @returns {Promise<Object>} - Messaggio generato e dati di analisi
+   */
+  async processAutopilotMessage(campaign, contact, messageData) {
+    try {
+      console.log(`🤖 Autopilot: Generazione messaggio per ${contact.name}...`);
+
+      // 1. Estrai configurazione autopilot
+      const config = campaign.autopilotConfig || {};
+      const claudeSettings = config.claudeSettings || {};
+      const searchKeyword = config.searchKeyword || 'ristorante';
+      const useContactKeyword = config.useContactKeyword !== false; // default true
+
+      // 2. Estrai dati dal contatto usando i campi configurati
+      const fieldPaths = config.requiredContactFields || {};
+      const getFieldValue = (fieldPath) => {
+        const parts = fieldPath.split('.');
+        let value = contact;
+        for (const part of parts) {
+          value = value?.[part];
+          if (value === undefined) break;
+        }
+        return value;
+      };
+
+      const restaurantName = getFieldValue(fieldPaths.nameField || 'properties.restaurant_name') || contact.name;
+      const lat = getFieldValue(fieldPaths.latField || 'properties.latitude');
+      const lng = getFieldValue(fieldPaths.lngField || 'properties.longitude');
+      const contactKeyword = useContactKeyword ? getFieldValue(fieldPaths.keywordField || 'properties.keyword') : null;
+      
+      // Usa keyword dal contatto se disponibile, altrimenti fallback a config
+      const keyword = contactKeyword || searchKeyword;
+
+      // Validazione coordinate
+      if (!lat || !lng) {
+        throw new Error(`Contatto ${contact.name} senza coordinate GPS (richieste per autopilot)`);
+      }
+
+      console.log(`🔍 Ricerca competitor per ${restaurantName} con keyword "${keyword}"`);
+
+      // 3. Chiama Serper per ottenere competitor
+      const analysisContext = await serperService.analyzeContactContext({
+        ...contact.toObject(),
+        properties: {
+          ...contact.properties,
+          restaurant_name: restaurantName,
+          keyword: keyword,
+          latitude: lat,
+          longitude: lng
+        }
+      });
+
+      if (!analysisContext.hasData) {
+        throw new Error(`Impossibile analizzare competitor: ${analysisContext.error}`);
+      }
+
+      console.log(`✅ Trovati ${analysisContext.competitors.length} competitor`);
+
+      // 4. Genera messaggio con Claude
+      const generatedMessage = await claudeService.generateWhatsAppMessage(
+        analysisContext,
+        claudeSettings
+      );
+
+      // 5. Valida messaggio
+      const validation = claudeService.validateMessage(generatedMessage);
+      
+      if (!validation.isValid) {
+        console.warn(`⚠️ Messaggio generato ha problemi: ${validation.issues.join(', ')}`);
+      }
+
+      console.log(`✅ Messaggio generato da AI (score: ${validation.score}/100)`);
+
+      // 6. Prepara dati autopilot per salvare nel messaggio
+      const autopilotData = {
+        competitors: analysisContext.competitors,
+        userRank: analysisContext.userRank || null,
+        userReviews: analysisContext.userReviews || 0,
+        userRating: analysisContext.userRating || 0,
+        generatedByAI: true,
+        aiModel: 'claude-haiku-4-5-20251001', // 🆕 Modello aggiornato
+        generatedAt: new Date(),
+        messageValidation: validation
+      };
+
+      // 7. Salva dati nel contatto se configurato
+      if (config.saveAnalysisToContact && analysisContext.competitors.length > 0) {
+        try {
+          const topCompetitor = analysisContext.competitors[0];
+          contact.properties = {
+            ...contact.properties,
+            serper_analyzed_at: new Date(),
+            serper_user_rank: analysisContext.userRank,
+            serper_top_competitor: topCompetitor.name,
+            serper_competitor_reviews: topCompetitor.reviews,
+            serper_competitor_rating: topCompetitor.rating
+          };
+          await contact.save();
+          console.log(`💾 Dati analisi salvati nel contatto ${contact.name}`);
+        } catch (saveError) {
+          console.warn(`⚠️ Errore salvataggio dati in contatto:`, saveError.message);
+        }
+      }
+
+      return {
+        generatedMessage,
+        autopilotData
+      };
+
+    } catch (error) {
+      console.error(`❌ Errore autopilot per ${contact.name}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Invia un singolo messaggio di campagna con smart rate limiting
    */
   async sendSmartCampaignMessage(campaign, messageData, priority = 'media') {
@@ -1176,6 +1297,42 @@ class WhatsappService {
       if (!currentMessage || currentMessage.status !== 'pending') {
         console.log(`⏭️ Message already processed for ${contact.name} (sequence: ${messageData.sequenceIndex})`);
         return null;
+      }
+
+      // 🤖 NUOVO: Se è autopilot e messaggio principale, genera messaggio con AI
+      let finalMessage = messageData.compiledMessage;
+      let autopilotData = null;
+
+      if (campaign.mode === 'autopilot' && messageData.sequenceIndex === 0) {
+        try {
+          const result = await this.processAutopilotMessage(campaign, contact, messageData);
+          finalMessage = result.generatedMessage;
+          autopilotData = result.autopilotData;
+          
+          // Aggiorna il messaggio nella coda con i dati autopilot
+          currentMessage.compiledMessage = finalMessage;
+          currentMessage.autopilotData = autopilotData;
+
+          console.log(`🤖 Messaggio autopilot generato per ${contact.name}`);
+          console.log(`   Preview: ${finalMessage.substring(0, 80)}...`);
+        } catch (autopilotError) {
+          console.error(`❌ Errore generazione autopilot:`, autopilotError);
+          // Se autopilot fallisce, marca messaggio come failed
+          campaign.markMessageFailed(
+            messageData.contactId, 
+            `Autopilot failed: ${autopilotError.message}`,
+            messageData.sequenceIndex
+          );
+          await campaign.save();
+          
+          return {
+            failed: true,
+            reason: 'Autopilot generation failed',
+            error: autopilotError.message,
+            contact: contact.name,
+            sequenceIndex: messageData.sequenceIndex
+          };
+        }
       }
 
       // 🎤 OTTIMIZZATO: Determina allegati da inviare
@@ -1234,7 +1391,7 @@ class WhatsappService {
       const messageId = await this.sendMessage(
         campaign.whatsappSessionId,
         contact.phone,
-        messageData.compiledMessage,
+        finalMessage, // 🤖 Usa messaggio generato da autopilot se disponibile
         attachmentsToSend
       );
 
@@ -1277,16 +1434,19 @@ class WhatsappService {
       const activity = new Activity({
         contact: contact._id,
         type: 'whatsapp',
-        title: `Campagna: ${campaign.name}`,
-        description: messageData.compiledMessage || '🎤 Messaggio vocale', // 🎤 Fallback per solo-vocali
+        title: `Campagna: ${campaign.name}${campaign.mode === 'autopilot' ? ' (Autopilot)' : ''}`, // 🤖
+        description: finalMessage || '🎤 Messaggio vocale', // 🤖 Usa messaggio generato
         data: {
-          messageText: messageData.compiledMessage || '🎤 Messaggio vocale',
+          messageText: finalMessage || '🎤 Messaggio vocale',
           messageId: messageId,
           campaignId: campaign._id,
           campaignName: campaign.name,
           sessionId: campaign.whatsappSessionId,
           priority: priority,
           sequenceIndex: messageData.sequenceIndex,
+          // 🤖 NUOVO: Dati autopilot se disponibili
+          isAutopilot: campaign.mode === 'autopilot',
+          autopilotData: autopilotData || undefined,
           // 🎤 NUOVO: Indica se c'è un attachment
           hasAttachment: attachmentsToSend.length > 0,
           attachmentType: attachmentsToSend[0]?.type

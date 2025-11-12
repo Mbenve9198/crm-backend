@@ -156,6 +156,8 @@ export const createCampaign = async (req, res) => {
       whatsappSessionId,
       targetList,
       contactFilters,
+      mode, // 🤖 NUOVO: 'standard' o 'autopilot'
+      autopilotConfig, // 🤖 NUOVO: Configurazione autopilot
       messageTemplate,
       attachments, // 🎤 Attachments per messaggio principale (inclusi vocali)
       messageSequences, // NUOVO: Sequenze di messaggi di follow-up
@@ -163,6 +165,15 @@ export const createCampaign = async (req, res) => {
       timing,
       scheduledStartAt
     } = req.body;
+
+    // 🤖 Validazione mode
+    const campaignMode = mode || 'standard';
+    if (!['standard', 'autopilot'].includes(campaignMode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mode deve essere "standard" o "autopilot"'
+      });
+    }
 
     // Verifica che la sessione WhatsApp esista e sia dell'utente
     const session = await WhatsappSession.findOne({
@@ -185,15 +196,30 @@ export const createCampaign = async (req, res) => {
       });
     }
 
-    // 🎤 Validazione: messaggio principale deve avere testo O vocale
-    const hasMainMessage = messageTemplate && messageTemplate.trim();
-    const hasMainVoice = attachments && attachments.some(a => a.type === 'voice');
-    
-    if (!hasMainMessage && !hasMainVoice) {
-      return res.status(400).json({
-        success: false,
-        message: 'Il messaggio principale deve avere almeno un testo o un vocale'
-      });
+    // 🤖 Validazione: dipende dal mode
+    if (campaignMode === 'standard') {
+      // Mode standard: messaggio principale deve avere testo O vocale
+      const hasMainMessage = messageTemplate && messageTemplate.trim();
+      const hasMainVoice = attachments && attachments.some(a => a.type === 'voice');
+      
+      if (!hasMainMessage && !hasMainVoice) {
+        return res.status(400).json({
+          success: false,
+          message: 'Il messaggio principale deve avere almeno un testo o un vocale'
+        });
+      }
+    } else if (campaignMode === 'autopilot') {
+      // Mode autopilot: validazione configurazione
+      if (!autopilotConfig) {
+        return res.status(400).json({
+          success: false,
+          message: 'autopilotConfig obbligatorio per campagne autopilot'
+        });
+      }
+
+      // Validazione che i contatti abbiano i campi richiesti (lat/lng)
+      // Questo sarà fatto dinamicamente durante l'invio
+      console.log('🤖 Campagna autopilot: messaggio verrà generato dinamicamente con AI');
     }
 
     // Estrai variabili dal template principale (se presente)
@@ -237,7 +263,9 @@ export const createCampaign = async (req, res) => {
       whatsappNumber: session.phoneNumber,
       targetList,
       contactFilters,
-      messageTemplate: messageTemplate || '', // 🎤 Può essere vuoto se c'è vocale
+      mode: campaignMode, // 🤖 NUOVO
+      autopilotConfig: campaignMode === 'autopilot' ? autopilotConfig : undefined, // 🤖 NUOVO
+      messageTemplate: messageTemplate || '', // 🎤 Può essere vuoto se c'è vocale o autopilot
       templateVariables,
       attachments: attachments || [], // 🎤 Include vocali per messaggio principale
       messageSequences: processedSequences, // NUOVO: Include le sequenze
@@ -255,23 +283,44 @@ export const createCampaign = async (req, res) => {
     console.log(`✅ Campagna creata: ${campaign.name} (${contacts.length} contatti)`);
 
     // Rispondi subito al client (no timeout)
+    const responseMessage = campaignMode === 'autopilot' 
+      ? `Campagna autopilot creata. Compilazione ${contacts.length} messaggi in corso... I messaggi verranno generati con AI al momento dell'invio.`
+      : `Campagna creata. Compilazione ${contacts.length} messaggi in corso...`;
+
     res.status(201).json({
       success: true,
       data: campaign,
-      message: `Campagna creata. Compilazione ${contacts.length} messaggi in corso...`
+      message: responseMessage
     });
     
     // 🚀 Compila messageQueue in background (non blocca response)
     setImmediate(async () => {
       try {
         console.log(`📝 Inizio compilazione messageQueue per ${contacts.length} contatti...`);
-        const messageQueue = await compileMessageQueue(contacts, messageTemplate, templateVariables);
+        
+        // 🤖 Per autopilot, crea placeholder (messaggio verrà generato al momento dell'invio)
+        let messageQueue;
+        if (campaignMode === 'autopilot') {
+          messageQueue = contacts.map(contact => ({
+            contactId: contact._id,
+            phoneNumber: contact.phone,
+            compiledMessage: '[AUTOPILOT - Messaggio verrà generato con AI]', // Placeholder
+            status: 'pending',
+            sequenceId: 'main',
+            sequenceIndex: 0,
+            hasReceivedResponse: false
+          }));
+          console.log(`🤖 MessageQueue autopilot: ${messageQueue.length} placeholder creati`);
+        } else {
+          messageQueue = await compileMessageQueue(contacts, messageTemplate, templateVariables);
+          console.log(`✅ MessageQueue standard: ${messageQueue.length} messaggi compilati`);
+        }
         
         campaign.messageQueue = messageQueue;
         campaign.updateStats();
         await campaign.save();
         
-        console.log(`✅ MessageQueue compilata: ${messageQueue.length} messaggi`);
+        console.log(`✅ MessageQueue salvata: ${messageQueue.length} messaggi`);
       } catch (error) {
         console.error(`❌ Errore compilazione messageQueue background:`, error);
       }
