@@ -82,17 +82,32 @@ Ti va di capire come migliorare la tua visibilità e attirare più clienti?
 
 ## Requisiti per i Contatti
 
-I contatti devono avere questi campi nelle `properties`:
+### ✅ Geocoding Automatico (NUOVO!)
+
+I contatti devono avere **solo 2 campi obbligatori**:
 
 ```javascript
 {
-  "restaurant_name": "Ristorante Da Mario",
-  "latitude": 43.7696,
-  "longitude": 11.2558,
-  "keyword": "ristorante toscano",  // opzionale
-  "city": "Firenze"  // opzionale ma consigliato
+  "name": "Ristorante Da Mario",  // Nome del contatto = nome ristorante
+  "properties": {
+    "Città": "Firenze"  // Città del ristorante
+  }
 }
 ```
+
+**Campi opzionali ma consigliati**:
+```javascript
+{
+  "properties": {
+    "Indirizzo": "Via Roma 15",  // Migliora precisione geocoding
+    "keyword": "ristorante toscano",  // Keyword ricerca specifica
+    "Recensioni": "45",  // Numero recensioni attuali
+    "Rating": "4.5"  // Rating attuale
+  }
+}
+```
+
+**Nota**: Il sistema fa **geocoding automatico** usando Serper API. Se i contatti hanno già `latitude` e `longitude` nelle properties, quelle vengono usate direttamente (risparmio costi).
 
 ## Configurazione
 

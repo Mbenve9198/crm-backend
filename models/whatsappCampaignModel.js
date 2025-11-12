@@ -93,19 +93,35 @@ const whatsappCampaignSchema = new mongoose.Schema({
     requiredContactFields: {
       nameField: {
         type: String,
-        default: 'properties.restaurant_name' // Campo nel contatto con nome ristorante
+        default: 'name' // Nome del contatto = nome ristorante
+      },
+      addressField: {
+        type: String,
+        default: 'properties.Indirizzo' // Indirizzo per geocoding
+      },
+      cityField: {
+        type: String,
+        default: 'properties.Città' // Città per geocoding
       },
       latField: {
         type: String,
-        default: 'properties.latitude'
+        default: 'properties.latitude' // Opzionale (se già presente)
       },
       lngField: {
         type: String,
-        default: 'properties.longitude'
+        default: 'properties.longitude' // Opzionale (se già presente)
       },
       keywordField: {
         type: String,
-        default: 'properties.keyword'
+        default: 'properties.keyword' // Opzionale
+      },
+      reviewsField: {
+        type: String,
+        default: 'properties.Recensioni' // Numero recensioni attuali
+      },
+      ratingField: {
+        type: String,
+        default: 'properties.Rating' // Rating attuale
       }
     },
     // Salva i dati di analisi nel contatto dopo l'invio

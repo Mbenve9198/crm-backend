@@ -8,7 +8,77 @@ import axios from 'axios';
 class SerperService {
   constructor() {
     this.apiKey = process.env.SERPER_API_KEY;
-    this.apiUrl = 'https://google.serper.dev/maps';
+    this.mapsApiUrl = 'https://google.serper.dev/maps';
+    this.placesApiUrl = 'https://google.serper.dev/places';
+  }
+
+  /**
+   * Trova coordinate GPS di un ristorante tramite nome e indirizzo/città
+   * @param {string} restaurantName - Nome del ristorante
+   * @param {string} address - Indirizzo (opzionale)
+   * @param {string} city - Città
+   * @returns {Promise<Object>} - Coordinate e dati del ristorante
+   */
+  async geocodeRestaurant(restaurantName, address = null, city = null) {
+    try {
+      if (!this.apiKey) {
+        throw new Error('SERPER_API_KEY non configurata');
+      }
+
+      // Costruisci query di ricerca
+      let query = restaurantName;
+      if (address) {
+        query += `, ${address}`;
+      }
+      if (city) {
+        query += `, ${city}`;
+      }
+
+      console.log(`📍 Geocoding: "${query}"`);
+
+      const response = await axios.post(
+        this.mapsApiUrl,
+        {
+          q: query,
+          num: 5 // Primi 5 risultati per trovare il ristorante giusto
+        },
+        {
+          headers: {
+            'X-API-KEY': this.apiKey,
+            'Content-Type': 'application/json'
+          },
+          timeout: 30000
+        }
+      );
+
+      const places = response.data.places || [];
+
+      if (places.length === 0) {
+        console.log('❌ Nessun risultato trovato per geocoding');
+        return null;
+      }
+
+      // Prendi il primo risultato (quello più rilevante)
+      const place = places[0];
+      
+      console.log(`✅ Trovato: ${place.title}`);
+      console.log(`   Coordinate: ${place.gpsCoordinates?.latitude}, ${place.gpsCoordinates?.longitude}`);
+      console.log(`   Indirizzo: ${place.address}`);
+
+      return {
+        name: place.title,
+        latitude: place.gpsCoordinates?.latitude,
+        longitude: place.gpsCoordinates?.longitude,
+        address: place.address,
+        rating: place.rating,
+        reviews: place.reviews || place.ratingCount || 0,
+        placeId: place.placeId
+      };
+
+    } catch (error) {
+      console.error('❌ Errore geocoding:', error.response?.data || error.message);
+      throw error;
+    }
   }
 
   /**
@@ -154,23 +224,76 @@ class SerperService {
    */
   async analyzeContactContext(contact) {
     try {
-      // Estrai dati necessari dal contatto
+      // Estrai dati dal contatto (supporta vari formati di properties)
       const restaurantName = contact.properties?.restaurant_name || contact.name;
       const keyword = contact.properties?.keyword || 'ristorante';
-      const lat = contact.properties?.latitude;
-      const lng = contact.properties?.longitude;
+      
+      // Supporta sia minuscolo che maiuscolo (database reale ha Città, Indirizzo)
+      const city = contact.properties?.Città || contact.properties?.city || contact.properties?.città || null;
+      const address = contact.properties?.Indirizzo || contact.properties?.address || contact.properties?.indirizzo || null;
+      const userReviews = parseInt(contact.properties?.Recensioni || contact.properties?.recensioni || contact.properties?.reviews || 0);
+      const userRating = parseFloat(contact.properties?.Rating || contact.properties?.rating || 0);
+
+      console.log(`🔍 Analisi contatto: ${restaurantName}`);
+      console.log(`   Città: ${city || 'N/A'}`);
+      console.log(`   Indirizzo: ${address || 'N/A'}`);
+      console.log(`   Reviews: ${userReviews}, Rating: ${userRating}`);
+
+      // STEP 1: Geocoding - Trova coordinate del ristorante
+      let lat, lng, geocodedData;
+      
+      // Prova prima con coordinate esistenti
+      lat = contact.properties?.latitude;
+      lng = contact.properties?.longitude;
 
       if (!lat || !lng) {
-        console.warn(`⚠️  Contatto ${contact.name} senza coordinate GPS`);
+        console.log(`📍 Coordinate mancanti, eseguo geocoding...`);
+        
+        if (!city && !address) {
+          console.warn(`⚠️  Impossibile geocodare: mancano città E indirizzo`);
+          return {
+            hasData: false,
+            error: 'Indirizzo o città necessari per geocoding'
+          };
+        }
+
+        // Fa geocoding con Serper
+        geocodedData = await this.geocodeRestaurant(restaurantName, address, city);
+        
+        if (!geocodedData || !geocodedData.latitude || !geocodedData.longitude) {
+          console.warn(`⚠️  Geocoding fallito per ${restaurantName}`);
+          return {
+            hasData: false,
+            error: 'Geocoding fallito - ristorante non trovato'
+          };
+        }
+
+        lat = geocodedData.latitude;
+        lng = geocodedData.longitude;
+        
+        console.log(`✅ Coordinate ottenute: ${lat}, ${lng}`);
+      } else {
+        console.log(`✅ Coordinate già disponibili: ${lat}, ${lng}`);
+      }
+
+      // STEP 2: Trova competitor usando le coordinate
+      const rankingData = await this.getGoogleMapsRanking(restaurantName, keyword, lat, lng);
+      
+      if (!rankingData) {
+        console.warn(`⚠️  Nessun dato ranking trovato per ${restaurantName}`);
         return {
           hasData: false,
-          error: 'Coordinate GPS mancanti'
+          error: 'Nessun dato ranking trovato'
         };
       }
 
-      // Ottieni competitor
-      const competitors = await this.getTopCompetitors(restaurantName, keyword, lat, lng);
-      
+      // Estrai competitor che sono davanti
+      const competitors = [
+        rankingData.competitor1,
+        rankingData.competitor2,
+        rankingData.competitor3
+      ].filter(c => c !== null);
+
       if (competitors.length === 0) {
         console.warn(`⚠️  Nessun competitor trovato per ${restaurantName}`);
         return {
@@ -181,13 +304,15 @@ class SerperService {
 
       return {
         hasData: true,
-        restaurantName,
+        restaurantName: geocodedData?.name || restaurantName, // Usa nome da geocoding se disponibile
         keyword,
+        userRank: rankingData.userRank,
         competitors: competitors,
-        userReviews: contact.properties?.reviews || 0,
-        userRating: contact.properties?.rating || 0,
-        city: contact.properties?.city || '',
-        address: contact.properties?.address || ''
+        userReviews: rankingData.userReviews || userReviews,
+        userRating: rankingData.userRating || userRating,
+        city: city || geocodedData?.address?.split(',').pop()?.trim() || '',
+        address: geocodedData?.address || address || '',
+        coordinates: { lat, lng }
       };
 
     } catch (error) {

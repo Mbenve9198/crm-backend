@@ -1188,44 +1188,10 @@ class WhatsappService {
       const searchKeyword = config.searchKeyword || 'ristorante';
       const useContactKeyword = config.useContactKeyword !== false; // default true
 
-      // 2. Estrai dati dal contatto usando i campi configurati
-      const fieldPaths = config.requiredContactFields || {};
-      const getFieldValue = (fieldPath) => {
-        const parts = fieldPath.split('.');
-        let value = contact;
-        for (const part of parts) {
-          value = value?.[part];
-          if (value === undefined) break;
-        }
-        return value;
-      };
-
-      const restaurantName = getFieldValue(fieldPaths.nameField || 'properties.restaurant_name') || contact.name;
-      const lat = getFieldValue(fieldPaths.latField || 'properties.latitude');
-      const lng = getFieldValue(fieldPaths.lngField || 'properties.longitude');
-      const contactKeyword = useContactKeyword ? getFieldValue(fieldPaths.keywordField || 'properties.keyword') : null;
+      // 2. Chiama Serper per analisi completa (include geocoding se necessario)
+      console.log(`🔍 Analisi autopilot per ${contact.name}`);
       
-      // Usa keyword dal contatto se disponibile, altrimenti fallback a config
-      const keyword = contactKeyword || searchKeyword;
-
-      // Validazione coordinate
-      if (!lat || !lng) {
-        throw new Error(`Contatto ${contact.name} senza coordinate GPS (richieste per autopilot)`);
-      }
-
-      console.log(`🔍 Ricerca competitor per ${restaurantName} con keyword "${keyword}"`);
-
-      // 3. Chiama Serper per ottenere competitor
-      const analysisContext = await serperService.analyzeContactContext({
-        ...contact.toObject(),
-        properties: {
-          ...contact.properties,
-          restaurant_name: restaurantName,
-          keyword: keyword,
-          latitude: lat,
-          longitude: lng
-        }
-      });
+      const analysisContext = await serperService.analyzeContactContext(contact);
 
       if (!analysisContext.hasData) {
         throw new Error(`Impossibile analizzare competitor: ${analysisContext.error}`);
