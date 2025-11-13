@@ -1213,7 +1213,10 @@ class WhatsappService {
       // 4. Genera messaggio con Claude
       const generatedMessage = await claudeService.generateWhatsAppMessage(
         analysisContext,
-        claudeSettings
+        {
+          ...claudeSettings,
+          messageStyle: config.messageStyle || 'direct' // 🆕 Passa messageStyle
+        }
       );
 
       // 5. Valida messaggio

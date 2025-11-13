@@ -58,6 +58,14 @@ const whatsappCampaignSchema = new mongoose.Schema({
 
   // 🤖 Configurazione autopilot (solo per mode='autopilot')
   autopilotConfig: {
+    // Stile del messaggio (determina quale prompt usare)
+    messageStyle: {
+      type: String,
+      enum: ['direct', 'case-study'],
+      default: 'direct'
+      // 'direct' = Hook diretto + tool gratuito
+      // 'case-study' = Hook + caso successo Il Porto + call telefonica
+    },
     // Impostazioni Claude per generazione messaggi
     claudeSettings: {
       tone: {
@@ -66,9 +74,9 @@ const whatsappCampaignSchema = new mongoose.Schema({
       },
       maxLength: {
         type: Number,
-        default: 280,
+        default: 350,
         min: 100,
-        max: 350
+        max: 500
       },
       focusPoint: {
         type: String,

@@ -38,25 +38,42 @@ class ClaudeService {
       } = context;
 
       // Default settings
+      const messageStyle = campaignSettings.messageStyle || 'direct';
       const tone = campaignSettings.tone || 'colloquiale e amichevole';
-      const maxLength = campaignSettings.maxLength || 350; // Aumentato default
+      const maxLength = campaignSettings.maxLength || 350;
       const focusPoint = campaignSettings.focusPoint || 'visibilità su Google';
       const cta = campaignSettings.cta || 'offrire tool gratuito';
 
-      // Costruisci prompt per Claude
-      const prompt = this.buildPrompt({
-        restaurantName,
-        competitors,
-        userReviews,
-        userRating,
-        city,
-        keyword,
-        tone,
-        maxLength,
-        focusPoint,
-        cta,
-        userRank: context.userRank
-      });
+      // Scegli il prompt in base allo stile
+      let prompt;
+      if (messageStyle === 'case-study') {
+        prompt = this.buildCaseStudyPrompt({
+          restaurantName,
+          competitors,
+          userReviews,
+          userRating,
+          city,
+          keyword,
+          tone,
+          maxLength,
+          userRank: context.userRank
+        });
+      } else {
+        // Default: direct style
+        prompt = this.buildDirectPrompt({
+          restaurantName,
+          competitors,
+          userReviews,
+          userRating,
+          city,
+          keyword,
+          tone,
+          maxLength,
+          focusPoint,
+          cta,
+          userRank: context.userRank
+        });
+      }
 
       console.log(`🤖 Generazione messaggio con Claude per ${restaurantName}...`);
 
@@ -83,10 +100,10 @@ class ClaudeService {
   }
 
   /**
-   * Costruisce il prompt per Claude
+   * Costruisce il prompt DIRECT style (tool gratuito)
    * @private
    */
-  buildPrompt({
+  buildDirectPrompt({
     restaurantName,
     competitors,
     userReviews,
@@ -139,6 +156,81 @@ IMPORTANTE:
 - Sii SPECIFICO con nomi e numeri
 - Tono da "consulente amico" non da venditore aggressivo
 - Genera SOLO il messaggio, senza spiegazioni
+
+Genera il messaggio:`;
+  }
+
+  /**
+   * Costruisce il prompt CASE-STUDY style (con esempio Il Porto di Livorno)
+   * @private
+   */
+  buildCaseStudyPrompt({
+    restaurantName,
+    competitors,
+    userReviews,
+    userRating,
+    city,
+    keyword,
+    tone,
+    maxLength,
+    userRank
+  }) {
+    // Costruisci lista competitor formattata
+    const competitorList = competitors
+      .map((c, i) => `${i + 1}. ${c.name} - posizione ${c.rank} con ${c.reviews} recensioni (${c.rating}⭐)`)
+      .join('\n');
+
+    // Determina posizione del ristorante
+    const rankText = typeof userRank === 'number' ? `posizione ${userRank}` : 'fuori dalla top 20';
+
+    return `Sei un esperto di marketing digitale per ristoranti. Genera un messaggio WhatsApp colloquiale che include un case study di successo.
+
+DATI REALI RISTORANTE:
+- Nome: "${restaurantName}"${city ? ` a ${city}` : ''}
+- Posizione Google Maps: ${rankText}  
+- Recensioni attuali: ${userReviews}
+
+TOP COMPETITOR (che escono PRIMA su Google):
+${competitorList}
+
+STRUTTURA MESSAGGIO (3 parti):
+
+1. HOOK - Confronto con competitor:
+   - Inizia "Ciao ragazzi"
+   - Spiega che hai cercato "${keyword}" su Google Maps${city ? ` a ${city}` : ''}
+   - Menziona posizione loro ristorante
+   - Nomina 1-2 competitor con recensioni specifiche
+   - Aggiungi insight: "Vuol dire che una persona che cerca un ristorante su Google ha già scelto dove andare ancora prima di scoprire che esistete" (adatta in base alla posizione)
+
+2. CASE STUDY - Esempio reale di successo:
+   - Usa il caso de "Il Porto di Livorno"
+   - Dati: passati da 1.108 a 5.389 recensioni in un anno
+   - Ora raccolgono oltre 100 recensioni al mese in modo automatico
+   - Sii specifico con i numeri
+
+3. CTA - Call to action telefonica:
+   - "Vi interessa sapere come abbiamo fatto e se è replicabile per voi?"
+   - "Bastano 5 minuti al telefono"
+
+STILE:
+- Tono colloquiale e amichevole
+- Lunghezza: preferibilmente sotto ${maxLength} caratteri (ma non rigido)
+- NO emoji, NO markdown
+- Linguaggio naturale e fluido
+- Dati REALI e SPECIFICI
+
+ESEMPIO OUTPUT:
+"Ciao ragazzi, ho fatto una ricerca su Google Maps a Torino e il vostro Buffa & Pappa esce fuori dalla top 20 con 326 recensioni, mentre i vostri competitor tipo Silos sono primo con 934 recensioni e Piccolo Lord secondo con 622. Vuol dire che una persona che cerca un ristorante su Google ha già scelto dove andare ancora prima di scoprire che esistete.
+
+Abbiamo aiutato un altro ristorante, Il Porto di Livorno, a risolvere esattamente questo problema: sono passati da 1.108 a 5.389 recensioni in un anno, e ora ne raccolgono oltre 100 al mese in modo automatico.
+
+Vi interessa sapere come abbiamo fatto e se è replicabile per voi? Bastano 5 minuti al telefono"
+
+IMPORTANTE:
+- Usa i DATI REALI forniti (nome ristorante, città, posizione, competitor)
+- Case study de Il Porto è FISSO (usa sempre quei numeri)
+- Tono professionale ma amichevole
+- Genera SOLO il messaggio
 
 Genera il messaggio:`;
   }
