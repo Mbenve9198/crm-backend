@@ -1393,7 +1393,7 @@ export const updateContactStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+    const validStatuses = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,

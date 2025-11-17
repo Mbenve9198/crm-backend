@@ -244,3 +244,4 @@ inspectContactProperties(targetList)
     process.exit(1);
   });
 
+
