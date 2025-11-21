@@ -250,32 +250,44 @@ class WhatsappService {
       let licenseKey = process.env.OPENWA_LICENSE_KEY; // Licenza di fallback
       
       try {
-        const { default: User } = await import('../models/userModel.js');
-        const user = await User.findById(owner);
-        
-        if (user) {
-          console.log(`👤 Utente trovato: ${user.firstName} ${user.lastName} (${user.email})`);
-          
-          // Determina la licenza basandosi sull'email dell'utente
-          if (user.email === 'marco@menuchat.com') {
-            // Marco Benvenuti usa la licenza esistente (quella già configurata)
-            licenseKey = process.env.OPENWA_LICENSE_KEY;
-            console.log('🔑 Marco Benvenuti: usando licenza esistente');
-          } else if (user.email === 'federico@menuchat.com') {
-            // Federico Desantis usa la nuova licenza
-            licenseKey = '38E12BAB-83DE4201-9C8473A6-D094A67B';
-            console.log('🔑 Federico Desantis: usando licenza specifica');
-          } else {
-            // Altri utenti usano la licenza di default
-            console.log(`🔑 Utente ${user.email}: usando licenza di default`);
-          }
-          
-          console.log(`🎯 Licenza selezionata per ${user.firstName}: ${licenseKey ? licenseKey.substring(0, 8) + '...' : 'Nessuna'}`);
+        // PRIORITÀ 1: Controlla se la sessione ha una licenza specifica nel database
+        const existingSession = await WhatsappSession.findOne({ sessionId });
+        if (existingSession?.config?.licenseKey) {
+          licenseKey = existingSession.config.licenseKey;
+          console.log(`🔑 Sessione ${sessionId}: usando licenza specifica dalla sessione`);
+          console.log(`🎯 Licenza: ${licenseKey.substring(0, 8)}...`);
         } else {
-          console.warn(`⚠️ Utente non trovato per ID: ${owner}, usando licenza di default`);
+          // PRIORITÀ 2: Licenza basata sull'utente (retrocompatibilità)
+          const { default: User } = await import('../models/userModel.js');
+          const user = await User.findById(owner);
+          
+          if (user) {
+            console.log(`👤 Utente trovato: ${user.firstName} ${user.lastName} (${user.email})`);
+            
+            // Determina la licenza basandosi sull'email dell'utente
+            if (user.email === 'marco@menuchat.com') {
+              // Marco Benvenuti usa la licenza esistente (quella già configurata)
+              licenseKey = process.env.OPENWA_LICENSE_KEY;
+              console.log('🔑 Marco Benvenuti: usando licenza esistente');
+            } else if (user.email === 'federico@menuchat.com') {
+              // Federico Desantis usa la licenza dedicata
+              licenseKey = process.env.OPENWA_LICENSE_KEY_FEDERICO || '8D57EE58-7B694EBC-A77FFA52-66B053E3';
+              console.log('🔑 Federico Desantis: usando licenza specifica');
+              if (!process.env.OPENWA_LICENSE_KEY_FEDERICO) {
+                console.log('⚠️  OPENWA_LICENSE_KEY_FEDERICO non configurata, usando valore hard-coded');
+              }
+            } else {
+              // Altri utenti usano la licenza di default
+              console.log(`🔑 Utente ${user.email}: usando licenza di default`);
+            }
+            
+            console.log(`🎯 Licenza selezionata per ${user.firstName}: ${licenseKey ? licenseKey.substring(0, 8) + '...' : 'Nessuna'}`);
+          } else {
+            console.warn(`⚠️ Utente non trovato per ID: ${owner}, usando licenza di default`);
+          }
         }
       } catch (userError) {
-        console.error('❌ Errore nel recupero dati utente:', userError);
+        console.error('❌ Errore nel recupero dati utente/sessione:', userError);
         console.log('🔄 Fallback: usando licenza di default');
       }
 

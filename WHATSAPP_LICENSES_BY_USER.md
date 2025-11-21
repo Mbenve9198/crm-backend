@@ -17,7 +17,7 @@ Il sistema di sequenze WhatsApp ora supporta **licenze diverse per ogni utente**
 - **Log**: `🔑 Marco Benvenuti: usando licenza esistente`
 
 ### Federico Desantis (federico@menuchat.com)  
-- **Licenza**: `38E12BAB-83DE4201-9C8473A6-D094A67B`
+- **Licenza**: `8D57EE58-7B694EBC-A77FFA52-66B053E3`
 - **Comportamento**: Licenza dedicata per le sue sessioni WhatsApp
 - **Log**: `🔑 Federico Desantis: usando licenza specifica`
 
@@ -42,7 +42,7 @@ let licenseKey = process.env.OPENWA_LICENSE_KEY; // Default
 if (user.email === 'marco@menuchat.com') {
   licenseKey = process.env.OPENWA_LICENSE_KEY; // Licenza esistente
 } else if (user.email === 'federico@menuchat.com') {
-  licenseKey = '38E12BAB-83DE4201-9C8473A6-D094A67B'; // Licenza Federico
+  licenseKey = '8D57EE58-7B694EBC-A77FFA52-66B053E3'; // Licenza Federico
 }
 ```
 
@@ -65,7 +65,7 @@ Nei log del server puoi verificare quale licenza è stata applicata:
 ```
 👤 Utente trovato: Federico Desantis (federico@menuchat.com)
 🔑 Federico Desantis: usando licenza specifica
-🎯 Licenza selezionata per Federico: 38E12BAB...
+🎯 Licenza selezionata per Federico: 8D57EE58...
 ✅ Sessione creata: federico-wa - Licenza: Licenza specifica utente
 ```
 
@@ -86,7 +86,7 @@ Nei log del server puoi verificare quale licenza è stata applicata:
 ### 3. Controllo Licenza Attiva
 Nei log di OpenWA dovresti vedere:
 ```
-✅ OpenWA License Key loaded: 38E12BAB...
+✅ OpenWA License Key loaded: 8D57EE58...
 🚀 Sessione pronta con licenza attiva
 ```
 
@@ -101,7 +101,7 @@ if (user.email === 'marco@menuchat.com') {
   licenseKey = process.env.OPENWA_LICENSE_KEY;
   console.log('🔑 Marco Benvenuti: usando licenza esistente');
 } else if (user.email === 'federico@menuchat.com') {
-  licenseKey = '38E12BAB-83DE4201-9C8473A6-D094A67B';
+  licenseKey = '8D57EE58-7B694EBC-A77FFA52-66B053E3';
   console.log('🔑 Federico Desantis: usando licenza specifica');
 } else if (user.email === 'nuovo@utente.com') {
   licenseKey = 'NUOVA-LICENZA-QUI';
@@ -119,7 +119,7 @@ Se una licenza scade:
 ## 🚨 Troubleshooting
 
 ### ❌ "License key invalid" per Federico
-- Verifica che la licenza `38E12BAB-83DE4201-9C8473A6-D094A67B` sia valida
+- Verifica che la licenza `8D57EE58-7B694EBC-A77FFA52-66B053E3` sia valida
 - Controlla che non sia scaduta
 - Verifica nei log che sia stata applicata correttamente
 
