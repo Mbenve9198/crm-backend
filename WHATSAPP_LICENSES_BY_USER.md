@@ -168,4 +168,4 @@ curl -H "Authorization: Bearer TOKEN" \
 
 **✅ Sistema implementato e attivo!** 
 
-Le sessioni create da Marco useranno la licenza esistente, mentre quelle di Federico useranno la nuova licenza `38E12BAB-83DE4201-9C8473A6-D094A67B`. 
+Le sessioni create da Marco useranno la licenza esistente, mentre quelle di Federico useranno la nuova licenza `8D57EE58-7B694EBC-A77FFA52-66B053E3`. 

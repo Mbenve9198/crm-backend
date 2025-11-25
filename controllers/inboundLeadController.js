@@ -20,7 +20,8 @@ export const receiveRankCheckerLead = async (req, res) => {
       placeId, 
       keyword, 
       rankingResults,
-      qualificationData 
+      qualificationData,
+      reportLinks  // 🆕 Link ai report
     } = req.body;
 
     // Validazione base
@@ -107,7 +108,10 @@ export const receiveRankCheckerLead = async (req, res) => {
       },
       properties: {
         restaurantAddress: rankingResults?.userRestaurant?.address || '',
-        googleMapsUrl: placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : ''
+        googleMapsUrl: placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : '',
+        // 🆕 Link diretti ai report (per accesso rapido dal CRM)
+        rankCheckerBaseReport: reportLinks?.baseReport || '',
+        rankCheckerCompleteReport: reportLinks?.completeReport || ''
       }
     };
 

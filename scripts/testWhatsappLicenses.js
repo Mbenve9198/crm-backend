@@ -47,7 +47,7 @@ const testLicenseMapping = async () => {
             licenseKey = process.env.OPENWA_LICENSE_KEY;
             licenseSource = 'Marco - Licenza esistente';
           } else if (user.email === 'federico@menuchat.com') {
-            licenseKey = '38E12BAB-83DE4201-9C8473A6-D094A67B';
+            licenseKey = '8D57EE58-7B694EBC-A77FFA52-66B053E3';
             licenseSource = 'Federico - Licenza specifica';
           }
           
@@ -71,7 +71,7 @@ const testLicenseMapping = async () => {
     console.log('🎉 Test completato!');
     console.log('\n📋 Riepilogo configurazione:');
     console.log(`   • Marco Benvenuti: Licenza esistente`);
-    console.log(`   • Federico Desantis: 38E12BAB-83DE4201-9C8473A6-D094A67B`);
+    console.log(`   • Federico Desantis: 8D57EE58-7B694EBC-A77FFA52-66B053E3`);
     console.log(`   • Altri utenti: Fallback alla licenza di default`);
     
     console.log('\n🚀 Per testare live:');
