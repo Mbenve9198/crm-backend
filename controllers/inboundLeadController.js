@@ -16,6 +16,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     const { 
       email, 
       phone, 
+      phoneWarning, // ⚠️ Warning se numero invalido
       restaurantName, 
       placeId, 
       keyword, 
@@ -33,6 +34,11 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
 
     console.log(`📥 INBOUND LEAD: ${restaurantName} (${email})`);
+    
+    // ⚠️ Log warning se numero invalido
+    if (phoneWarning) {
+      console.warn(`⚠️ PHONE WARNING: ${phoneWarning}`);
+    }
 
     // Trova l'owner di default per i lead inbound
     let defaultOwner;
@@ -111,7 +117,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         googleMapsUrl: placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : '',
         // 🆕 Link diretti ai report (per accesso rapido dal CRM)
         rankCheckerBaseReport: reportLinks?.baseReport || '',
-        rankCheckerCompleteReport: reportLinks?.completeReport || ''
+        rankCheckerCompleteReport: reportLinks?.completeReport || '',
+        // ⚠️ Warning se numero telefono invalido
+        phoneWarning: phoneWarning || null
       }
     };
 
