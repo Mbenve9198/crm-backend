@@ -3,6 +3,7 @@ import csv from 'csv-parser';
 import fs from 'fs';
 import { promisify } from 'util';
 import User from '../models/userModel.js'; // Added import for User
+import claudeService from '../services/claudeService.js'; // Per generazione script AI
 
 const readFile = promisify(fs.readFile);
 const unlinkFile = promisify(fs.unlink);
@@ -1637,6 +1638,89 @@ export const bulkChangeOwner = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * 📞 Genera script di chiamata personalizzato usando AI (Claude)
+ * GET /contacts/:id/call-script
+ * 
+ * Genera uno script di vendita basato sui dati del report Rank Checker del contatto.
+ * Funziona solo per contatti inbound con rankCheckerData.
+ */
+export const generateCallScript = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Trova il contatto
+    const contact = await Contact.findById(id).populate('owner', 'firstName lastName email');
+    
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contatto non trovato'
+      });
+    }
+
+    // Verifica che sia un contatto inbound con dati rank checker
+    if (contact.source !== 'inbound_rank_checker') {
+      return res.status(400).json({
+        success: false,
+        message: 'Lo script è disponibile solo per contatti inbound del Rank Checker'
+      });
+    }
+
+    if (!contact.rankCheckerData) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il contatto non ha dati Rank Checker disponibili'
+      });
+    }
+
+    // Verifica che ci siano almeno i dati base del report
+    const hasBaseReport = contact.rankCheckerData.restaurantData || 
+                          contact.rankCheckerData.ranking;
+    
+    if (!hasBaseReport) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il contatto deve avere almeno il report base del Rank Checker'
+      });
+    }
+
+    console.log(`📞 Generazione script chiamata per contatto: ${contact.name}`);
+
+    // Genera lo script usando Claude
+    const script = await claudeService.generateCallScript(contact);
+
+    res.json({
+      success: true,
+      message: 'Script di chiamata generato con successo',
+      data: {
+        script,
+        contactId: contact._id,
+        contactName: contact.name,
+        generatedAt: new Date().toISOString(),
+        hasCompleteReport: !!contact.properties?.rankCheckerCompleteReport
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Errore generazione script chiamata:', error);
+    
+    // Gestisci errore specifico di API key mancante
+    if (error.message?.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({
+        success: false,
+        message: 'Servizio AI non configurato. Contatta l\'amministratore.'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Errore durante la generazione dello script',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 }; 

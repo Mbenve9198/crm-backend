@@ -286,6 +286,231 @@ Genera il messaggio:`;
   }
 
   /**
+   * 📞 Genera uno script di chiamata personalizzato per contatti inbound
+   * @param {Object} contact - Contatto con rankCheckerData e properties
+   * @returns {Promise<string>} - Script di chiamata formattato
+   */
+  async generateCallScript(contact) {
+    try {
+      if (!this.client) {
+        throw new Error('ANTHROPIC_API_KEY non configurata');
+      }
+
+      // Estrai dati dal contatto
+      const { name, rankCheckerData, properties } = contact;
+      
+      if (!rankCheckerData) {
+        throw new Error('Dati Rank Checker mancanti per questo contatto');
+      }
+
+      const restaurantData = rankCheckerData.restaurantData || {};
+      const ranking = rankCheckerData.ranking || {};
+      
+      // Costruisci il contesto per il prompt
+      const userReviews = restaurantData.reviewCount || 0;
+      const userRating = restaurantData.rating || 0;
+      const userRank = ranking.mainRank;
+      const competitorsAhead = ranking.competitorsAhead || 0;
+      const hasDigitalMenu = rankCheckerData.hasDigitalMenu;
+      const willingToAdoptMenu = rankCheckerData.willingToAdoptMenu;
+      const dailyCovers = rankCheckerData.dailyCovers;
+      const keyword = rankCheckerData.keyword || 'ristorante';
+      const address = restaurantData.address || '';
+      
+      // Estrai competitor se disponibili
+      const strategicResults = ranking.strategicResults || [];
+      const topCompetitors = strategicResults.slice(0, 3).map((c, i) => ({
+        name: c.title || c.name || `Competitor ${i + 1}`,
+        reviews: c.reviews || c.reviewCount || 0,
+        rating: c.rating || 0,
+        rank: c.rank || i + 1
+      }));
+
+      // Determina lo scenario per il menu digitale
+      let menuScenario = 'A'; // Default: ha già menu
+      if (hasDigitalMenu === false) {
+        menuScenario = willingToAdoptMenu ? 'B' : 'C';
+      }
+
+      const prompt = this.buildCallScriptPrompt({
+        restaurantName: name,
+        userReviews,
+        userRating,
+        userRank,
+        competitorsAhead,
+        topCompetitors,
+        keyword,
+        address,
+        dailyCovers,
+        hasDigitalMenu,
+        willingToAdoptMenu,
+        menuScenario
+      });
+
+      console.log(`📞 Generazione script chiamata con Claude per ${name}...`);
+
+      const message = await this.client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 4096,
+        messages: [{
+          role: 'user',
+          content: prompt
+        }]
+      });
+
+      const generatedScript = message.content[0].text.trim();
+
+      console.log(`✅ Script chiamata generato (${generatedScript.length} caratteri)`);
+
+      return generatedScript;
+
+    } catch (error) {
+      console.error('❌ Errore generazione script chiamata:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Costruisce il prompt per lo script di chiamata
+   * @private
+   */
+  buildCallScriptPrompt({
+    restaurantName,
+    userReviews,
+    userRating,
+    userRank,
+    competitorsAhead,
+    topCompetitors,
+    keyword,
+    address,
+    dailyCovers,
+    hasDigitalMenu,
+    willingToAdoptMenu,
+    menuScenario
+  }) {
+    // Formatta competitor
+    const competitorInfo = topCompetitors.length > 0
+      ? topCompetitors.map((c, i) => `${i + 1}. ${c.name}: ${c.reviews} recensioni (${c.rating}⭐)`).join('\n')
+      : 'Nessun competitor trovato';
+
+    const rankText = typeof userRank === 'number' ? `posizione #${userRank}` : 'fuori dalla top 20';
+
+    // Determina lo scenario menu
+    let menuScenarioText = '';
+    if (menuScenario === 'A') {
+      menuScenarioText = `[SCENARIO A: HA GIÀ UN MENU QR] "...ha già un menu digitale. Ottimo. Possiamo integrare il nostro sistema con i suoi QR code esistenti in 10 minuti. Non deve cambiare assolutamente nulla."`;
+    } else if (menuScenario === 'B') {
+      menuScenarioText = `[SCENARIO B: NON CE L'HA, È DISPOSTO] "...non ha ancora un menu digitale ma è disposto a metterne uno. Perfetto. Glielo creiamo noi, graficamente e gratuitamente, e le inviamo i QR da stampare. Problema risolto."`;
+    } else {
+      menuScenarioText = `[SCENARIO C: NON CE L'HA, NON È DISPOSTO] Usa lo script per superare l'obiezione del menu cartaceo.`;
+    }
+
+    return `Sei un esperto venditore di MenuChat, un sistema che aiuta i ristoranti a ottenere più recensioni su Google.
+
+Genera uno SCRIPT DI CHIAMATA PERSONALIZZATO basato sui dati reali di questo contatto che ha richiesto un report di analisi.
+
+═══════════════════════════════════════
+DATI REALI DEL RISTORANTE
+═══════════════════════════════════════
+• Nome: ${restaurantName}
+• Indirizzo: ${address || 'Non specificato'}
+• Rating attuale: ${userRating}⭐
+• Recensioni attuali: ${userReviews}
+• Posizione Google Maps: ${rankText}
+• Competitor davanti: ${competitorsAhead}
+• Keyword cercata: "${keyword}"
+• Coperti giornalieri: ${dailyCovers || 'Non specificato'}
+• Menu digitale: ${hasDigitalMenu ? 'Sì' : 'No'}
+• Disposto ad adottarlo: ${willingToAdoptMenu ? 'Sì' : 'No'}
+
+═══════════════════════════════════════
+TOP COMPETITOR
+═══════════════════════════════════════
+${competitorInfo}
+
+═══════════════════════════════════════
+SCENARIO MENU DIGITALE
+═══════════════════════════════════════
+${menuScenarioText}
+
+═══════════════════════════════════════
+ISTRUZIONI
+═══════════════════════════════════════
+
+Genera uno script di chiamata completo seguendo questa STRUTTURA ESATTA, personalizzando OGNI sezione con i dati reali forniti sopra.
+
+Lo script deve seguire queste 11 fasi:
+
+📞 FASE 1: APERTURA
+- Saluto professionale
+- Menziona l'analisi gratuita del posizionamento Google che hanno richiesto
+- Chiedi se hanno visionato il report
+
+📊 FASE 2: RICAPITOLARE I DATI
+- Conferma i dati: ${userReviews} recensioni con rating ${userRating}
+- Menziona il competitor principale (${topCompetitors[0]?.name || 'competitor'}) con le sue ${topCompetitors[0]?.reviews || 'XXX'} recensioni
+- Chiedi se l'obiettivo è raggiungerli e superarli
+- Domanda sull'urgenza: "Perché ha richiesto questo report proprio adesso?"
+
+😤 FASE 3: IL PERCHÉ EMOTIVO
+- Chiedi cosa frustra di più:
+  a) Clienti soddisfatti che non lasciano recensioni?
+  b) Vedere ${topCompetitors[0]?.name || 'competitor'} davanti su Google?
+
+🔍 FASE 4: IDENTIFICARE IL GAP
+- Chiedi cosa hanno provato finora (richieste a voce, bigliettini, QR generici)
+- Sottolinea che il problema è la mancanza di un SISTEMA, non i clienti
+- "L'1% insoddisfatto si ricorda sempre di recensire, la maggioranza silenziosa no"
+
+🎯 FASE 5: RISULTATO IDEALE
+- Scenario ideale tra 6 mesi: top 3 Google Maps, rating 4.8+, 300-400 recensioni in più
+- Promise realistica: 100-150 nuove recensioni positive nei prossimi 60 giorni
+
+🙋 FASE 6: CHIEDERE PERMESSO
+- "Le va se le spiego in 30 secondi come funziona il nostro sistema?"
+
+💡 FASE 7: SPIEGARE MENUCHAT
+- Acquisizione: QR code sui tavoli per vedere menu
+- Piattaforma: Chat WhatsApp cattura numero legalmente
+- Automazione: 2 ore dopo, messaggio automatico chiede recensione
+- Risultato: 10-15% clienti diventano recensori
+
+📱 FASE 8: GESTIRE OBIEZIONE MENU DIGITALE
+${menuScenarioText}
+${menuScenario === 'C' ? `
+Se è nello SCENARIO C, usa questo script per superare l'obiezione:
+"Capisco l'esitazione sul menu cartaceo. Ma guardiamo i fatti: senza questo 'ponte digitale' non possiamo catturare i numeri e automatizzare le richieste. Chiederlo a voce non funziona, adesivi generici nemmeno. Questo QR code è il nostro 'cavallo di Troia': il cliente vuole vedere il menu, noi vogliamo la recensione. Vale la pena sacrificare un'opportunità certa per restare legati al cartaceo?"` : ''}
+
+🤔 FASE 9: NELLE LORO PAROLE
+- "Secondo lei, perché un sistema del genere funzionerebbe per ${restaurantName}?"
+- Cerca risposte tipo: "È automatico", "Non devo fare nulla", "WhatsApp è diretto"
+
+💰 FASE 10: CHIUSURA E PREZZI
+- Piano annuale standard: 149€/mese (1788€/anno)
+- Offerta anticipato: 1290€ (107€/mese) - risparmio 500€
+- PROVA GRATUITA 14 GIORNI con condizione: QR sui tavoli entro 72 ore
+- Opzione stampa QR: 70€+IVA se non vogliono stampare
+
+📉 FASE 11: GESTIONE OBIEZIONI POST-TRIAL (dopo 14 giorni)
+- Step-Down 1: Due rate da 645€ (oggi + 60gg)
+- Step-Down 2: Acconto 290€ + 10 rate da 100€
+- Last Resort: Piano mensile 149€/mese (perde sconto)
+
+═══════════════════════════════════════
+FORMATO OUTPUT
+═══════════════════════════════════════
+
+Genera lo script con questa formattazione:
+- Usa emoji per separare le fasi (📞, 📊, 😤, etc.)
+- Metti in grassetto le parti chiave con **testo**
+- Includi [PAUSA - ATTENDI RISPOSTA] dove appropriato
+- Personalizza OGNI riferimento con i dati reali del ristorante
+- Lo script deve essere PRONTO DA LEGGERE durante la chiamata
+
+Genera lo script completo:`;
+  }
+
+  /**
    * Valida la qualità del messaggio generato
    * @param {string} message - Messaggio da validare
    * @returns {Object} - Risultato validazione con score e suggerimenti
