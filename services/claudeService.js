@@ -318,13 +318,17 @@ Genera il messaggio:`;
       const address = restaurantData.address || '';
       
       // Estrai competitor se disponibili
-      const strategicResults = ranking.strategicResults || [];
-      const topCompetitors = strategicResults.slice(0, 3).map((c, i) => ({
-        name: c.title || c.name || `Competitor ${i + 1}`,
+      // I competitor sono in fullResults.competitors (dal rank checker)
+      const fullResults = ranking.fullResults || {};
+      const competitors = fullResults.competitors || [];
+      const topCompetitors = competitors.slice(0, 3).map((c, i) => ({
+        name: c.name || c.title || `Competitor ${i + 1}`,
         reviews: c.reviews || c.reviewCount || 0,
         rating: c.rating || 0,
-        rank: c.rank || i + 1
+        rank: c.rank || c.position || i + 1
       }));
+      
+      console.log(`📊 Competitor trovati per script: ${topCompetitors.length}`, topCompetitors.map(c => c.name));
 
       // Determina lo scenario per il menu digitale
       let menuScenario = 'A'; // Default: ha già menu
