@@ -473,11 +473,14 @@ Lo script deve seguire queste 11 fasi:
 🙋 FASE 6: CHIEDERE PERMESSO
 - "Le va se le spiego in 30 secondi come funziona il nostro sistema?"
 
-💡 FASE 7: SPIEGARE MENUCHAT
-- Acquisizione: QR code sui tavoli per vedere menu
-- Piattaforma: Chat WhatsApp cattura numero legalmente
-- Automazione: 2 ore dopo, messaggio automatico chiede recensione
-- Risultato: 10-15% clienti diventano recensori
+💡 FASE 7: SPIEGARE MENUCHAT (IL SISTEMA)
+Il flusso è semplicissimo:
+1. Il cliente scansiona il QR code sul tavolo per vedere il menu
+2. Si apre automaticamente una chat WhatsApp che gli invia il menu digitale (in quel momento catturiamo il suo numero, legalmente)
+3. Due ore dopo il pasto, il sistema invia automaticamente un messaggio WhatsApp chiedendo "Com'è andata?" e invitando a lasciare una recensione
+4. Risultato: il 10% di chi riceve il messaggio lascia effettivamente la recensione
+
+È matematica pura: se hai 100 coperti al giorno e il 70% guarda il menu via QR, sono 70 messaggi. Il 10% di 70 = 7 recensioni AL GIORNO, 200+ al mese. Tutto in automatico, senza chiedere nulla a voce.
 
 📱 FASE 8: GESTIRE OBIEZIONE MENU DIGITALE
 ${menuScenarioText}
