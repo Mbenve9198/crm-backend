@@ -1647,11 +1647,15 @@ export const bulkChangeOwner = async (req, res) => {
  * GET /contacts/:id/call-script
  * 
  * Genera uno script di vendita basato sui dati del report Rank Checker del contatto.
+ * Lo script viene salvato nel contatto e riutilizzato nelle chiamate successive.
+ * Usa ?regenerate=true per forzare una nuova generazione.
+ * 
  * Funziona solo per contatti inbound con rankCheckerData.
  */
 export const generateCallScript = async (req, res) => {
   try {
     const { id } = req.params;
+    const { regenerate } = req.query; // Se true, forza rigenerazione
     
     // Trova il contatto
     const contact = await Contact.findById(id).populate('owner', 'firstName lastName email');
@@ -1689,20 +1693,54 @@ export const generateCallScript = async (req, res) => {
       });
     }
 
-    console.log(`📞 Generazione script chiamata per contatto: ${contact.name}`);
+    // Controlla se esiste già uno script salvato e non è richiesta rigenerazione
+    const existingScript = contact.properties?.generatedCallScript;
+    const scriptGeneratedAt = contact.properties?.callScriptGeneratedAt;
+    
+    if (existingScript && !regenerate) {
+      console.log(`📞 Restituisco script esistente per contatto: ${contact.name}`);
+      
+      return res.json({
+        success: true,
+        message: 'Script di chiamata recuperato dalla cache',
+        data: {
+          script: existingScript,
+          contactId: contact._id,
+          contactName: contact.name,
+          generatedAt: scriptGeneratedAt,
+          hasCompleteReport: !!contact.properties?.rankCheckerCompleteReport,
+          fromCache: true
+        }
+      });
+    }
+
+    console.log(`📞 Generazione nuovo script chiamata per contatto: ${contact.name}`);
 
     // Genera lo script usando Claude
     const script = await claudeService.generateCallScript(contact);
+    const generatedAt = new Date().toISOString();
+
+    // Salva lo script nel contatto
+    contact.properties = {
+      ...contact.properties,
+      generatedCallScript: script,
+      callScriptGeneratedAt: generatedAt
+    };
+    contact.lastModifiedBy = req.user._id;
+    await contact.save();
+
+    console.log(`✅ Script salvato nel contatto: ${contact.name}`);
 
     res.json({
       success: true,
-      message: 'Script di chiamata generato con successo',
+      message: 'Script di chiamata generato e salvato con successo',
       data: {
         script,
         contactId: contact._id,
         contactName: contact.name,
-        generatedAt: new Date().toISOString(),
-        hasCompleteReport: !!contact.properties?.rankCheckerCompleteReport
+        generatedAt,
+        hasCompleteReport: !!contact.properties?.rankCheckerCompleteReport,
+        fromCache: false
       }
     });
 
