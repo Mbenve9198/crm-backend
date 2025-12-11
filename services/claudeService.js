@@ -504,17 +504,31 @@ Se è nello SCENARIO C, usa questo script per superare l'obiezione:
 - Last Resort: Piano mensile 149€/mese (perde sconto)
 
 ═══════════════════════════════════════
-FORMATO OUTPUT
+FORMATO OUTPUT - IMPORTANTISSIMO
 ═══════════════════════════════════════
 
-Genera lo script con questa formattazione:
-- Usa emoji per separare le fasi (📞, 📊, 😤, etc.)
-- Metti in grassetto le parti chiave con **testo**
-- Includi [PAUSA - ATTENDI RISPOSTA] dove appropriato
-- Personalizza OGNI riferimento con i dati reali del ristorante
-- Lo script deve essere PRONTO DA LEGGERE durante la chiamata
+Lo script deve essere DISCORSIVO e NATURALE, come un vero dialogo telefonico.
 
-Genera lo script completo:`;
+REGOLE FONDAMENTALI:
+1. SCRIVI FRASI COMPLETE E NATURALI, non bullet point o elenchi
+2. Deve sembrare una conversazione vera, non uno schema
+3. Usa un tono colloquiale ma professionale
+4. Includi [PAUSA - ATTENDI RISPOSTA] dove il cliente deve rispondere
+5. Personalizza OGNI riferimento con i dati reali del ristorante
+6. Usa emoji SOLO per i titoli delle fasi (📞, 📊, 😤, etc.)
+7. Dentro ogni fase, scrivi il testo DA LEGGERE direttamente al telefono
+8. Puoi usare **grassetto** per evidenziare numeri o concetti chiave
+
+ESEMPIO DI COME SCRIVERE (GIUSTO):
+"Perfetto. Allora, sulla base di quello che facciamo con altri ristoranti come il vostro, penso che realisticamente possiamo aggiungere almeno **100-150 nuove recensioni positive** nei prossimi 60 giorni. E l'obiettivo, ovviamente, è mantenere quel flusso costante per sempre. Le sembra un obiettivo interessante?"
+
+ESEMPIO DI COME NON SCRIVERE (SBAGLIATO):
+📈 **Scenario ideale:**
+- Top 3 su Google Maps
+- Rating mantenuto a 4.8+ stelle
+- 300-400 nuove recensioni positive
+
+Genera lo script completo in forma DISCORSIVA:`;
   }
 
   /**
