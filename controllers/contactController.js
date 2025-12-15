@@ -374,6 +374,14 @@ export const updateContact = async (req, res) => {
     // Aggiunge il campo lastModifiedBy
     updates.lastModifiedBy = req.user._id;
 
+    // 🆕 Controlla se lo status sta cambiando verso uno stato positivo
+    const positiveStatuses = ['interessato', 'qr code inviato', 'free trial iniziato', 'won'];
+    const oldStatus = existingContact.status;
+    const newStatus = updates.status;
+    const isStatusChangingToPositive = newStatus && 
+                                        positiveStatuses.includes(newStatus) && 
+                                        oldStatus !== newStatus;
+
     const contact = await Contact.findByIdAndUpdate(
       id,
       updates,
@@ -382,6 +390,34 @@ export const updateContact = async (req, res) => {
     .populate('owner', 'firstName lastName email role')
     .populate('createdBy', 'firstName lastName email')
     .populate('lastModifiedBy', 'firstName lastName email');
+
+    // 🆕 Se status cambia a positivo e il contatto ha email, ferma sequenza SOAP OPERA
+    if (isStatusChangingToPositive && contact.email) {
+      try {
+        const menuchatBackendUrl = process.env.MENUCHAT_BACKEND_URL || 'https://menuchat-backend.onrender.com';
+        const response = await fetch(`${menuchatBackendUrl}/api/rank-checker-leads/stop-sequence`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': process.env.MENUCHAT_API_KEY || ''
+          },
+          body: JSON.stringify({
+            email: contact.email,
+            reason: `CRM status cambiato a "${newStatus}"`,
+            crmContactId: contact._id.toString(),
+            newStatus: newStatus
+          })
+        });
+        
+        const result = await response.json();
+        if (result.success && result.leadFound) {
+          console.log(`🛑 Sequenza SOAP OPERA fermata per ${contact.email} (status: ${newStatus})`);
+        }
+      } catch (webhookError) {
+        // Non bloccare l'update se il webhook fallisce
+        console.warn(`⚠️ Errore webhook stop-sequence per ${contact.email}:`, webhookError.message);
+      }
+    }
 
     res.json({
       success: true,
