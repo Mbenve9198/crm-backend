@@ -31,7 +31,11 @@ export const receiveRankCheckerLead = async (req, res) => {
       estimatedMonthlyReviews,
       // 🆕 Metadata
       leadSource,
-      leadType
+      leadType,
+      // 🆕 Richiesta chiamata
+      callRequested,
+      callPreference,
+      callRequestedAt
     } = req.body;
 
     // Validazione base
@@ -49,6 +53,11 @@ export const receiveRankCheckerLead = async (req, res) => {
     const finalReportLink = reportLink || reportLinks?.baseReport || '';
     if (finalReportLink) {
       console.log(`🔗 Report Link: ${finalReportLink}`);
+    }
+    
+    // 🆕 Log richiesta chiamata
+    if (callRequested) {
+      console.log(`📞 RICHIESTA CHIAMATA: ${callPreference || 'non specificata'}`);
     }
     
     // ⚠️ Log warning se numero invalido
@@ -148,6 +157,12 @@ export const receiveRankCheckerLead = async (req, res) => {
         contactName: name || null,
         restaurantAddress: rankingResults?.userRestaurant?.address || '',
         googleMapsUrl: placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : '',
+        // 🆕 Richiesta chiamata
+        ...(callRequested && {
+          callRequested: true,
+          callPreference: callPreference || null,
+          callRequestedAt: callRequestedAt || new Date().toISOString()
+        }),
         // 🆕 Link singolo al report (accesso rapido dal CRM)
         rankCheckerReport: finalReportLink,
         // ⚠️ Warning se numero telefono invalido
