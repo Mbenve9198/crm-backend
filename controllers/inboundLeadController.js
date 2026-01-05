@@ -17,12 +17,21 @@ export const receiveRankCheckerLead = async (req, res) => {
       email, 
       phone, 
       phoneWarning, // ⚠️ Warning se numero invalido
+      name, // 🆕 Nome contatto (se diverso da restaurantName)
       restaurantName, 
       placeId, 
       keyword, 
       rankingResults,
       qualificationData,
-      reportLinks  // 🆕 Link ai report
+      reportLink, // 🆕 Link al report (singolo)
+      reportLinks, // Legacy: supporto vecchio formato
+      // 🆕 Dati qualificazione diretti
+      hasDigitalMenu,
+      dailyCovers,
+      estimatedMonthlyReviews,
+      // 🆕 Metadata
+      leadSource,
+      leadType
     } = req.body;
 
     // Validazione base
@@ -34,10 +43,30 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
 
     console.log(`📥 INBOUND LEAD: ${restaurantName} (${email})`);
+    console.log(`📊 Lead Type: ${leadType || 'N/A'} | Source: ${leadSource || 'N/A'}`);
+    
+    // 🆕 Determina il link al report (supporto sia nuovo formato che legacy)
+    const finalReportLink = reportLink || reportLinks?.baseReport || '';
+    if (finalReportLink) {
+      console.log(`🔗 Report Link: ${finalReportLink}`);
+    }
     
     // ⚠️ Log warning se numero invalido
     if (phoneWarning) {
       console.warn(`⚠️ PHONE WARNING: ${phoneWarning}`);
+    }
+    
+    // 🆕 Dati qualificazione (priorità ai campi diretti, fallback a qualificationData)
+    const qualData = {
+      hasDigitalMenu: hasDigitalMenu ?? qualificationData?.hasDigitalMenu ?? null,
+      dailyCovers: dailyCovers ?? qualificationData?.dailyCovers ?? null,
+      estimatedMonthlyReviews: estimatedMonthlyReviews ?? qualificationData?.estimatedMonthlyReviews ?? null,
+      willingToAdoptMenu: qualificationData?.willingToAdoptMenu ?? null,
+      qualifiedAt: qualificationData?.qualifiedAt || (hasDigitalMenu !== undefined ? new Date() : null)
+    };
+    
+    if (qualData.dailyCovers) {
+      console.log(`📊 Qualificazione: ${qualData.dailyCovers} coperti/giorno, ${qualData.estimatedMonthlyReviews} recensioni/mese, Menu digitale: ${qualData.hasDigitalMenu ? 'Sì' : 'No'}`);
     }
 
     // Trova l'owner di default per i lead inbound
@@ -83,7 +112,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       phone: phone,
       lists: ['Inbound - Rank Checker'], // Lista dedicata per questi lead
       status: 'da contattare',
-      source: 'inbound_rank_checker',
+      source: leadSource || 'inbound_rank_checker',
       owner: defaultOwner._id,
       rankCheckerData: {
         placeId: placeId,
@@ -105,19 +134,22 @@ export const receiveRankCheckerLead = async (req, res) => {
             lng: rankingResults?.userRestaurant?.coordinates?.lng || null
           }
         },
-        hasDigitalMenu: qualificationData?.hasDigitalMenu,
-        willingToAdoptMenu: qualificationData?.willingToAdoptMenu,
-        dailyCovers: qualificationData?.dailyCovers,
-        estimatedMonthlyReviews: qualificationData?.estimatedMonthlyReviews,
-        qualifiedAt: qualificationData?.qualifiedAt,
-        leadCapturedAt: new Date()
+        // 🆕 Dati qualificazione
+        hasDigitalMenu: qualData.hasDigitalMenu,
+        willingToAdoptMenu: qualData.willingToAdoptMenu,
+        dailyCovers: qualData.dailyCovers,
+        estimatedMonthlyReviews: qualData.estimatedMonthlyReviews,
+        qualifiedAt: qualData.qualifiedAt,
+        leadCapturedAt: new Date(),
+        leadType: leadType || 'INBOUND'
       },
       properties: {
+        // 🆕 Nome contatto se diverso da nome ristorante
+        contactName: name || null,
         restaurantAddress: rankingResults?.userRestaurant?.address || '',
         googleMapsUrl: placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : '',
-        // 🆕 Link diretti ai report (per accesso rapido dal CRM)
-        rankCheckerBaseReport: reportLinks?.baseReport || '',
-        rankCheckerCompleteReport: reportLinks?.completeReport || '',
+        // 🆕 Link singolo al report (accesso rapido dal CRM)
+        rankCheckerReport: finalReportLink,
         // ⚠️ Warning se numero telefono invalido
         phoneWarning: phoneWarning || null
       }
