@@ -121,7 +121,8 @@ export const receiveRankCheckerLead = async (req, res) => {
       phone: phone,
       lists: ['Inbound - Rank Checker'], // Lista dedicata per questi lead
       status: 'da contattare',
-      source: leadSource || 'inbound_rank_checker',
+      // ⚠️ source deve essere un valore valido dell'enum - leadSource va in rankCheckerData
+      source: 'inbound_rank_checker',
       owner: defaultOwner._id,
       rankCheckerData: {
         placeId: placeId,
@@ -150,7 +151,8 @@ export const receiveRankCheckerLead = async (req, res) => {
         estimatedMonthlyReviews: qualData.estimatedMonthlyReviews,
         qualifiedAt: qualData.qualifiedAt,
         leadCapturedAt: new Date(),
-        leadType: leadType || 'INBOUND'
+        leadType: leadType || 'INBOUND',
+        leadSource: leadSource || 'organic' // organic, paid, etc.
       },
       properties: {
         // 🆕 Nome contatto se diverso da nome ristorante
