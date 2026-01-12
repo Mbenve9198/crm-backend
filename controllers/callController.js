@@ -36,16 +36,26 @@ export const initiateCall = async (req, res) => {
     const userId = req.user.id;
 
     // Verifica che le credenziali Twilio siano configurate nelle variabili d'ambiente
-    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
       return res.status(400).json({
         success: false,
-        message: 'Credenziali Twilio non configurate. Contatta l\'amministratore per configurare TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_PHONE_NUMBER.'
+        message: 'Credenziali Twilio non configurate. Contatta l\'amministratore per configurare TWILIO_ACCOUNT_SID e TWILIO_AUTH_TOKEN.'
+      });
+    }
+
+    // Ottieni l'utente per il numero di telefono Twilio
+    const user = await User.findById(userId);
+    const twilioPhone = user?.settings?.twilio?.phoneNumber || TWILIO_PHONE_NUMBER;
+    
+    if (!twilioPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Numero di telefono Twilio non configurato. Configura il numero nelle impostazioni.'
       });
     }
 
     // Crea client Twilio dalle variabili d'ambiente
     const client = createTwilioClient();
-    const twilioPhone = TWILIO_PHONE_NUMBER;
 
     // Verifica che il contatto esista e l'utente possa accedervi
     const contact = await Contact.findById(contactId);
