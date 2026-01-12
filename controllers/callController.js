@@ -103,17 +103,14 @@ export const initiateCall = async (req, res) => {
       console.warn('⚠️  BACKEND_URL non configurato! Usando URL di default. Configura la variabile d\'ambiente per Twilio.');
     }
 
-    // Numero Twilio dalle variabili d'ambiente
-    const userPhone = TWILIO_PHONE_NUMBER;
-
-    console.log(`📞 Chiamata verso di te: ${userPhone}`);
+    console.log(`📞 Chiamata verso di te: ${twilioPhone}`);
     console.log(`📞 Poi collegamento al contatto: ${toNumber}`);
 
     // Inizia la chiamata verso di TE (primo leg)
     // Quando rispondi, Twilio chiamerà answerUrl per sapere cosa fare
     const call = await client.calls.create({
-      from: userPhone, // DA il tuo numero
-      to: userPhone, // VERSO il tuo numero (Twilio ti chiama!)
+      from: twilioPhone, // DA il tuo numero Twilio
+      to: twilioPhone, // VERSO il tuo numero (Twilio ti chiama!)
       url: answerUrl, // Quando rispondi, Twilio chiama questo URL per il TwiML
       statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
