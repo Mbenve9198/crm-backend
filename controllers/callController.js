@@ -6,23 +6,24 @@ import User from '../models/userModel.js';
 
 /**
  * Controller per la gestione delle chiamate Twilio
- * Ogni utente usa la propria configurazione Twilio
+ * Usa le credenziali Twilio dalle variabili d'ambiente
  */
 
+// Credenziali Twilio dalle variabili d'ambiente
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+
 /**
- * Crea client Twilio per l'utente specifico
- * @param {Object} user - Utente con configurazione Twilio
+ * Crea client Twilio usando le variabili d'ambiente
  * @returns {Object} - Client Twilio configurato
  */
-function createTwilioClient(user) {
-  if (!user.hasTwilioEnabled()) {
-    throw new Error('Configurazione Twilio non disponibile o non verificata');
+function createTwilioClient() {
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    throw new Error('Credenziali Twilio non configurate nelle variabili d\'ambiente (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)');
   }
   
-  return twilio(
-    user.settings.twilio.accountSid,
-    user.settings.twilio.authToken
-  );
+  return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
 /**
@@ -34,18 +35,17 @@ export const initiateCall = async (req, res) => {
     const { contactId, recordCall = true } = req.body;
     const userId = req.user.id;
 
-    // Ottieni l'utente con configurazione Twilio
-    const user = await User.findById(userId).select('+settings.twilio.authToken');
-    if (!user || !user.hasTwilioEnabled()) {
+    // Verifica che le credenziali Twilio siano configurate nelle variabili d'ambiente
+    if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_PHONE_NUMBER) {
       return res.status(400).json({
         success: false,
-        message: 'Configurazione Twilio non presente o non verificata. Configura Twilio nelle impostazioni.'
+        message: 'Credenziali Twilio non configurate. Contatta l\'amministratore per configurare TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN e TWILIO_PHONE_NUMBER.'
       });
     }
 
-    // Crea client Twilio per questo utente
-    const client = createTwilioClient(user);
-    const twilioPhone = user.settings.twilio.phoneNumber;
+    // Crea client Twilio dalle variabili d'ambiente
+    const client = createTwilioClient();
+    const twilioPhone = TWILIO_PHONE_NUMBER;
 
     // Verifica che il contatto esista e l'utente possa accedervi
     const contact = await Contact.findById(contactId);
@@ -93,15 +93,8 @@ export const initiateCall = async (req, res) => {
       console.warn('⚠️  BACKEND_URL non configurato! Usando URL di default. Configura la variabile d\'ambiente per Twilio.');
     }
 
-    // Il tuo numero verificato con Twilio (che usi per fare E ricevere chiamate)
-    const userPhone = user.settings.twilio.phoneNumber;
-    
-    if (!userPhone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Non hai configurato il tuo numero di telefono nelle impostazioni Twilio'
-      });
-    }
+    // Numero Twilio dalle variabili d'ambiente
+    const userPhone = TWILIO_PHONE_NUMBER;
 
     console.log(`📞 Chiamata verso di te: ${userPhone}`);
     console.log(`📞 Poi collegamento al contatto: ${toNumber}`);
@@ -453,9 +446,8 @@ export const cancelCall = async (req, res) => {
 
     // Prova a cancellare la chiamata anche su Twilio se possibile
     try {
-      const user = await User.findById(userId).select('+settings.twilio.authToken');
-      if (user && user.hasTwilioEnabled()) {
-        const client = createTwilioClient(user);
+      if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+        const client = createTwilioClient();
         await client.calls(call.twilioCallSid).update({ status: 'canceled' });
         console.log(`📞 Chiamata cancellata su Twilio: ${call.twilioCallSid}`);
       }
