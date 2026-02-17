@@ -140,6 +140,7 @@ contactSchema.index({ name: 1 }); // Indice per ricerche per nome
 contactSchema.index({ owner: 1 }); // Indice per ownership
 contactSchema.index({ owner: 1, lists: 1 }); // Indice composto per owner e lista
 contactSchema.index({ 'properties.company': 1 }); // Esempio di indice su proprietà dinamica
+contactSchema.index({ updatedAt: -1 }); // Indice per sort di default (lead inbound tornano in cima)
 
 // Metodi dello schema
 

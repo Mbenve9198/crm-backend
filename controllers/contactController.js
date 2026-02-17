@@ -233,7 +233,8 @@ export const getContacts = async (req, res) => {
     }
 
     // Costruisce l'ordinamento
-    let sortOptions = { createdAt: -1 }; // Default sort
+    // Default: updatedAt per far risalire in cima i lead che ricevono interazioni inbound
+    let sortOptions = { updatedAt: -1 };
     if (sort_by && sort_direction) {
       const sortField = mapColumnToField(sort_by);
       const sortDir = sort_direction === 'desc' ? -1 : 1;
