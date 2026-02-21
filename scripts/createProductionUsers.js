@@ -28,6 +28,11 @@ const createProductionUsers = async () => {
     console.log('Marco:', existingMarco ? '✅ Esiste' : '❌ Non esiste');
     console.log('Federico:', existingFederico ? '✅ Esiste' : '❌ Non esiste');
     
+    if (!process.env.ADMIN_PASSWORD || !process.env.MANAGER_PASSWORD) {
+      console.error('❌ Variabili d\'ambiente richieste: ADMIN_PASSWORD, MANAGER_PASSWORD');
+      process.exit(1);
+    }
+
     const usersToCreate = [];
     
     if (!existingMarco) {
@@ -35,7 +40,7 @@ const createProductionUsers = async () => {
         firstName: 'Marco',
         lastName: 'Benvenuti',
         email: 'marco@menuchat.com',
-        password: 'Itpennywise9194!',
+        password: process.env.ADMIN_PASSWORD,
         role: 'admin',
         department: 'Amministrazione',
         isEmailVerified: true,
@@ -48,7 +53,7 @@ const createProductionUsers = async () => {
         firstName: 'Federico',
         lastName: 'MenuChat',
         email: 'federico@menuchat.com',
-        password: 'Itpennywise9194!',
+        password: process.env.MANAGER_PASSWORD,
         role: 'manager',
         department: 'Gestione',
         isEmailVerified: true,
@@ -83,9 +88,7 @@ const createProductionUsers = async () => {
     console.log(`👑 Amministratori: ${adminCount}`);
     console.log(`📋 Manager: ${managerCount}`);
     
-    console.log('\n🎯 Credenziali per il login:');
-    console.log('👤 Admin: marco@menuchat.com / Itpennywise9194!');
-    console.log('👤 Manager: federico@menuchat.com / Itpennywise9194!');
+    console.log('\n🎯 Utenti creati. Le credenziali sono quelle impostate tramite variabili d\'ambiente.');
     
   } catch (error) {
     console.error('❌ Errore durante la creazione degli utenti:', error);

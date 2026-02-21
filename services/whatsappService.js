@@ -271,10 +271,10 @@ class WhatsappService {
               console.log('🔑 Marco Benvenuti: usando licenza esistente');
             } else if (user.email === 'federico@menuchat.com') {
               // Federico Desantis usa la licenza dedicata
-              licenseKey = process.env.OPENWA_LICENSE_KEY_FEDERICO || '8D57EE58-7B694EBC-A77FFA52-66B053E3';
+              licenseKey = process.env.OPENWA_LICENSE_KEY_FEDERICO;
               console.log('🔑 Federico Desantis: usando licenza specifica');
               if (!process.env.OPENWA_LICENSE_KEY_FEDERICO) {
-                console.log('⚠️  OPENWA_LICENSE_KEY_FEDERICO non configurata, usando valore hard-coded');
+                console.log('⚠️  OPENWA_LICENSE_KEY_FEDERICO non configurata nelle variabili d\'ambiente');
               }
             } else {
               // Altri utenti usano la licenza di default

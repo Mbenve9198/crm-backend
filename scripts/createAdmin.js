@@ -26,31 +26,35 @@ const createAdmin = async () => {
       process.exit(0);
     }
 
-    // Dati per il nuovo admin
+    const adminEmail = process.env.ADMIN_EMAIL || 'admin@menuchatcrm.com';
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    if (!adminPassword) {
+      console.error('❌ Variabile d\'ambiente richiesta: ADMIN_PASSWORD');
+      console.error('   Esempio: ADMIN_PASSWORD=LatuaPasswordSicura node scripts/createAdmin.js');
+      process.exit(1);
+    }
+
     const adminData = {
       firstName: 'Admin',
       lastName: 'MenuChatCRM',
-      email: 'admin@menuchatcrm.com',
-      password: 'admin123', // Password temporanea - DA CAMBIARE!
+      email: adminEmail,
+      password: adminPassword,
       role: 'admin',
       department: 'Amministrazione',
       isEmailVerified: true
     };
 
-    // Crea l'utente admin
     const admin = await User.create(adminData);
     
     console.log('🎉 Utente amministratore creato con successo!');
     console.log('');
-    console.log('📋 CREDENZIALI AMMINISTRATORE:');
-    console.log('================================');
     console.log(`📧 Email: ${admin.email}`);
-    console.log(`🔑 Password: admin123`);
     console.log(`👤 Nome: ${admin.firstName} ${admin.lastName}`);
     console.log(`🏢 Ruolo: ${admin.role}`);
     console.log('');
     console.log('⚠️  IMPORTANTE:');
-    console.log('   1. Cambia subito la password dopo il primo login');
+    console.log('   1. Cambia la password dopo il primo login');
     console.log('   2. Aggiorna email e dati personali');
     console.log('   3. Crea altri utenti dal pannello admin');
     console.log('');
@@ -130,20 +134,12 @@ if (customEmail) {
 /**
  * ISTRUZIONI D'USO:
  * 
- * 1. Admin di default:
- *    node scripts/createAdmin.js
+ * 1. Admin di default (richiede ADMIN_PASSWORD come variabile d'ambiente):
+ *    ADMIN_PASSWORD=xxx node scripts/createAdmin.js
  * 
  * 2. Admin personalizzato:
- *    node scripts/createAdmin.js --email=admin@tuazienda.com --password=sicura123 --name="Mario Rossi"
+ *    node scripts/createAdmin.js --email=admin@tuazienda.com --password=xxx --name="Mario Rossi"
  * 
  * 3. Verifica esistenza admin:
  *    Il script controlla automaticamente se esiste già un admin
- * 
- * ESEMPI:
- * 
- * # Crea admin di default
- * npm run create-admin
- * 
- * # Crea admin personalizzato  
- * node scripts/createAdmin.js --email=boss@company.com --password=SuperSecret123 --name="CEO Boss"
  */ 

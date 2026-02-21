@@ -2,14 +2,14 @@ import mongoose from 'mongoose';
 import User from '../models/userModel.js';
 import dotenv from 'dotenv';
 
-// Carica le variabili d'ambiente dal file crm.env
-dotenv.config({ path: './crm.env' });
+// Carica le variabili d'ambiente dal file .env
+dotenv.config({ path: './.env' });
 
 /**
- * Script per creare l'utente Emanuele Funai con configurazione Twilio
+ * Script per creare l'utente Alessandro Totti con configurazione Twilio
  */
 
-const createEmanueleUser = async () => {
+const createAlessandroUser = async () => {
   try {
     // Connessione al database di produzione
     const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/menuchatcrm';
@@ -25,10 +25,10 @@ const createEmanueleUser = async () => {
     console.log('✅ Connesso al database!\n');
     
     // Verifica se l'utente esiste già
-    const existingUser = await User.findOne({ email: 'emanuele.funai@menuchat.it' });
+    const existingUser = await User.findOne({ email: 'alessandro.totti@menuchat.it' });
     
     if (existingUser) {
-      console.log('⚠️  L\'utente emanuele.funai@menuchat.it esiste già!');
+      console.log('⚠️  L\'utente alessandro.totti@menuchat.it esiste già!');
       console.log(`   👤 Nome: ${existingUser.firstName} ${existingUser.lastName}`);
       console.log(`   🏢 Ruolo: ${existingUser.role}`);
       console.log(`   📞 Numero Twilio: ${existingUser.settings?.twilio?.phoneNumber || 'Non configurato'}`);
@@ -37,24 +37,22 @@ const createEmanueleUser = async () => {
       return;
     }
     
-    if (!process.env.EMANUELE_PASSWORD) {
-      console.error('❌ Variabile d\'ambiente richiesta: EMANUELE_PASSWORD');
+    if (!process.env.ALESSANDRO_PASSWORD) {
+      console.error('❌ Variabile d\'ambiente richiesta: ALESSANDRO_PASSWORD');
       process.exit(1);
     }
 
-    console.log('🔧 Creazione nuovo utente Emanuele Funai...\n');
+    console.log('🔧 Creazione nuovo utente Alessandro Totti...\n');
     
-    // Legge le credenziali Twilio dal file .env
-    const twilioAccountSid = process.env.TWILIO_ACCOUNT_SID;
-    const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
-    const twilioPhoneNumber = '+393319433266'; // Formato E.164
+    // Numero di telefono Twilio in formato E.164
+    const twilioPhoneNumber = '+393737683347';
     
     // Dati del nuovo utente con configurazione Twilio completa
     const userData = {
-      firstName: 'Emanuele',
-      lastName: 'Funai',
-      email: 'emanuele.funai@menuchat.it',
-      password: process.env.EMANUELE_PASSWORD,
+      firstName: 'Alessandro',
+      lastName: 'Totti',
+      email: 'alessandro.totti@menuchat.it',
+      password: process.env.ALESSANDRO_PASSWORD,
       role: 'admin', // Tutti i permessi
       department: 'Amministrazione',
       isEmailVerified: true,
@@ -75,8 +73,6 @@ const createEmanueleUser = async () => {
           }
         },
         twilio: {
-          accountSid: twilioAccountSid,
-          authToken: twilioAuthToken,
           phoneNumber: twilioPhoneNumber,
           isVerified: true, // Già verificato
           isEnabled: true, // Già abilitato
@@ -112,8 +108,6 @@ const createEmanueleUser = async () => {
     console.log('   Email Verificata: ' + (newUser.isEmailVerified ? '✅ Sì' : '❌ No'));
     
     console.log('\n📞 CONFIGURAZIONE TWILIO:');
-    console.log('   Account SID: ' + twilioAccountSid);
-    console.log('   Auth Token: ' + twilioAuthToken.substring(0, 8) + '...');
     console.log('   Numero Telefono: ' + twilioPhoneNumber);
     console.log('   Stato: ✅ Verificato e Abilitato');
     console.log('   Data Verifica: ' + newUser.settings.twilio.lastVerified.toLocaleString('it-IT'));
@@ -165,5 +159,4 @@ const createEmanueleUser = async () => {
 };
 
 // Esegui lo script
-createEmanueleUser();
-
+createAlessandroUser();

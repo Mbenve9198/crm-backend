@@ -17,22 +17,27 @@ const createUsers = async () => {
     console.log('✅ Connesso a MongoDB');
 
     // Definisco gli utenti da creare
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD || !process.env.MANAGER_EMAIL || !process.env.MANAGER_PASSWORD) {
+      console.error('❌ Variabili d\'ambiente richieste: ADMIN_EMAIL, ADMIN_PASSWORD, MANAGER_EMAIL, MANAGER_PASSWORD');
+      process.exit(1);
+    }
+
     const usersToCreate = [
       {
         firstName: 'Marco',
         lastName: 'Benvenuti',
-        email: 'marco@menuchat.com',
-        password: 'Itpennywise9194!',
-        role: 'admin', // Assumo che Marco sia admin
+        email: process.env.ADMIN_EMAIL,
+        password: process.env.ADMIN_PASSWORD,
+        role: 'admin',
         department: 'Amministrazione',
         isEmailVerified: true
       },
       {
         firstName: 'Federico',
         lastName: 'MenuChat',
-        email: 'federico@menuchat.com',
-        password: 'Itpennywise9194!',
-        role: 'manager', // Assumo che Federico sia manager
+        email: process.env.MANAGER_EMAIL,
+        password: process.env.MANAGER_PASSWORD,
+        role: 'manager',
         department: 'Gestione',
         isEmailVerified: true
       }
@@ -59,7 +64,7 @@ const createUsers = async () => {
         console.log(`   👤 Nome: ${newUser.firstName} ${newUser.lastName}`);
         console.log(`   🏢 Ruolo: ${newUser.role}`);
         console.log(`   🏢 Dipartimento: ${newUser.department}`);
-        console.log(`   🔑 Password: ${userData.password}\n`);
+        console.log(`   🔑 Password: [impostata]\n`);
         
       } catch (error) {
         console.error(`❌ Errore nella creazione di ${userData.email}:`, error.message);
@@ -70,18 +75,7 @@ const createUsers = async () => {
     }
 
     console.log('🎉 Processo di creazione utenti completato!');
-    console.log('\n📋 RIEPILOGO CREDENZIALI:');
-    console.log('================================');
-    console.log('👤 Marco Benvenuti');
-    console.log('   📧 Email: marco@menuchat.com');
-    console.log('   🔑 Password: Itpennywise9194!');
-    console.log('   🏢 Ruolo: admin');
-    console.log('');
-    console.log('👤 Federico MenuChat');
-    console.log('   📧 Email: federico@menuchat.com');
-    console.log('   🔑 Password: Itpennywise9194!');
-    console.log('   🏢 Ruolo: manager');
-    console.log('\n🚀 Entrambi possono effettuare il login su:');
+    console.log('\n🚀 Gli utenti possono effettuare il login su:');
     console.log('   POST /api/auth/login');
 
   } catch (error) {

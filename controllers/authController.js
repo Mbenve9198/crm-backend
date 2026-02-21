@@ -8,7 +8,10 @@ import { promisify } from 'util';
  */
 
 // Configurazione JWT
-const JWT_SECRET = process.env.JWT_SECRET || 'menuchat-crm-super-secret-key-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET non configurato nelle variabili d\'ambiente');
+}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 /**
