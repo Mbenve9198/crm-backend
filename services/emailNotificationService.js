@@ -1,0 +1,103 @@
+import { Resend } from 'resend';
+
+/**
+ * Servizio per inviare notifiche email al team via Resend
+ * Usato per notificare quando un lead Smartlead risponde positivamente
+ */
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const fromEmail = process.env.RESEND_FROM_EMAIL || process.env.FROM_EMAIL || 'noreply@menuchat.com';
+
+/**
+ * Invia notifica al team quando un lead Smartlead è classificato come INTERESTED
+ */
+export const sendSmartleadInterestedNotification = async (data) => {
+  try {
+    if (!resend) {
+      console.warn('⚠️ Resend non configurato, skip notifica');
+      return { success: false, error: 'Resend non configurato' };
+    }
+
+    const {
+      email, name, phone, campaignName, replyText,
+      aiClassification, subject,
+      // Properties dal webhook
+      website, location, customFields
+    } = data;
+
+    const confidencePercent = ((aiClassification?.confidence || 0) * 100).toFixed(0);
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;">
+<div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+
+<div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px 20px; text-align: center;">
+  <h1 style="margin: 0; font-size: 28px;">✨ Lead Interessato da Smartlead!</h1>
+  <p style="margin: 10px 0 0 0; font-size: 14px; opacity: 0.9;">Risposta positiva alla campagna email</p>
+</div>
+
+<div style="padding: 30px 20px;">
+  <div style="text-align: center; margin-bottom: 20px;">
+    <span style="background-color: #10b981; color: white; padding: 8px 20px; border-radius: 20px; font-size: 14px; font-weight: bold;">
+      🤖 AI: INTERESTED (${confidencePercent}% confidence)
+    </span>
+  </div>
+  <p style="text-align: center; color: #6b7280; font-size: 13px; margin-top: 5px;">${aiClassification?.reason || ''}</p>
+
+  <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+    <h2 style="color: #059669; margin: 0 0 15px 0; font-size: 20px;">👤 Dati Contatto</h2>
+    <p style="margin: 5px 0;"><strong>Nome:</strong> ${name || 'N/A'}</p>
+    <p style="margin: 5px 0;"><strong>Email:</strong> <a href="mailto:${email}" style="color: #059669;">${email}</a></p>
+    ${phone ? `<p style="margin: 5px 0;"><strong>Telefono:</strong> <a href="tel:${phone}" style="color: #059669; font-size: 18px; font-weight: bold;">${phone}</a></p>` : ''}
+    ${location ? `<p style="margin: 5px 0;"><strong>Località:</strong> ${location}</p>` : ''}
+    ${website ? `<p style="margin: 5px 0;"><strong>Sito:</strong> <a href="${website}" style="color: #059669;" target="_blank">${website}</a></p>` : ''}
+  </div>
+
+  <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+    <h2 style="color: #d97706; margin: 0 0 10px 0; font-size: 18px;">📧 Campagna</h2>
+    <p style="margin: 5px 0;"><strong>Nome:</strong> ${campaignName || 'N/A'}</p>
+    ${subject ? `<p style="margin: 5px 0;"><strong>Oggetto:</strong> ${subject}</p>` : ''}
+  </div>
+
+  <div style="background-color: #ede9fe; border-left: 4px solid #8b5cf6; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+    <h2 style="color: #7c3aed; margin: 0 0 10px 0; font-size: 18px;">💬 Risposta del Lead</h2>
+    <div style="background-color: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd6fe; font-style: italic; white-space: pre-wrap;">${(replyText || 'Nessun testo').substring(0, 1000)}</div>
+  </div>
+
+  ${customFields && Object.keys(customFields).length > 0 ? `
+  <div style="background-color: #f8f9fa; border-left: 4px solid #6366f1; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
+    <h2 style="color: #4f46e5; margin: 0 0 10px 0; font-size: 18px;">📋 Campi Custom Smartlead</h2>
+    ${Object.entries(customFields).map(([k, v]) => `<p style="margin: 3px 0;"><strong>${k}:</strong> ${v}</p>`).join('')}
+  </div>` : ''}
+
+  <div style="text-align: center; margin-top: 30px;">
+    ${phone ? `<a href="tel:${phone}" style="display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 16px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 18px; box-shadow: 0 4px 12px rgba(16,185,129,0.4);">📞 CHIAMA ORA</a><br><br>` : ''}
+    <a href="mailto:${email}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 14px;">✉️ Rispondi via Email</a>
+  </div>
+
+  <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center;">
+    <p style="margin: 5px 0;">⏰ Risposta ricevuta il ${new Date().toLocaleString('it-IT')}</p>
+    <p style="margin: 5px 0;">💡 <strong>Azione:</strong> Contattare il prima possibile!</p>
+  </div>
+</div>
+</div></body></html>`;
+
+    const result = await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      bcc: ['marco.benvenuti91@gmail.com', 'federico@midachat.com'],
+      subject: `✨ SMARTLEAD INTERESTED: ${name || email} ${location ? `(${location})` : ''} — risposta positiva!`,
+      html
+    });
+
+    console.log(`✅ Notifica email inviata al team per ${name || email} (Resend ID: ${result.data?.id})`);
+    return { success: true, resendId: result.data?.id };
+
+  } catch (error) {
+    console.error('❌ Errore invio notifica email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export default { sendSmartleadInterestedNotification };

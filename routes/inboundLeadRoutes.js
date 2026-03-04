@@ -1,5 +1,6 @@
 import express from 'express';
 import { receiveRankCheckerLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
+import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
 
 const router = express.Router();
 
@@ -11,36 +12,27 @@ const router = express.Router();
 /**
  * Riceve lead dal Rank Checker di MenuChat
  * POST /api/inbound/rank-checker-lead
- * 
- * Body:
- * {
- *   email: string,
- *   phone: string,
- *   restaurantName: string,
- *   placeId: string,
- *   keyword: string,
- *   rankingResults: object,
- *   qualificationData: object (opzionale)
- * }
  */
 router.post('/rank-checker-lead', receiveRankCheckerLead);
 
 /**
- * Riceve lead da Smartlead (campagne email outbound)
+ * Riceve lead da Smartlead (formato legacy - chiamata diretta)
  * POST /api/inbound/smartlead-lead
- * 
- * Body:
- * {
- *   name: string,
- *   email: string,
- *   phone: string (opzionale),
- *   lists: array,
- *   status: string,
- *   source: string,
- *   properties: object
- * }
  */
 router.post('/smartlead-lead', receiveSmartleadLead);
+
+/**
+ * Webhook Smartlead con classificazione AI
+ * POST /api/inbound/smartlead-webhook
+ * 
+ * Flusso: Webhook → AI classifica risposta → mappa campi → crea/aggiorna contatto CRM
+ * 
+ * Gestisce:
+ * - EMAIL_REPLY → AI classifica → INTERESTED (CRM + notifica) / NOT_INTERESTED (CRM) / OUT_OF_OFFICE (skip)
+ * - LEAD_CATEGORY_UPDATED → sincronizza categoria al CRM
+ * - EMAIL_SENT → solo log
+ */
+router.post('/smartlead-webhook', handleSmartleadWebhook);
 
 export default router;
 
