@@ -2,7 +2,7 @@ import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import { classifyReply } from '../services/replyClassifierService.js';
-import { updateLeadCategory, mapAiCategoryToSmartlead, stripHtml } from '../services/smartleadApiService.js';
+import { updateLeadCategory, resumeLead, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
 
 /**
@@ -45,10 +45,10 @@ const mapWebhookToContact = (webhookData) => {
   // LinkedIn
   const linkedin = leadData.linkedin_profile || customFields.linkedin || customFields.LinkedIn || null;
 
-  // Campagna
+  // Campagna e lead ID (Smartlead usa sl_email_lead_id nel webhook, non lead_id)
   const campaignId = webhookData.campaign_id;
   const campaignName = webhookData.campaign_name;
-  const leadId = webhookData.lead_id;
+  const leadId = extractLeadId(webhookData);
 
   // Costruisci properties dal webhook (tutti i campi utili)
   const properties = {};
@@ -203,6 +203,7 @@ export const handleSmartleadWebhook = async (req, res) => {
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`📨 WEBHOOK SMARTLEAD: ${eventType}`);
+    console.log(`   to_email: ${webhookData.to_email}, sl_email_lead_id: ${webhookData.sl_email_lead_id}, campaign_id: ${webhookData.campaign_id}`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     switch (eventType) {
@@ -243,7 +244,8 @@ const handleEmailReply = async (webhookData) => {
 
   console.log(`💬 EMAIL_REPLY da: ${mapped.email}`);
   console.log(`   Nome: ${mapped.name}`);
-  console.log(`   Campagna: ${mapped.campaignName}`);
+  console.log(`   Campagna: ${mapped.campaignName} (ID: ${mapped.campaignId})`);
+  console.log(`   Lead ID Smartlead: ${mapped.leadId || 'N/A'}`);
   console.log(`   Preview: ${replyText.substring(0, 150)}...`);
 
   // 1. Classifica con AI
@@ -324,8 +326,22 @@ const handleEmailReply = async (webhookData) => {
     console.log(`🚫 CRM: contatto salvato come non interessato`);
 
   } else {
-    // OUT_OF_OFFICE: nessuna azione CRM, sequenza continua
-    console.log(`📋 OUT_OF_OFFICE — nessuna azione CRM, sequenza continua`);
+    // OUT_OF_OFFICE: nessuna azione CRM
+    // Smartlead potrebbe aver gia fermato la sequenza al ricevimento della reply
+    // (se stop_lead_settings = "REPLY_TO_AN_EMAIL"), quindi RESUME per far continuare
+    console.log(`📋 OUT_OF_OFFICE — riattivo la sequenza su Smartlead`);
+
+    if (mapped.campaignId && mapped.leadId) {
+      // 1. Imposta categoria "Out Of Office" senza pausa
+      await updateLeadCategory(mapped.campaignId, mapped.leadId, 'Out Of Office', false);
+      // 2. Resume esplicito per riattivare la sequenza
+      const resumeResult = await resumeLead(mapped.campaignId, mapped.leadId);
+      if (resumeResult.success) {
+        console.log(`▶️ Sequenza riattivata per lead ${mapped.leadId}`);
+      } else {
+        console.warn(`⚠️ Resume fallito: ${resumeResult.reason || resumeResult.error}`);
+      }
+    }
   }
 
   console.log(`✅ EMAIL_REPLY processato [${mapped.email} → ${category}]`);

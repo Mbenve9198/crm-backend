@@ -2,8 +2,9 @@ import axios from 'axios';
 
 /**
  * Service per interagire con le API di Smartlead
- * Aggiorna categorie lead e gestisce pause sequenze
+ * Aggiorna categorie lead, gestisce pause/resume sequenze
  * 
+ * Docs: https://server.smartlead.ai/api/v1
  * Rate limit: 10 requests ogni 2 secondi
  */
 
@@ -54,12 +55,18 @@ export const getCategoryIdByName = async (categoryName) => {
 };
 
 /**
- * Aggiorna la categoria di un lead in una campagna e opzionalmente mette in pausa
+ * Aggiorna la categoria di un lead in una campagna
+ * POST /campaigns/{campaign_id}/leads/{lead_id}/category
+ * 
+ * @param {number} campaignId - ID campagna
+ * @param {number} leadId - sl_email_lead_id dal webhook
+ * @param {string} categoryName - "Interested", "Not Interested", "Out Of Office"
+ * @param {boolean} pauseLead - true = ferma la sequenza
  */
 export const updateLeadCategory = async (campaignId, leadId, categoryName, pauseLead = false) => {
   try {
     if (!campaignId || !leadId) {
-      console.warn('⚠️ campaignId o leadId mancante, skip aggiornamento Smartlead');
+      console.warn(`⚠️ campaignId (${campaignId}) o leadId (${leadId}) mancante, skip aggiornamento Smartlead`);
       return { success: false, reason: 'campaignId o leadId mancante' };
     }
 
@@ -69,7 +76,7 @@ export const updateLeadCategory = async (campaignId, leadId, categoryName, pause
       return { success: false, reason: `Categoria "${categoryName}" non trovata` };
     }
 
-    console.log(`🏷️ Smartlead: lead ${leadId} → "${categoryName}" (pause: ${pauseLead})`);
+    console.log(`🏷️ Smartlead API: POST /campaigns/${campaignId}/leads/${leadId}/category → "${categoryName}" (id: ${categoryId}, pause: ${pauseLead})`);
 
     const response = await axios.post(
       buildUrl(`/campaigns/${campaignId}/leads/${leadId}/category`),
@@ -77,10 +84,40 @@ export const updateLeadCategory = async (campaignId, leadId, categoryName, pause
       { timeout: 15000, headers: { 'Content-Type': 'application/json' } }
     );
 
-    console.log(`✅ Categoria Smartlead aggiornata: lead ${leadId} → "${categoryName}"`);
+    console.log(`✅ Categoria Smartlead aggiornata: lead ${leadId} → "${categoryName}"${pauseLead ? ' + lead in pausa' : ''}`);
     return { success: true, data: response.data, categoryId, categoryName, paused: pauseLead };
   } catch (error) {
     console.error('❌ Errore aggiornamento categoria Smartlead:', error.response?.data || error.message);
+    return { success: false, error: error.response?.data || error.message };
+  }
+};
+
+/**
+ * Riprende un lead messo in pausa (riattiva la sequenza)
+ * POST /campaigns/{campaign_id}/leads/{lead_id}/resume
+ * 
+ * Usato per OUT_OF_OFFICE: Smartlead stoppa la sequenza su ogni reply,
+ * ma noi vogliamo che continui se è solo un auto-reply.
+ */
+export const resumeLead = async (campaignId, leadId) => {
+  try {
+    if (!campaignId || !leadId) {
+      console.warn(`⚠️ campaignId (${campaignId}) o leadId (${leadId}) mancante, skip resume`);
+      return { success: false, reason: 'campaignId o leadId mancante' };
+    }
+
+    console.log(`▶️ Smartlead API: POST /campaigns/${campaignId}/leads/${leadId}/resume`);
+
+    const response = await axios.post(
+      buildUrl(`/campaigns/${campaignId}/leads/${leadId}/resume`),
+      { resume_lead_with_delay_days: 0 },
+      { timeout: 15000, headers: { 'Content-Type': 'application/json' } }
+    );
+
+    console.log(`✅ Lead ${leadId} riattivato nella campagna ${campaignId}`);
+    return { success: true, data: response.data };
+  } catch (error) {
+    console.error('❌ Errore resume lead Smartlead:', error.response?.data || error.message);
     return { success: false, error: error.response?.data || error.message };
   }
 };
@@ -95,6 +132,19 @@ export const mapAiCategoryToSmartlead = (aiCategory) => {
     case 'OUT_OF_OFFICE': return { smartleadCategory: 'Out Of Office', shouldPause: false };
     default: return { smartleadCategory: null, shouldPause: false };
   }
+};
+
+/**
+ * Estrae il lead ID corretto dal webhook payload
+ * Smartlead usa campi diversi a seconda dell'evento:
+ * - EMAIL_REPLY: sl_email_lead_id
+ * - LEAD_CATEGORY_UPDATED: lead_id o sl_email_lead_id
+ */
+export const extractLeadId = (webhookData) => {
+  return webhookData.sl_email_lead_id
+    || webhookData.lead_id
+    || webhookData.sl_lead_id
+    || null;
 };
 
 /**
@@ -114,6 +164,8 @@ export default {
   fetchCategories,
   getCategoryIdByName,
   updateLeadCategory,
+  resumeLead,
   mapAiCategoryToSmartlead,
+  extractLeadId,
   stripHtml
 };
