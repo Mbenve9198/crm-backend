@@ -62,6 +62,9 @@ REGOLE CRITICHE:
 - "Non abbiamo tempo in questo periodo" = INTERESTED
 - Risposte brevi tipo "Ok", "Ricevuto", "Grazie" senza contesto = INTERESTED
 - Risposte in altre lingue = classifica normalmente in base al contenuto
+- ABBREVIAZIONI ITALIANE: "nn" = "non", "x" = "per", "cmq" = "comunque". "Nn sono interessato" = "Non sono interessato" = NOT_INTERESTED
+- Se la risposta contiene disclaimer GDPR/privacy con richiesta cancellazione dati = NOT_INTERESTED (il lead non vuole essere contattato)
+- Se la risposta inizia con un rifiuto chiaro ("non sono interessato", "no grazie") anche se seguito da testo legale/GDPR = NOT_INTERESTED
 
 FORMATO RISPOSTA (SOLO JSON valido, nient'altro):
 {
@@ -113,6 +116,18 @@ export const classifyReply = async (replyText, context = {}) => {
 const quickClassify = (text) => {
   const lower = text.toLowerCase().trim();
 
+  // Normalizza abbreviazioni italiane comuni prima del pattern matching
+  // "nn" → "non", "x" → "per", "xchè/xché" → "perché", "cmq" → "comunque"
+  const normalized = lower
+    .replace(/\bnn\b/g, 'non')
+    .replace(/\bn\b(?=\s+(sono|siamo|ci|mi|è|ho|abbiamo|voglio|vogliamo))/g, 'non')
+    .replace(/\bxchè\b|\bxché\b|\bperchè\b/g, 'perché')
+    .replace(/\bx\b/g, 'per')
+    .replace(/\bcmq\b/g, 'comunque')
+    .replace(/\bqnd\b/g, 'quando')
+    .replace(/\btt\b/g, 'tutto')
+    .replace(/\bgrz\b|\bgrz\b/g, 'grazie');
+
   const oooPatterns = [
     'fuori ufficio', 'out of office', 'automatisch', 'auto-reply',
     'automatic reply', 'risposta automatica', 'vacation', 'in ferie',
@@ -127,7 +142,7 @@ const quickClassify = (text) => {
     'autoresponder', 'message automatique'
   ];
   for (const p of oooPatterns) {
-    if (lower.includes(p)) return { category: 'OUT_OF_OFFICE', confidence: 0.95, reason: 'Risposta automatica / fuori ufficio', shouldStopSequence: false };
+    if (normalized.includes(p)) return { category: 'OUT_OF_OFFICE', confidence: 0.95, reason: 'Risposta automatica / fuori ufficio', shouldStopSequence: false };
   }
 
   const negPatterns = [
@@ -137,10 +152,14 @@ const quickClassify = (text) => {
     'non scriveteci più', 'non scrivetemi più', 'non inviate più',
     'disiscrivi', 'disiscrivimi', 'disiscrivetemi',
     'non ci interessa', 'non mi interessa', 'non siamo interessati',
-    'non sono interessato', 'non sono interessata'
+    'non sono interessato', 'non sono interessata',
+    'non interessato', 'non interessata', 'non interessati',
+    'no grazie', 'no, grazie',
+    'cancellazione dei', 'rettifica o la cancellazione',
+    'ai sensi del regolamento'
   ];
   for (const p of negPatterns) {
-    if (lower.includes(p)) return { category: 'NOT_INTERESTED', confidence: 0.95, reason: 'Rifiuto esplicito o richiesta rimozione', shouldStopSequence: true };
+    if (normalized.includes(p)) return { category: 'NOT_INTERESTED', confidence: 0.95, reason: 'Rifiuto esplicito o richiesta rimozione', shouldStopSequence: true };
   }
 
   const posPatterns = [
@@ -153,7 +172,7 @@ const quickClassify = (text) => {
     'prendiamo un appuntamento', 'fissiamo una chiamata'
   ];
   for (const p of posPatterns) {
-    if (lower.includes(p)) return { category: 'INTERESTED', confidence: 0.95, reason: 'Interesse esplicito / richiesta contatto', shouldStopSequence: true };
+    if (normalized.includes(p)) return { category: 'INTERESTED', confidence: 0.95, reason: 'Interesse esplicito / richiesta contatto', shouldStopSequence: true };
   }
 
   return null;
