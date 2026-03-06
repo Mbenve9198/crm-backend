@@ -2,7 +2,7 @@ import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import { classifyReply } from '../services/replyClassifierService.js';
-import { updateLeadCategory, resumeLead, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
+import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
 
 /**
@@ -17,75 +17,135 @@ import { sendSmartleadInterestedNotification } from '../services/emailNotificati
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 /**
- * Estrae e mappa tutti i campi dal payload webhook Smartlead al formato CRM
+ * Estrae dati base dal webhook (disponibili immediatamente senza API call)
  */
-const mapWebhookToContact = (webhookData) => {
-  // Dati lead dal webhook (Smartlead invia in vari formati)
-  const leadData = webhookData.lead_data || webhookData.lead || {};
-  const customFields = leadData.custom_fields || {};
-
-  // Nome: priorità company_name > first+last > to_name
-  const firstName = leadData.first_name || webhookData.first_name || '';
-  const lastName = leadData.last_name || webhookData.last_name || '';
-  const companyName = leadData.company_name || webhookData.company_name || customFields.company_name || '';
-  const fullName = companyName || [firstName, lastName].filter(Boolean).join(' ') || webhookData.to_name || 'Lead Smartlead';
-
-  // Email
-  const email = (webhookData.to_email || webhookData.to || leadData.email || '').toLowerCase().trim();
-
-  // Telefono: dal lead_data o da custom_fields
-  const phone = leadData.phone_number || customFields.phone || customFields.Phone || customFields.phone_number || null;
-
-  // Website
-  const website = leadData.website || customFields.website || customFields.Website || customFields.site || null;
-
-  // Location
-  const location = leadData.location || customFields.location || customFields.Location || customFields.city || customFields.City || null;
-
-  // LinkedIn
-  const linkedin = leadData.linkedin_profile || customFields.linkedin || customFields.LinkedIn || null;
-
-  // Campagna e lead ID (Smartlead usa sl_email_lead_id nel webhook, non lead_id)
+const extractWebhookBasicData = (webhookData) => {
+  const email = (webhookData.to_email || webhookData.to || '').toLowerCase().trim();
   const campaignId = webhookData.campaign_id;
   const campaignName = webhookData.campaign_name;
   const leadId = extractLeadId(webhookData);
+  const toName = webhookData.to_name || '';
 
-  // Costruisci properties dal webhook (tutti i campi utili)
+  return { email, campaignId, campaignName, leadId, toName };
+};
+
+/**
+ * Mappa i dati completi del lead (da Smartlead API) al formato Contact CRM
+ * 
+ * Campi Smartlead → CRM:
+ * - company_name → name
+ * - email → email
+ * - phone_number → phone
+ * - custom_fields.location_link → properties.google_maps_link
+ * - custom_fields.rating_prospect → properties.rating
+ * - custom_fields.reviews_prospect → properties.reviews_count
+ * - website → properties.site
+ * - location → properties.location
+ * - linkedin_profile → properties.linkedin
+ * - custom_fields.* → properties.smartlead_*
+ */
+const mapLeadDataToContact = (smartleadLead, webhookBasic) => {
+  const customFields = smartleadLead.custom_fields || {};
+
+  // Nome: company_name > first+last > to_name dal webhook
+  const firstName = smartleadLead.first_name || '';
+  const lastName = smartleadLead.last_name || '';
+  const companyName = smartleadLead.company_name || '';
+  const fullName = companyName || [firstName, lastName].filter(Boolean).join(' ') || webhookBasic.toName || 'Lead Smartlead';
+
+  // Telefono
+  const phone = smartleadLead.phone_number || customFields.phone || customFields.Phone || null;
+
+  // Website
+  const website = smartleadLead.website || customFields.website || customFields.Website || null;
+
+  // Location (testo) e Google Maps link (da custom_fields)
+  const locationText = smartleadLead.location || customFields.city || customFields.City || null;
+  const googleMapsLink = customFields.location_link || customFields.Location_Link || customFields.google_maps_link || null;
+
+  // LinkedIn
+  const linkedin = smartleadLead.linkedin_profile || customFields.linkedin || null;
+
+  // Rating e recensioni (da custom_fields)
+  const rating = customFields.rating_prospect || customFields.rating || null;
+  const reviewsCount = customFields.reviews_prospect || customFields.reviews || customFields.reviews_count || null;
+
+  // Properties per il CRM
   const properties = {};
 
+  // Dati principali
   if (website) properties.site = website;
-  if (location) properties.location = location;
+  if (locationText) properties.location = locationText;
   if (linkedin) properties.linkedin = linkedin;
+  if (googleMapsLink) properties.google_maps_link = googleMapsLink;
+  if (rating) properties.rating = rating;
+  if (reviewsCount) properties.reviews_count = reviewsCount;
   if (firstName) properties.first_name = firstName;
   if (lastName) properties.last_name = lastName;
   if (companyName && companyName !== fullName) properties.company_name = companyName;
 
-  // Mappa tutti i custom_fields di Smartlead nelle properties
+  // Mappa tutti i custom_fields nelle properties (escludi copy email lunghe per non inquinare)
+  const skipFields = ['copy_email_1_final', 'copy_email_2', 'copy_email_3', 'copy_email_4',
+    'outbound_email_final_def', 'follow_up_email_finale', 'break_up_email_final',
+    'location_link', 'rating_prospect', 'reviews_prospect'];
+
   for (const [key, value] of Object.entries(customFields)) {
-    if (value && typeof value === 'string' && value.trim() && value !== '--') {
+    const keyLower = key.toLowerCase();
+    if (skipFields.some(s => keyLower.includes(s.toLowerCase()))) continue;
+    if (value && typeof value === 'string' && value.trim() && value !== '--' && value.length < 500) {
       const normalizedKey = key.toLowerCase().replace(/\s+/g, '_');
       properties[`smartlead_${normalizedKey}`] = value;
     }
   }
 
   // Metadata campagna
-  properties.smartlead_campaign_id = campaignId;
-  properties.smartlead_campaign_name = campaignName;
-  properties.smartlead_lead_id = leadId;
+  properties.smartlead_campaign_id = webhookBasic.campaignId;
+  properties.smartlead_campaign_name = webhookBasic.campaignName;
+  properties.smartlead_lead_id = webhookBasic.leadId || smartleadLead.id;
   properties.smartlead_imported_at = new Date().toISOString();
 
   return {
     name: fullName,
-    email,
+    email: webhookBasic.email,
     phone,
     website,
-    location,
+    location: locationText,
+    googleMapsLink,
+    rating,
+    reviewsCount,
     linkedin,
     properties,
-    campaignId,
-    campaignName,
-    leadId,
+    campaignId: webhookBasic.campaignId,
+    campaignName: webhookBasic.campaignName,
+    leadId: webhookBasic.leadId || smartleadLead.id,
     customFields
+  };
+};
+
+/**
+ * Crea dati mappati dal solo webhook (fallback se fetch API fallisce)
+ */
+const mapWebhookOnlyToContact = (webhookBasic) => {
+  return {
+    name: webhookBasic.toName || 'Lead Smartlead',
+    email: webhookBasic.email,
+    phone: null,
+    website: null,
+    location: null,
+    googleMapsLink: null,
+    rating: null,
+    reviewsCount: null,
+    linkedin: null,
+    properties: {
+      smartlead_campaign_id: webhookBasic.campaignId,
+      smartlead_campaign_name: webhookBasic.campaignName,
+      smartlead_lead_id: webhookBasic.leadId,
+      smartlead_imported_at: new Date().toISOString()
+    },
+    campaignId: webhookBasic.campaignId,
+    campaignName: webhookBasic.campaignName,
+    leadId: webhookBasic.leadId,
+    customFields: {}
   };
 };
 
@@ -236,22 +296,22 @@ export const handleSmartleadWebhook = async (req, res) => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const handleEmailReply = async (webhookData) => {
-  const mapped = mapWebhookToContact(webhookData);
+  const webhookBasic = extractWebhookBasicData(webhookData);
   const replyMessage = webhookData.reply_message || {};
   const replyBody = replyMessage.html || webhookData.reply_body || '';
   const replyText = replyMessage.text || webhookData.preview_text || stripHtml(replyBody);
   const subject = webhookData.subject;
 
-  console.log(`💬 EMAIL_REPLY da: ${mapped.email}`);
-  console.log(`   Nome: ${mapped.name}`);
-  console.log(`   Campagna: ${mapped.campaignName} (ID: ${mapped.campaignId})`);
-  console.log(`   Lead ID Smartlead: ${mapped.leadId || 'N/A'}`);
+  console.log(`💬 EMAIL_REPLY da: ${webhookBasic.email}`);
+  console.log(`   Nome (webhook): ${webhookBasic.toName}`);
+  console.log(`   Campagna: ${webhookBasic.campaignName} (ID: ${webhookBasic.campaignId})`);
+  console.log(`   Lead ID Smartlead: ${webhookBasic.leadId || 'N/A'}`);
   console.log(`   Preview: ${replyText.substring(0, 150)}...`);
 
   // 1. Classifica con AI
   const aiResult = await classifyReply(replyText, {
-    restaurantName: mapped.name,
-    campaignName: mapped.campaignName,
+    restaurantName: webhookBasic.toName,
+    campaignName: webhookBasic.campaignName,
     subject
   });
 
@@ -263,8 +323,8 @@ const handleEmailReply = async (webhookData) => {
 
   // 2. Aggiorna categoria su Smartlead via API
   const { smartleadCategory, shouldPause } = mapAiCategoryToSmartlead(category);
-  if (smartleadCategory && mapped.campaignId && mapped.leadId) {
-    const slResult = await updateLeadCategory(mapped.campaignId, mapped.leadId, smartleadCategory, shouldPause);
+  if (smartleadCategory && webhookBasic.campaignId && webhookBasic.leadId) {
+    const slResult = await updateLeadCategory(webhookBasic.campaignId, webhookBasic.leadId, smartleadCategory, shouldPause);
     if (slResult.success) {
       console.log(`✅ Smartlead: ${smartleadCategory}${shouldPause ? ' + sequenza fermata' : ''}`);
     } else {
@@ -274,7 +334,20 @@ const handleEmailReply = async (webhookData) => {
 
   // 3. Azioni in base alla categoria
   if (category === 'INTERESTED') {
-    // Crea/aggiorna contatto CRM come "interessato"
+    // 3a. Fetch dati completi del lead da Smartlead API per popolare il CRM
+    console.log(`🔍 Recupero dati completi del lead da Smartlead...`);
+    const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
+
+    let mapped;
+    if (smartleadLead) {
+      mapped = mapLeadDataToContact(smartleadLead, webhookBasic);
+      console.log(`✅ Dati lead recuperati: ${mapped.name} | Tel: ${mapped.phone || 'N/A'} | Rating: ${mapped.rating || 'N/A'} | Recensioni: ${mapped.reviewsCount || 'N/A'}`);
+    } else {
+      console.warn(`⚠️ Impossibile recuperare dati da Smartlead, uso solo dati webhook`);
+      mapped = mapWebhookOnlyToContact(webhookBasic);
+    }
+
+    // 3b. Crea/aggiorna contatto CRM come "interessato"
     const result = await createOrUpdateCrmContact(mapped, 'interessato', {
       type: 'email',
       title: '✨ Lead INTERESSATO (AI) — Risposta positiva',
@@ -293,7 +366,7 @@ const handleEmailReply = async (webhookData) => {
       console.log(`${result.isNew ? '🆕' : '🔄'} CRM: contatto ${result.contact.name} → interessato`);
     }
 
-    // Invia notifica email al team
+    // 3c. Invia notifica email al team
     const emailResult = await sendSmartleadInterestedNotification({
       email: mapped.email,
       name: mapped.name,
@@ -309,7 +382,12 @@ const handleEmailReply = async (webhookData) => {
     if (emailResult.success) console.log(`📧 Notifica team inviata!`);
 
   } else if (category === 'NOT_INTERESTED') {
-    // Crea/aggiorna contatto CRM come "non interessato" (per tracking)
+    // Fetch dati anche per NOT_INTERESTED per popolare CRM per tracking
+    const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
+    const mapped = smartleadLead
+      ? mapLeadDataToContact(smartleadLead, webhookBasic)
+      : mapWebhookOnlyToContact(webhookBasic);
+
     await createOrUpdateCrmContact(mapped, 'non interessato', {
       type: 'email',
       title: '🚫 Lead NON INTERESSATO (AI)',
@@ -327,24 +405,21 @@ const handleEmailReply = async (webhookData) => {
 
   } else {
     // OUT_OF_OFFICE: nessuna azione CRM
-    // Smartlead potrebbe aver gia fermato la sequenza al ricevimento della reply
-    // (se stop_lead_settings = "REPLY_TO_AN_EMAIL"), quindi RESUME per far continuare
+    // Smartlead potrebbe aver gia fermato la sequenza, quindi RESUME
     console.log(`📋 OUT_OF_OFFICE — riattivo la sequenza su Smartlead`);
 
-    if (mapped.campaignId && mapped.leadId) {
-      // 1. Imposta categoria "Out Of Office" senza pausa
-      await updateLeadCategory(mapped.campaignId, mapped.leadId, 'Out Of Office', false);
-      // 2. Resume esplicito per riattivare la sequenza
-      const resumeResult = await resumeLead(mapped.campaignId, mapped.leadId);
+    if (webhookBasic.campaignId && webhookBasic.leadId) {
+      await updateLeadCategory(webhookBasic.campaignId, webhookBasic.leadId, 'Out Of Office', false);
+      const resumeResult = await resumeLead(webhookBasic.campaignId, webhookBasic.leadId);
       if (resumeResult.success) {
-        console.log(`▶️ Sequenza riattivata per lead ${mapped.leadId}`);
+        console.log(`▶️ Sequenza riattivata per lead ${webhookBasic.leadId}`);
       } else {
         console.warn(`⚠️ Resume fallito: ${resumeResult.reason || resumeResult.error}`);
       }
     }
   }
 
-  console.log(`✅ EMAIL_REPLY processato [${mapped.email} → ${category}]`);
+  console.log(`✅ EMAIL_REPLY processato [${webhookBasic.email} → ${category}]`);
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -352,14 +427,20 @@ const handleEmailReply = async (webhookData) => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const handleLeadCategoryUpdated = async (webhookData) => {
-  const mapped = mapWebhookToContact(webhookData);
+  const webhookBasic = extractWebhookBasicData(webhookData);
   const leadCategory = webhookData.lead_category || {};
   const newCategoryName = leadCategory.new_name || webhookData.category || '';
   const oldCategoryName = leadCategory.old_name || '';
   const lastReply = webhookData.last_reply || webhookData.lastReply || {};
 
-  console.log(`🏷️ LEAD_CATEGORY_UPDATED: ${mapped.email}`);
+  console.log(`🏷️ LEAD_CATEGORY_UPDATED: ${webhookBasic.email}`);
   console.log(`   ${oldCategoryName || 'N/A'} → ${newCategoryName}`);
+
+  // Fetch dati completi del lead da Smartlead
+  const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
+  const mapped = smartleadLead
+    ? mapLeadDataToContact(smartleadLead, webhookBasic)
+    : mapWebhookOnlyToContact(webhookBasic);
 
   const categoryLower = newCategoryName.toLowerCase();
 

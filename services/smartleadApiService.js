@@ -135,6 +135,41 @@ export const mapAiCategoryToSmartlead = (aiCategory) => {
 };
 
 /**
+ * Recupera tutti i dati di un lead da Smartlead tramite email
+ * GET /leads/?api_key=${API_KEY}&email=${email}
+ * 
+ * Restituisce: id, first_name, last_name, email, phone_number, company_name,
+ *              website, location, custom_fields, linkedin_profile, lead_campaign_data
+ */
+export const fetchLeadByEmail = async (email) => {
+  try {
+    if (!email) return null;
+
+    console.log(`🔍 Smartlead API: fetch lead by email ${email}`);
+
+    const response = await axios.get(
+      `${SMARTLEAD_API_BASE}/leads/?api_key=${getApiKey()}&email=${encodeURIComponent(email)}`,
+      { timeout: 15000 }
+    );
+
+    if (response.data && response.data.email) {
+      console.log(`✅ Lead trovato su Smartlead: ${response.data.company_name || response.data.email} (ID: ${response.data.id})`);
+      return response.data;
+    }
+
+    console.log(`ℹ️ Lead non trovato su Smartlead per email: ${email}`);
+    return null;
+  } catch (error) {
+    if (error.response?.status === 404) {
+      console.log(`ℹ️ Lead non trovato su Smartlead: ${email}`);
+      return null;
+    }
+    console.error('❌ Errore fetch lead Smartlead:', error.response?.data || error.message);
+    return null;
+  }
+};
+
+/**
  * Estrae il lead ID corretto dal webhook payload
  * Smartlead usa campi diversi a seconda dell'evento:
  * - EMAIL_REPLY: sl_email_lead_id
@@ -165,6 +200,7 @@ export default {
   getCategoryIdByName,
   updateLeadCategory,
   resumeLead,
+  fetchLeadByEmail,
   mapAiCategoryToSmartlead,
   extractLeadId,
   stripHtml
