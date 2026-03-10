@@ -210,11 +210,12 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     console.log(`🆕 Nuovo contatto: ${name} (${email})`);
     isNew = true;
 
-    // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead Smartlead
+    // Round robin puro tra Alessandro Totti ed Emanuele Funai
+    // Applicato SOLO ai nuovi lead Smartlead INTERESSATI
     let ownerForNewContact = defaultOwner;
-    const hasSmartleadMetadata = !!properties.smartlead_campaign_id;
+    const isSmartleadInterested = status === 'interessato' && !!properties.smartlead_campaign_id;
 
-    if (hasSmartleadMetadata) {
+    if (isSmartleadInterested) {
       const roundRobinEmails = [
         'alessandro.totti@menuchat.it',
         'emanuele.funai@menuchat.it'
