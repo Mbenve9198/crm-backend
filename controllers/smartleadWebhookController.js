@@ -1,6 +1,7 @@
 import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
+import AssignmentState from '../models/assignmentStateModel.js';
 import { classifyReply } from '../services/replyClassifierService.js';
 import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
@@ -160,7 +161,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     return null;
   }
 
-  // Trova owner di default
+  // Trova owner di default (fallback generale)
   let defaultOwner;
   if (process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL) {
     defaultOwner = await User.findOne({ email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL.toLowerCase() });
@@ -209,6 +210,47 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     console.log(`🆕 Nuovo contatto: ${name} (${email})`);
     isNew = true;
 
+    // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead Smartlead
+    let ownerForNewContact = defaultOwner;
+    const hasSmartleadMetadata = !!properties.smartlead_campaign_id;
+
+    if (hasSmartleadMetadata) {
+      const roundRobinEmails = [
+        'alessandro.totti@menuchat.it',
+        'emanuele.funai@menuchat.it'
+      ];
+
+      // Recupera utenti per le email configurate (filtra solo attivi)
+      const owners = await User.find({
+        email: { $in: roundRobinEmails },
+        isActive: true
+      }).sort({ createdAt: 1 });
+
+      if (owners.length > 0) {
+        // Allinea l'ordine degli owner a quello delle email
+        const orderedOwners = roundRobinEmails
+          .map(emailVal => owners.find(u => u.email === emailVal))
+          .filter(Boolean);
+
+        if (orderedOwners.length > 0) {
+          // Legge/crea stato round robin
+          const key = 'smartlead_round_robin';
+          let state = await AssignmentState.findOne({ key });
+          if (!state) {
+            state = await AssignmentState.create({ key, lastIndex: -1 });
+          }
+
+          const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+          ownerForNewContact = orderedOwners[nextIndex];
+
+          state.lastIndex = nextIndex;
+          await state.save();
+
+          console.log(`🎯 Round robin Smartlead → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+        }
+      }
+    }
+
     contact = new Contact({
       name,
       email,
@@ -218,8 +260,8 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
       mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status) ? 0 : undefined,
       source: 'smartlead_outbound',
       properties,
-      owner: defaultOwner._id,
-      createdBy: defaultOwner._id
+      owner: ownerForNewContact._id,
+      createdBy: ownerForNewContact._id
     });
     await contact.save();
 
