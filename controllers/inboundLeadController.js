@@ -1,6 +1,7 @@
 import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
+import AssignmentState from '../models/assignmentStateModel.js';
 
 /**
  * Controller per la gestione dei lead inbound da MenuChat
@@ -213,8 +214,47 @@ export const receiveRankCheckerLead = async (req, res) => {
     } else {
       // Contatto nuovo → CREA
       console.log(`🆕 Creazione nuovo contatto...`);
-      
-      leadData.createdBy = defaultOwner._id;
+
+      // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead inbound (Rank Checker)
+      let ownerForNewContact = defaultOwner;
+      try {
+        const roundRobinEmails = [
+          'alessandro.totti@menuchat.it',
+          'emanuele.funai@menuchat.it'
+        ];
+
+        const owners = await User.find({
+          email: { $in: roundRobinEmails },
+          isActive: true
+        }).sort({ createdAt: 1 });
+
+        if (owners.length > 0) {
+          const orderedOwners = roundRobinEmails
+            .map(emailVal => owners.find(u => u.email === emailVal))
+            .filter(Boolean);
+
+          if (orderedOwners.length > 0) {
+            const key = 'smartlead_round_robin';
+            let state = await AssignmentState.findOne({ key });
+            if (!state) {
+              state = await AssignmentState.create({ key, lastIndex: -1 });
+            }
+
+            const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+            ownerForNewContact = orderedOwners[nextIndex];
+
+            state.lastIndex = nextIndex;
+            await state.save();
+
+            console.log(`🎯 Round robin INBOUND → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+          }
+        }
+      } catch (err) {
+        console.error('⚠️ Errore round robin inbound, uso defaultOwner:', err.message);
+      }
+
+      leadData.owner = ownerForNewContact._id;
+      leadData.createdBy = ownerForNewContact._id;
       
       contact = new Contact(leadData);
       await contact.save();
@@ -368,7 +408,45 @@ export const receiveSmartleadLead = async (req, res) => {
       // CREA nuovo contatto
       console.log(`🆕 Creazione nuovo contatto...`);
       isNew = true;
-      
+
+      // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead Smartlead inbound
+      let ownerForNewContact = defaultOwner;
+      try {
+        const roundRobinEmails = [
+          'alessandro.totti@menuchat.it',
+          'emanuele.funai@menuchat.it'
+        ];
+
+        const owners = await User.find({
+          email: { $in: roundRobinEmails },
+          isActive: true
+        }).sort({ createdAt: 1 });
+
+        if (owners.length > 0) {
+          const orderedOwners = roundRobinEmails
+            .map(emailVal => owners.find(u => u.email === emailVal))
+            .filter(Boolean);
+
+          if (orderedOwners.length > 0) {
+            const key = 'smartlead_round_robin';
+            let state = await AssignmentState.findOne({ key });
+            if (!state) {
+              state = await AssignmentState.create({ key, lastIndex: -1 });
+            }
+
+            const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+            ownerForNewContact = orderedOwners[nextIndex];
+
+            state.lastIndex = nextIndex;
+            await state.save();
+
+            console.log(`🎯 Round robin SMARTLEAD INBOUND → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+          }
+        }
+      } catch (err) {
+        console.error('⚠️ Errore round robin Smartlead inbound, uso defaultOwner:', err.message);
+      }
+
       contact = new Contact({
         name,
         email: email.toLowerCase(),
@@ -378,8 +456,8 @@ export const receiveSmartleadLead = async (req, res) => {
         mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status) ? mrr : undefined,
         source,
         properties,
-        owner: defaultOwner._id,
-        createdBy: defaultOwner._id
+        owner: ownerForNewContact._id,
+        createdBy: ownerForNewContact._id
       });
       
       await contact.save();
