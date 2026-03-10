@@ -129,6 +129,7 @@ export const mapAiCategoryToSmartlead = (aiCategory) => {
   switch (aiCategory) {
     case 'INTERESTED': return { smartleadCategory: 'Interested', shouldPause: true };
     case 'NOT_INTERESTED': return { smartleadCategory: 'Not Interested', shouldPause: true };
+    case 'DO_NOT_CONTACT': return { smartleadCategory: 'Do Not Contact', shouldPause: true };
     case 'OUT_OF_OFFICE': return { smartleadCategory: 'Out Of Office', shouldPause: false };
     default: return { smartleadCategory: null, shouldPause: false };
   }

@@ -35,17 +35,24 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - Qualsiasi risposta che NON è un rifiuto chiaro ed esplicito
    - NEL DUBBIO TRA INTERESTED E NOT_INTERESTED → scegli INTERESTED
 
-2. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE.
-   Classifica come NOT_INTERESTED SOLO se:
-   - Dice chiaramente "non ci interessa", "no grazie", "non vogliamo", "non abbiamo bisogno"
-   - Chiede rimozione dalla lista: "rimuoveteci", "cancellatemi", "non contattateci più", "unsubscribe"
-   - Risposta arrabbiata o ostile ("è spam", "come avete avuto la mia email", "smettetela")
-   - "Abbiamo già un sistema e siamo soddisfatti" (rifiuto definitivo)
-   - "Il ristorante è chiuso / in vendita / cambiato gestione"
-   - Rifiuto cortese ma DEFINITIVO ("non è proprio il nostro ambito", "non fa per noi")
-   - ATTENZIONE: "Non è il momento" o "non abbiamo tempo adesso" NON è NOT_INTERESTED, è INTERESTED (apertura futura)
+2. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE, ma senza chiedere esplicitamente di non essere più contattato in futuro.
+   Classifica come NOT_INTERESTED se:
+   - Dice chiaramente "non ci interessa", "non ci serve", "non siamo interessati", "non sono interessato", "non abbiamo bisogno"
+   - Dice che l’attività è sospesa/chiusa ("attività momentaneamente sospesa", "ristorante chiuso", "non facciamo più questo servizio")
+   - Dice che ha già un fornitore o un sistema e non vuole cambiarlo ora
+   - Rifiuto cortese ma DEFINITIVO ("non è proprio il nostro ambito", "non fa per noi", "non è di nostro interesse")
+   - Risposte tipo "grazie ma non siamo interessati / non ci serve"
+   - Risposte come "ci aggiorniamo la prossima settimana" SENZA chiara apertura positiva e senza richiesta di maggiori info → considerale NOT_INTERESTED (non OUT_OF_OFFICE)
 
-3. **OUT_OF_OFFICE** — Risposte automatiche che NON esprimono né interesse né disinteresse.
+3. **DO_NOT_CONTACT** — Il lead NON vuole più essere contattato, oppure il rifiuto è talmente netto che è prudente non scrivergli mai più.
+   Classifica come DO_NOT_CONTACT se:
+   - Chiede esplicitamente di NON essere più contattato: "non contattatemi più", "non scrivetemi più", "basta email", "non voglio più ricevere vostre comunicazioni"
+   - Chiede rimozione/cancellazione: "rimuovetemi/rimuoveteci dalla mailing list", "cancellate i miei dati", "cancellazione immediata/definitiva", "unsubscribe"
+   - Cita GDPR / privacy con richiesta di cancellazione o diffida: "ai sensi del GDPR", "violazione della privacy", "diffidiamo dal contattarci ulteriormente"
+   - Minaccia o cita vie legali / autorità: "procederemo per vie legali", "segnaleremo alle autorità", "spam"
+   - Risposta molto breve e secca come solo "No", "No grazie", "No non mi interessa" (senza altre aperture positive)
+
+4. **OUT_OF_OFFICE** — Risposte automatiche che NON esprimono né interesse né disinteresse.
    Classifica come OUT_OF_OFFICE se:
    - Risposte automatiche: "fuori ufficio", "out of office", "sono in ferie fino a..."
    - Auto-reply di sistema, vacation reply
@@ -63,12 +70,12 @@ REGOLE CRITICHE:
 - Risposte brevi tipo "Ok", "Ricevuto", "Grazie" senza contesto = INTERESTED
 - Risposte in altre lingue = classifica normalmente in base al contenuto
 - ABBREVIAZIONI ITALIANE: "nn" = "non", "x" = "per", "cmq" = "comunque". "Nn sono interessato" = "Non sono interessato" = NOT_INTERESTED
-- Se la risposta contiene disclaimer GDPR/privacy con richiesta cancellazione dati = NOT_INTERESTED (il lead non vuole essere contattato)
-- Se la risposta inizia con un rifiuto chiaro ("non sono interessato", "no grazie") anche se seguito da testo legale/GDPR = NOT_INTERESTED
+- Se la risposta contiene disclaimer GDPR/privacy con richiesta cancellazione dati = DO_NOT_CONTACT (il lead non vuole essere contattato in futuro)
+- Se la risposta inizia con un rifiuto chiaro + richiesta di non essere più contattato ("non sono interessato, cancellatemi", "no grazie, rimuovetemi") anche se seguito da testo legale/GDPR = DO_NOT_CONTACT
 
 FORMATO RISPOSTA (SOLO JSON valido, nient'altro):
 {
-  "category": "INTERESTED|NOT_INTERESTED|OUT_OF_OFFICE",
+  "category": "INTERESTED|NOT_INTERESTED|DO_NOT_CONTACT|OUT_OF_OFFICE",
   "confidence": 0.0-1.0,
   "reason": "breve spiegazione in italiano (max 100 caratteri)"
 }`;
@@ -130,33 +137,62 @@ const quickClassify = (text) => {
 
   const oooPatterns = [
     'fuori ufficio', 'out of office', 'automatisch', 'auto-reply',
-    'automatic reply', 'risposta automatica', 'vacation', 'in ferie',
-    'non sono disponibile fino', 'sarò assente', 'away from',
+    'automatic reply', 'risposta automatica', 'vacation',
+    'non sono disponibile fino', 'sarò assente', 'saro assente', 'away from',
     'i am currently out', 'je suis absent', 'abwesend',
     'delivery status notification', 'undeliverable', 'mail delivery failed',
     'mailer-daemon', 'postmaster', 'noreply', 'no-reply', 'donotreply',
     'il tuo ticket', 'your ticket', 'ticket number', 'numero ticket',
     'prenotazione confermata', 'booking confirmed', 'prenota un tavolo',
     'per prenotare', 'riapriremo', 'riapriamo', 'chiusi per ferie',
-    'chiusi per riposo', 'chiusura estiva', 'chiusura invernale',
+    'chiusura estiva', 'chiusura invernale',
     'autoresponder', 'message automatique'
   ];
   for (const p of oooPatterns) {
     if (normalized.includes(p)) return { category: 'OUT_OF_OFFICE', confidence: 0.95, reason: 'Risposta automatica / fuori ufficio', shouldStopSequence: false };
   }
 
-  const negPatterns = [
-    'rimuoveteci', 'rimuovetemi', 'cancellatemi', 'cancellate il mio',
-    'toglietemi', 'non contattateci', 'non contattatemi', 'unsubscribe',
+  // Pattern forti per DO_NOT_CONTACT (richiesta esplicita di stop / toni legali / "No" secco)
+  const dncPatterns = [
+    'non contattatemi più', 'non contattatemi piu', 'non contattarmi più', 'non contattarmi piu',
+    'non contattateci più', 'non contattateci piu',
+    'non scrivetemi più', 'non scrivetemi piu', 'non scriveteci più', 'non scriveteci piu',
+    'non voglio più ricevere', 'non voglio piu ricevere',
+    'non desidero ulteriori comunicazioni', 'non desideriamo ulteriori comunicazioni',
+    'rimuovetemi dalla mailing list', 'rimuoveteci dalla mailing list', 'rimuovere dalla mailing list',
+    'cancellate i miei dati', 'cancellate i nostri dati', 'cancellazione immediata', 'cancellazione definitiva',
+    'unsubscribe', 'disiscrivi', 'disiscrivimi', 'disiscrivetemi',
     'remove me', 'remove us', 'stop emailing', 'stop sending',
-    'non scriveteci più', 'non scrivetemi più', 'non inviate più',
-    'disiscrivi', 'disiscrivimi', 'disiscrivetemi',
+    'vi diffidiamo dal contattare', 'diffidiamo dal contattarvi ulteriormente',
+    'procederemo per vie legali', 'per vie legali',
+    'segnaleremo alle autorità', 'segnalare alle autorità',
+    'violazione della privacy', 'gdpr',
+    'basta email', 'basta messaggi', 'è spam', 'e spam', 'spam',
+    // "No" molto secchi tipici delle tue campagne
+    'no', 'no grazie', 'no, grazie', 'no non mi interessa', 'no, non mi interessa'
+  ];
+  for (const p of dncPatterns) {
+    if (normalized === p || normalized.startsWith(p + ' ') || normalized.includes(p + '.')) {
+      return { category: 'DO_NOT_CONTACT', confidence: 0.97, reason: 'Richiesta stop contatti / rifiuto secco', shouldStopSequence: true };
+    }
+  }
+
+  const negPatterns = [
     'non ci interessa', 'non mi interessa', 'non siamo interessati',
     'non sono interessato', 'non sono interessata',
     'non interessato', 'non interessata', 'non interessati',
-    'no grazie', 'no, grazie',
-    'cancellazione dei', 'rettifica o la cancellazione',
-    'ai sensi del regolamento'
+    'non abbiamo bisogno', 'al momento non abbiamo bisogno',
+    'non ci serve', 'al momento non ci serve',
+    'abbiamo già un fornitore', 'abbiamo gia un fornitore',
+    'abbiamo già questo servizio', 'abbiamo gia questo servizio',
+    'abbiamo già un sistema', 'abbiamo gia un sistema',
+    'non utilizziamo questo tipo di servizio', 'non utilizziamo questo servizio',
+    'la nostra attività è sospesa', 'la nostra attivita è sospesa', 'la nostra attività e sospesa', 'la nostra attivita e sospesa',
+    'attività momentaneamente sospesa', 'attivita momentaneamente sospesa',
+    'attività chiusa', 'attivita chiusa',
+    'non fa per noi', 'non è il nostro ambito', 'non e il nostro ambito',
+    'non è di nostro interesse', 'non e di nostro interesse',
+    'grazie ma non siamo interessati', 'grazie ma non ci serve'
   ];
   for (const p of negPatterns) {
     if (normalized.includes(p)) return { category: 'NOT_INTERESTED', confidence: 0.95, reason: 'Rifiuto esplicito o richiesta rimozione', shouldStopSequence: true };
@@ -208,7 +244,7 @@ const parseClassificationResponse = (responseText) => {
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found');
     const parsed = JSON.parse(jsonMatch[0]);
-    const validCategories = ['INTERESTED', 'NOT_INTERESTED', 'OUT_OF_OFFICE'];
+    const validCategories = ['INTERESTED', 'NOT_INTERESTED', 'DO_NOT_CONTACT', 'OUT_OF_OFFICE'];
     if (!validCategories.includes(parsed.category)) throw new Error(`Invalid category: ${parsed.category}`);
     return {
       category: parsed.category,
@@ -219,6 +255,7 @@ const parseClassificationResponse = (responseText) => {
   } catch (error) {
     console.error('❌ Errore parsing classificazione:', error.message);
     const upper = responseText.toUpperCase();
+    if (upper.includes('DO_NOT_CONTACT')) return { category: 'DO_NOT_CONTACT', confidence: 0.5, reason: 'Parsing fallback', shouldStopSequence: true };
     if (upper.includes('NOT_INTERESTED')) return { category: 'NOT_INTERESTED', confidence: 0.5, reason: 'Parsing fallback', shouldStopSequence: true };
     if (upper.includes('OUT_OF_OFFICE')) return { category: 'OUT_OF_OFFICE', confidence: 0.5, reason: 'Parsing fallback', shouldStopSequence: false };
     return { category: 'INTERESTED', confidence: 0.3, reason: 'Default INTERESTED', shouldStopSequence: true };

@@ -381,7 +381,7 @@ const handleEmailReply = async (webhookData) => {
     });
     if (emailResult.success) console.log(`📧 Notifica team inviata!`);
 
-  } else if (category === 'NOT_INTERESTED') {
+  } else if (category === 'NOT_INTERESTED' || category === 'DO_NOT_CONTACT') {
     // Fetch dati anche per NOT_INTERESTED per popolare CRM per tracking
     const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
     const mapped = smartleadLead
@@ -390,7 +390,9 @@ const handleEmailReply = async (webhookData) => {
 
     await createOrUpdateCrmContact(mapped, 'non interessato', {
       type: 'email',
-      title: '🚫 Lead NON INTERESSATO (AI)',
+      title: category === 'DO_NOT_CONTACT'
+        ? '🛑 Lead DO NOT CONTACT (AI)'
+        : '🚫 Lead NON INTERESSATO (AI)',
       description: `Campagna: ${mapped.campaignName}\n\n🤖 AI: ${category} (${(confidence * 100).toFixed(0)}%)\nMotivo: ${reason}\n\nRisposta:\n${replyText}`,
       data: {
         emailSubject: subject,
