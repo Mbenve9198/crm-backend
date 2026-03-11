@@ -13,6 +13,7 @@ import {
   removeContactFromList,
   handleCsvImport,
   getContactStats,
+  getLeadFunnelAnalytics,
   getDynamicProperties,
   getCsvMappingOptions,
   getContactLists,
@@ -74,6 +75,9 @@ router.use(protect);
 
 // Statistiche contatti (deve essere prima di /:id per evitare conflitti)
 router.get('/stats', getContactStats);
+
+// Analytics lead per fonte (Smartlead vs Rank Checker)
+router.get('/analytics/leads', restrictTo('manager', 'admin'), getLeadFunnelAnalytics);
 
 // Proprietà dinamiche disponibili (deve essere prima di /:id per evitare conflitti)
 router.get('/dynamic-properties', getDynamicProperties);

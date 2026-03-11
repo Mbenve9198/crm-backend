@@ -1349,6 +1349,142 @@ export const getDynamicProperties = async (req, res) => {
   }
 };
 
+ * Analytics lead per fonte (Smartlead vs Rank Checker)
+ * GET /contacts/analytics/leads?from=YYYY-MM-DD&to=YYYY-MM-DD
+ */
+export const getLeadFunnelAnalytics = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    // Calcola intervallo di date
+    let dateFrom;
+    let dateTo;
+
+    if (from) {
+      const parsedFrom = new Date(from);
+      if (isNaN(parsedFrom.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "from" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      dateFrom = parsedFrom;
+    } else {
+      // Default: ultimi 30 giorni
+      dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - 30);
+    }
+
+    if (to) {
+      const parsedTo = new Date(to);
+      if (isNaN(parsedTo.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      // Include tutta la giornata "to"
+      parsedTo.setHours(23, 59, 59, 999);
+      dateTo = parsedTo;
+    } else {
+      dateTo = new Date();
+    }
+
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+
+    const pipeline = [
+      {
+        $match: {
+          source: { $in: sourcesOfInterest },
+          createdAt: { $gte: dateFrom, $lte: dateTo }
+        }
+      },
+      {
+        $group: {
+          _id: '$source',
+          totalLeads: { $sum: 1 },
+          freeTrialStarted: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'free trial iniziato'] }, 1, 0]
+            }
+          },
+          wonCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'won'] }, 1, 0]
+            }
+          },
+          lostCount: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'lost'] }, 1, 0]
+            }
+          },
+          mrrWon: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'won'] }, { $ifNull: ['$mrr', 0] }, 0]
+            }
+          },
+          mrrFreeTrial: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'free trial iniziato'] },
+                { $ifNull: ['$mrr', 0] },
+                0
+              ]
+            }
+          }
+        }
+      }
+    ];
+
+    const aggResults = await Contact.aggregate(pipeline);
+
+    // Normalizza in oggetto leggibile per il frontend
+    const resultBySource = {};
+    for (const row of aggResults) {
+      const src = row._id;
+      resultBySource[src] = {
+        totalLeads: row.totalLeads,
+        freeTrialStarted: row.freeTrialStarted,
+        won: row.wonCount,
+        lost: row.lostCount,
+        mrrWon: row.mrrWon,
+        mrrFreeTrial: row.mrrFreeTrial
+      };
+    }
+
+    // Assicura chiavi presenti anche se 0
+    sourcesOfInterest.forEach((src) => {
+      if (!resultBySource[src]) {
+        resultBySource[src] = {
+          totalLeads: 0,
+          freeTrialStarted: 0,
+          won: 0,
+          lost: 0,
+          mrrWon: 0,
+          mrrFreeTrial: 0
+        };
+      }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        period: {
+          from: dateFrom,
+          to: dateTo
+        },
+        sources: resultBySource
+      }
+    });
+  } catch (error) {
+    console.error('Errore nel recupero delle analytics lead:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
 /**
  * Ottieni tutte le proprietà dinamiche disponibili per la mappatura CSV
  * GET /contacts/csv-mapping-options
