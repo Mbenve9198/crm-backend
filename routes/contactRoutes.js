@@ -15,6 +15,7 @@ import {
   getContactStats,
   getLeadFunnelAnalytics,
   getFunnelStatusEvents,
+  getWonContactsBySource,
   getDynamicProperties,
   getCsvMappingOptions,
   getContactLists,
@@ -82,6 +83,9 @@ router.get('/analytics/leads', restrictTo('admin'), getLeadFunnelAnalytics);
 
 // Analytics funnel per eventi di cambio stato - solo admin
 router.get('/analytics/funnel-status-events', restrictTo('admin'), getFunnelStatusEvents);
+
+// Elenco contatti WON per sorgente e periodo - solo admin
+router.get('/analytics/won-contacts', restrictTo('admin'), getWonContactsBySource);
 
 // Proprietà dinamiche disponibili (deve essere prima di /:id per evitare conflitti)
 router.get('/dynamic-properties', getDynamicProperties);

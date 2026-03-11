@@ -1739,6 +1739,118 @@ export const getFunnelStatusEvents = async (req, res) => {
 };
 
 /**
+ * Elenco contatti WON per sorgente e periodo, basato sugli eventi di cambio stato
+ * GET /contacts/analytics/won-contacts?source=smartlead_outbound|inbound_rank_checker&from=YYYY-MM-DD&to=YYYY-MM-DD
+ */
+export const getWonContactsBySource = async (req, res) => {
+  try {
+    const { from, to, source } = req.query;
+
+    if (!source) {
+      return res.status(400).json({
+        success: false,
+        message: 'Parametro "source" obbligatorio (es. smartlead_outbound o inbound_rank_checker)'
+      });
+    }
+
+    let dateFrom;
+    let dateTo;
+
+    if (from) {
+      const parsedFrom = new Date(from);
+      if (isNaN(parsedFrom.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "from" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      dateFrom = parsedFrom;
+    } else {
+      dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - 30);
+    }
+
+    if (to) {
+      const parsedTo = new Date(to);
+      if (isNaN(parsedTo.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      parsedTo.setHours(23, 59, 59, 999);
+      dateTo = parsedTo;
+    } else {
+      dateTo = new Date();
+    }
+
+    const pipeline = [
+      {
+        $match: {
+          type: 'status_change',
+          'data.statusChange.newStatus': 'won',
+          createdAt: { $gte: dateFrom, $lte: dateTo }
+        }
+      },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact',
+          foreignField: '_id',
+          as: 'contact'
+        }
+      },
+      { $unwind: '$contact' },
+      {
+        $match: {
+          'contact.source': source
+        }
+      },
+      {
+        $group: {
+          _id: '$contact._id',
+          name: { $first: '$contact.name' },
+          email: { $first: '$contact.email' },
+          mrr: { $first: '$contact.mrr' },
+          source: { $first: '$contact.source' },
+          wonAt: { $min: '$createdAt' }
+        }
+      },
+      {
+        $sort: { wonAt: -1 }
+      }
+    ];
+
+    const contacts = await Activity.aggregate(pipeline);
+
+    res.json({
+      success: true,
+      data: {
+        source,
+        period: {
+          from: dateFrom,
+          to: dateTo
+        },
+        contacts: contacts.map((c) => ({
+          id: c._id,
+          name: c.name,
+          email: c.email,
+          mrr: c.mrr,
+          source: c.source,
+          wonAt: c.wonAt
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Errore nel recupero dei contatti won per sorgente:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
  * Ottieni tutte le proprietà dinamiche disponibili per la mappatura CSV
  * GET /contacts/csv-mapping-options
  */
