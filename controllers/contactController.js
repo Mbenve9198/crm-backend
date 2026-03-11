@@ -1404,6 +1404,11 @@ export const getLeadFunnelAnalytics = async (req, res) => {
         $group: {
           _id: '$source',
           totalLeads: { $sum: 1 },
+          qrCodeSent: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'qr code inviato'] }, 1, 0]
+            }
+          },
           freeTrialStarted: {
             $sum: {
               $cond: [{ $eq: ['$status', 'free trial iniziato'] }, 1, 0]
@@ -1445,6 +1450,7 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       const src = row._id;
       resultBySource[src] = {
         totalLeads: row.totalLeads,
+        qrCodeSent: row.qrCodeSent,
         freeTrialStarted: row.freeTrialStarted,
         won: row.wonCount,
         lost: row.lostCount,
@@ -1458,6 +1464,7 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       if (!resultBySource[src]) {
         resultBySource[src] = {
           totalLeads: 0,
+          qrCodeSent: 0,
           freeTrialStarted: 0,
           won: 0,
           lost: 0,
