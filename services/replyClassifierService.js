@@ -153,6 +153,16 @@ const quickClassify = (text) => {
   }
 
   // Pattern forti per DO_NOT_CONTACT (richiesta esplicita di stop / toni legali / "No" secco)
+  // Gestisce anche "NOOOO ..." come rifiuto secco
+  if (/^no+\b/.test(normalized)) {
+    return {
+      category: 'DO_NOT_CONTACT',
+      confidence: 0.97,
+      reason: 'Rifiuto secco (NO allungato)',
+      shouldStopSequence: true
+    };
+  }
+
   const dncPatterns = [
     'non contattatemi più', 'non contattatemi piu', 'non contattarmi più', 'non contattarmi piu',
     'non contattateci più', 'non contattateci piu',
@@ -175,6 +185,21 @@ const quickClassify = (text) => {
     if (normalized === p || normalized.startsWith(p + ' ') || normalized.includes(p + '.')) {
       return { category: 'DO_NOT_CONTACT', confidence: 0.97, reason: 'Richiesta stop contatti / rifiuto secco', shouldStopSequence: true };
     }
+  }
+
+  // Frasi miste "non siamo interessati" + "cancellate" → trattale come DO_NOT_CONTACT
+  if (
+    normalized.includes('cancellate') &&
+    (normalized.includes('non siamo interessati') ||
+     normalized.includes('non mi interessa') ||
+     normalized.includes('non ci interessa'))
+  ) {
+    return {
+      category: 'DO_NOT_CONTACT',
+      confidence: 0.96,
+      reason: 'Non interessato + richiesta di cancellazione',
+      shouldStopSequence: true
+    };
   }
 
   const negPatterns = [
