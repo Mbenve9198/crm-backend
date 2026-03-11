@@ -14,6 +14,7 @@ import {
   handleCsvImport,
   getContactStats,
   getLeadFunnelAnalytics,
+  getFunnelStatusEvents,
   getDynamicProperties,
   getCsvMappingOptions,
   getContactLists,
@@ -78,6 +79,9 @@ router.get('/stats', getContactStats);
 
 // Analytics lead per fonte (Smartlead vs Rank Checker) - solo admin
 router.get('/analytics/leads', restrictTo('admin'), getLeadFunnelAnalytics);
+
+// Analytics funnel per eventi di cambio stato - solo admin
+router.get('/analytics/funnel-status-events', restrictTo('admin'), getFunnelStatusEvents);
 
 // Proprietà dinamiche disponibili (deve essere prima di /:id per evitare conflitti)
 router.get('/dynamic-properties', getDynamicProperties);

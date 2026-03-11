@@ -3,6 +3,7 @@ import csv from 'csv-parser';
 import fs from 'fs';
 import { promisify } from 'util';
 import User from '../models/userModel.js'; // Added import for User
+import Activity from '../models/activityModel.js';
 import claudeService from '../services/claudeService.js'; // Per generazione script AI
 
 const readFile = promisify(fs.readFile);
@@ -1501,6 +1502,235 @@ export const getLeadFunnelAnalytics = async (req, res) => {
     });
   } catch (error) {
     console.error('Errore nel recupero delle analytics lead:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Analytics funnel basato sugli eventi di cambio stato (Activities)
+ * GET /contacts/analytics/funnel-status-events?from=YYYY-MM-DD&to=YYYY-MM-DD&source=smartlead_outbound|inbound_rank_checker|all
+ *
+ * Versione semplice:
+ * - Conta quante volte i lead ENTRANO in ciascuno stato (eventsByStatus)
+ * - Conta quanti lead unici toccano ciascuno stato (uniqueLeadsByStatus)
+ */
+export const getFunnelStatusEvents = async (req, res) => {
+  try {
+    const { from, to, source = 'all' } = req.query;
+
+    let dateFrom;
+    let dateTo;
+
+    if (from) {
+      const parsedFrom = new Date(from);
+      if (isNaN(parsedFrom.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "from" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      dateFrom = parsedFrom;
+    } else {
+      dateFrom = new Date();
+      dateFrom.setDate(dateFrom.getDate() - 30);
+    }
+
+    if (to) {
+      const parsedTo = new Date(to);
+      if (isNaN(parsedTo.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      parsedTo.setHours(23, 59, 59, 999);
+      dateTo = parsedTo;
+    } else {
+      dateTo = new Date();
+    }
+
+    const baseMatch = {
+      type: 'status_change',
+      createdAt: { $gte: dateFrom, $lte: dateTo }
+    };
+
+    const pipeline = [
+      { $match: baseMatch },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact',
+          foreignField: '_id',
+          as: 'contact'
+        }
+      },
+      { $unwind: '$contact' }
+    ];
+
+    if (source && source !== 'all') {
+      pipeline.push({
+        $match: {
+          'contact.source': source
+        }
+      });
+    }
+
+    pipeline.push({
+      $group: {
+        _id: {
+          source: '$contact.source',
+          newStatus: '$data.statusChange.newStatus'
+        },
+        eventsCount: { $sum: 1 },
+        contacts: { $addToSet: '$contact._id' }
+      }
+    });
+
+    const aggResults = await Activity.aggregate(pipeline);
+
+    const resultBySource = {};
+
+    for (const row of aggResults) {
+      const src = row._id.source || 'unknown';
+      const status = row._id.newStatus || 'unknown';
+
+      if (!resultBySource[src]) {
+        resultBySource[src] = {
+          eventsByStatus: {},
+          uniqueLeadsByStatus: {},
+          conversionFromPrevious: {}
+        };
+      }
+
+      resultBySource[src].eventsByStatus[status] = row.eventsCount;
+      resultBySource[src].uniqueLeadsByStatus[status] = row.contacts.length;
+    }
+
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+    sourcesOfInterest.forEach((src) => {
+      if (!resultBySource[src]) {
+        resultBySource[src] = {
+          eventsByStatus: {},
+          uniqueLeadsByStatus: {},
+          conversionFromPrevious: {}
+        };
+      }
+    });
+
+    // Calcolo conversion rate step-by-step basato sulla cronologia degli eventi
+    const funnelStatuses = [
+      'interessato',
+      'qr code inviato',
+      'free trial iniziato',
+      'won',
+      'lost'
+    ];
+
+    const timelinePipeline = [
+      { $match: baseMatch },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: 'contact',
+          foreignField: '_id',
+          as: 'contact'
+        }
+      },
+      { $unwind: '$contact' }
+    ];
+
+    if (source && source !== 'all') {
+      timelinePipeline.push({
+        $match: {
+          'contact.source': source
+        }
+      });
+    }
+
+    timelinePipeline.push({
+      $project: {
+        source: '$contact.source',
+        contactId: '$contact._id',
+        newStatus: '$data.statusChange.newStatus',
+        createdAt: 1
+      }
+    });
+
+    const timelineEvents = await Activity.aggregate(timelinePipeline);
+
+    // Mappa: source -> contactId -> status -> firstTimestamp
+    const statusTimesBySource = {};
+
+    for (const ev of timelineEvents) {
+      const src = ev.source || 'unknown';
+      const status = ev.newStatus;
+      if (!status || !funnelStatuses.includes(status)) continue;
+
+      if (!statusTimesBySource[src]) {
+        statusTimesBySource[src] = {};
+      }
+      if (!statusTimesBySource[src][ev.contactId]) {
+        statusTimesBySource[src][ev.contactId] = {};
+      }
+
+      const current = statusTimesBySource[src][ev.contactId][status];
+      if (!current || ev.createdAt < current) {
+        statusTimesBySource[src][ev.contactId][status] = ev.createdAt;
+      }
+    }
+
+    // Per ogni sorgente e per ogni coppia consecutiva old->next calcola il conversion rate
+    Object.entries(statusTimesBySource).forEach(([src, contactsMap]) => {
+      const conversion = {};
+
+      for (let i = 0; i < funnelStatuses.length - 1; i++) {
+        const fromStatus = funnelStatuses[i];
+        const toStatus = funnelStatuses[i + 1];
+
+        let leadsInFrom = 0;
+        let leadsFromTo = 0;
+
+        Object.values(contactsMap).forEach((statusMap) => {
+          const fromTime = statusMap[fromStatus];
+          if (!fromTime) return;
+          leadsInFrom++;
+
+          const toTime = statusMap[toStatus];
+          if (toTime && toTime > fromTime) {
+            leadsFromTo++;
+          }
+        });
+
+        const key = `${fromStatus}->${toStatus}`;
+        conversion[key] = leadsInFrom > 0 ? leadsFromTo / leadsInFrom : 0;
+      }
+
+      if (!resultBySource[src]) {
+        resultBySource[src] = {
+          eventsByStatus: {},
+          uniqueLeadsByStatus: {},
+          conversionFromPrevious: {}
+        };
+      }
+
+      resultBySource[src].conversionFromPrevious = conversion;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        period: {
+          from: dateFrom,
+          to: dateTo
+        },
+        sources: resultBySource
+      }
+    });
+  } catch (error) {
+    console.error('Errore nel recupero degli eventi funnel:', error);
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'
