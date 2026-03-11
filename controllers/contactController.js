@@ -1372,9 +1372,10 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
-      // Default: ultimi 30 giorni
+      // Default: dal primo giorno del mese corrente
       dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
+      dateFrom.setDate(1);
+      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
@@ -1534,8 +1535,10 @@ export const getFunnelStatusEvents = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
+      // Default: dal primo giorno del mese corrente
       dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
+      dateFrom.setDate(1);
+      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
@@ -1766,8 +1769,10 @@ export const getWonContactsBySource = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
+      // Default: dal primo giorno del mese corrente
       dateFrom = new Date();
-      dateFrom.setDate(dateFrom.getDate() - 30);
+      dateFrom.setDate(1);
+      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
