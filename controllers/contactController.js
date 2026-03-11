@@ -1349,6 +1349,7 @@ export const getDynamicProperties = async (req, res) => {
   }
 };
 
+/**
  * Analytics lead per fonte (Smartlead vs Rank Checker)
  * GET /contacts/analytics/leads?from=YYYY-MM-DD&to=YYYY-MM-DD
  */
