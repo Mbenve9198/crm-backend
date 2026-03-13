@@ -207,6 +207,12 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     await contact.save();
 
   } else {
+    // Se il lead è classificato come "non interessato", non creare un nuovo contatto in CRM
+    if (status === 'non interessato') {
+      console.log(`🚫 Smartlead: skip creazione nuovo contatto non interessato (${email})`);
+      return null;
+    }
+
     console.log(`🆕 Nuovo contatto: ${name} (${email})`);
     isNew = true;
 
