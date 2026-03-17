@@ -1917,6 +1917,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
+    const OUTCOME_WINDOW_DAYS = 60;
+    const outcomeWindowMs = OUTCOME_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
     // 1) COORTE "CREATI"
     const createdContacts = await Contact.find({
@@ -2119,12 +2121,13 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       activityCountsAgg.map((r) => [String(r._id), r.count])
     );
 
-    // 4) Eventi di ingresso stati nel periodo per la coorte
+    // 4) Eventi di ingresso stati per la coorte entro outcome window (60 giorni dalla coorte)
     const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won'];
+    const maxOutcomeTo = new Date(dateTo.getTime() + outcomeWindowMs);
     const statusEvents = await Activity.find({
       contact: { $in: cohortIds },
       type: 'status_change',
-      createdAt: { $gte: dateFrom, $lte: dateTo },
+      createdAt: { $gte: dateFrom, $lte: maxOutcomeTo },
       'data.statusChange.newStatus': { $in: stageStatuses }
     })
       .select('contact createdAt data.statusChange.newStatus')
@@ -2134,6 +2137,11 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const stageTimesByContact = new Map(); // id -> { qr?, ft?, won? }
     for (const ev of statusEvents) {
       const id = String(ev.contact);
+      const cohort = cohortById.get(id);
+      if (!cohort?.cohortStartAt) continue;
+      const cohortStartAt = new Date(cohort.cohortStartAt);
+      const outcomeEndAt = new Date(cohortStartAt.getTime() + outcomeWindowMs);
+
       const st = ev.data?.statusChange?.newStatus;
       if (!st) continue;
       const m = stageTimesByContact.get(id) || {};
@@ -2141,6 +2149,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         st === 'qr code inviato' ? 'qr' : st === 'free trial iniziato' ? 'ft' : st === 'won' ? 'won' : null;
       if (!key) continue;
       const t = ev.createdAt;
+      // Considera solo eventi dopo l'inizio coorte e entro la finestra di outcome
+      if (t < cohortStartAt || t > outcomeEndAt) continue;
       if (!m[key] || t < m[key]) m[key] = t;
       stageTimesByContact.set(id, m);
     }
@@ -2276,6 +2286,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       data: {
         period: { from: dateFrom, to: dateTo },
         silenceDaysThreshold: SILENCE_DAYS,
+        outcomeWindowDays: OUTCOME_WINDOW_DAYS,
         sources: resultBySource
       }
     });
