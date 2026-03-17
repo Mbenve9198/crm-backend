@@ -2014,7 +2014,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       {
         $match: {
           'firstActivity.title': {
-            $not: /non interessato|do not contact|\uD83D\uDEAB|\uD83D\uDED1/i
+            // NB: MongoDB usa PCRE2 e non supporta escape \u.... nelle regex
+            $not: /non interessato|do not contact|🚫|🛑/i
           }
         }
       },
