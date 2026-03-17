@@ -2110,6 +2110,15 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const cohortById = new Map([...createdById.entries(), ...reactivatedById.entries()]);
     const cohortIds = Array.from(cohortById.keys()).map((id) => new mongoose.Types.ObjectId(id));
 
+    // 3b) Conteggio activity totali per contatto nella coorte (per "Not touched")
+    const activityCountsAgg = await Activity.aggregate([
+      { $match: { contact: { $in: cohortIds } } },
+      { $group: { _id: '$contact', count: { $sum: 1 } } }
+    ]);
+    const activityCountById = new Map(
+      activityCountsAgg.map((r) => [String(r._id), r.count])
+    );
+
     // 4) Eventi di ingresso stati nel periodo per la coorte
     const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won'];
     const statusEvents = await Activity.find({
@@ -2144,6 +2153,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         total: { count: 0 }
       },
       steps: {
+        notTouched: { count: 0, contacts: [] },
         qrCodeSent: { count: 0, contacts: [] },
         freeTrialStarted: { count: 0, contacts: [] },
         won: { count: 0, contacts: [] }
@@ -2203,6 +2213,19 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         source: c.source
       };
 
+      // Not touched:
+      // - Smartlead: <= 1 activity totale (solo quella iniziale / nessuna)
+      // - Rank Checker: 0 activity totali
+      const activitiesCount = activityCountById.get(id) || 0;
+      const isNotTouched =
+        src === 'smartlead_outbound' ? activitiesCount <= 1 : activitiesCount === 0;
+      if (isNotTouched) {
+        resultBySource[src].steps.notTouched.contacts.push({
+          ...base,
+          enteredAt: null
+        });
+      }
+
       if (hasQr) {
         resultBySource[src].steps.qrCodeSent.contacts.push({
           ...base,
@@ -2237,10 +2260,12 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       obj.cohort.created.contacts.sort(sortByCohortStartDesc);
       obj.cohort.reactivated.contacts.sort(sortByCohortStartDesc);
 
+      obj.steps.notTouched.contacts.sort(sortByEnteredDesc);
       obj.steps.qrCodeSent.contacts.sort(sortByEnteredDesc);
       obj.steps.freeTrialStarted.contacts.sort(sortByEnteredDesc);
       obj.steps.won.contacts.sort(sortByEnteredDesc);
 
+      obj.steps.notTouched.count = obj.steps.notTouched.contacts.length;
       obj.steps.qrCodeSent.count = obj.steps.qrCodeSent.contacts.length;
       obj.steps.freeTrialStarted.count = obj.steps.freeTrialStarted.contacts.length;
       obj.steps.won.count = obj.steps.won.contacts.length;
