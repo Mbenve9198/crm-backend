@@ -201,6 +201,58 @@ export const receiveRankCheckerLead = async (req, res) => {
       await contact.save();
       
       console.log(`✅ Contatto aggiornato: ${contact.name} (${contact.email})`);
+
+      // ♻️ "Riattivazione" (opzione B): crea un'activity solo se non ci sono activity da >= 40 giorni
+      // Usiamo type esistente ("email") e distinguiamo via data.kind/origin per poter filtrare lato analytics.
+      try {
+        const REACTIVATION_SILENCE_DAYS = 40;
+        const silenceMs = REACTIVATION_SILENCE_DAYS * 24 * 60 * 60 * 1000;
+
+        const lastActivity = await Activity.findOne({ contact: contact._id })
+          .sort({ createdAt: -1 })
+          .select('createdAt type title');
+
+        const now = new Date();
+        const lastAt = lastActivity?.createdAt ? new Date(lastActivity.createdAt) : null;
+        const isSilentLongEnough = !lastAt || now.getTime() - lastAt.getTime() >= silenceMs;
+
+        if (isSilentLongEnough) {
+          const activity = new Activity({
+            contact: contact._id,
+            type: 'email',
+            title: '♻️ Lead riattivato (Rank Checker)',
+            description: `Lead Rank Checker ricevuto su contatto già esistente. Ultima activity: ${
+              lastAt ? lastAt.toISOString() : 'mai'
+            }`,
+            data: {
+              kind: 'reactivation',
+              origin: 'rank_checker',
+              meta: {
+                receivedAt: new Date().toISOString(),
+                silenceDaysThreshold: REACTIVATION_SILENCE_DAYS,
+                lastActivityAt: lastAt ? lastAt.toISOString() : null,
+                rankChecker: {
+                  placeId,
+                  keyword,
+                  leadType: leadType || 'INBOUND',
+                  leadSource: leadSource || 'organic'
+                }
+              }
+            },
+            createdBy: defaultOwner._id
+          });
+
+          await activity.save();
+          console.log(`📝 Activity riattivazione creata: ${activity._id}`);
+        } else {
+          console.log(
+            `ℹ️ Nessuna riattivazione: ultima activity troppo recente (${lastAt?.toISOString()})`
+          );
+        }
+      } catch (activityErr) {
+        // Non bloccare il flusso se l'activity fallisce
+        console.warn('⚠️ Errore creazione activity riattivazione Rank Checker:', activityErr.message);
+      }
       
       return res.status(200).json({
         success: true,

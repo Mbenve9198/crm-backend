@@ -33,6 +33,20 @@ const activitySchema = new mongoose.Schema({
   
   // Dati specifici per tipo di activity
   data: {
+    // Campi generici per analytics / tracciamento eventi
+    kind: {
+      type: String,
+      maxLength: [100, 'Il kind non può superare 100 caratteri']
+    },
+    origin: {
+      type: String,
+      enum: ['rank_checker', 'smartlead', 'manual', 'system', 'other']
+    },
+    // Payload libero per casi non coperti dallo schema (webhook metadata, ecc.)
+    meta: {
+      type: mongoose.Schema.Types.Mixed
+    },
+
     // Per le chiamate
     callOutcome: {
       type: String,

@@ -16,6 +16,7 @@ import {
   getLeadFunnelAnalytics,
   getFunnelStatusEvents,
   getWonContactsBySource,
+  getLeadCohortFunnelAnalytics,
   getDynamicProperties,
   getCsvMappingOptions,
   getContactLists,
@@ -80,6 +81,9 @@ router.get('/stats', getContactStats);
 
 // Analytics lead per fonte (Smartlead vs Rank Checker) - solo admin
 router.get('/analytics/leads', restrictTo('admin'), getLeadFunnelAnalytics);
+
+// Analytics lead a coorte (creati + riattivati) + funnel (QR -> FT -> WON) - solo admin
+router.get('/analytics/leads-cohort', restrictTo('admin'), getLeadCohortFunnelAnalytics);
 
 // Analytics funnel per eventi di cambio stato - solo admin
 router.get('/analytics/funnel-status-events', restrictTo('admin'), getFunnelStatusEvents);

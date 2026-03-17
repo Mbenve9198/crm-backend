@@ -1,4 +1,5 @@
 import Contact from '../models/contactModel.js';
+import mongoose from 'mongoose';
 import csv from 'csv-parser';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -1848,6 +1849,329 @@ export const getWonContactsBySource = async (req, res) => {
     });
   } catch (error) {
     console.error('Errore nel recupero dei contatti won per sorgente:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Errore interno del server'
+    });
+  }
+};
+
+/**
+ * Analytics lead "a coorte" (creati + riattivati) + funnel per stati (QR -> Free trial -> Won)
+ * GET /contacts/analytics/leads-cohort?from=YYYY-MM-DD&to=YYYY-MM-DD
+ *
+ * Definizioni:
+ * - Creati: Contact.createdAt nel periodo
+ * - Riattivati: prima Activity nel periodo su contatto esistente (createdAt < from)
+ *              con "silenzio" di almeno 40 giorni rispetto all'Activity precedente (di QUALUNQUE tipo)
+ * - Funnel: membership per stato basata su Activity.type='status_change' nel periodo.
+ *          Cumulativo: se un lead entra in "won", appare anche in "free trial iniziato" e "qr code inviato".
+ */
+export const getLeadCohortFunnelAnalytics = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+
+    let dateFrom;
+    let dateTo;
+
+    if (from) {
+      const parsedFrom = new Date(from);
+      if (isNaN(parsedFrom.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "from" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      dateFrom = parsedFrom;
+    } else {
+      dateFrom = new Date();
+      dateFrom.setDate(1);
+      dateFrom.setHours(0, 0, 0, 0);
+    }
+
+    if (to) {
+      const parsedTo = new Date(to);
+      if (isNaN(parsedTo.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
+        });
+      }
+      parsedTo.setHours(23, 59, 59, 999);
+      dateTo = parsedTo;
+    } else {
+      dateTo = new Date();
+    }
+
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+    const SILENCE_DAYS = 40;
+    const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
+
+    // 1) COORTE "CREATI"
+    const createdContacts = await Contact.find({
+      source: { $in: sourcesOfInterest },
+      createdAt: { $gte: dateFrom, $lte: dateTo }
+    })
+      .select('_id name email mrr source createdAt')
+      .lean();
+
+    const createdById = new Map(
+      createdContacts.map((c) => [String(c._id), { ...c, cohortStartAt: c.createdAt }])
+    );
+
+    // 2) COORTE "RIATTIVATI" (prima activity nel periodo + gap >= 40gg rispetto alla precedente)
+    // Pipeline su Activity per trovare firstActivityAt nel periodo per contatto
+    const reactivatedAgg = await Activity.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: dateFrom, $lte: dateTo }
+        }
+      },
+      {
+        $group: {
+          _id: '$contact',
+          firstActivityAt: { $min: '$createdAt' }
+        }
+      },
+      {
+        $lookup: {
+          from: 'contacts',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'contact'
+        }
+      },
+      { $unwind: '$contact' },
+      {
+        $match: {
+          'contact.source': { $in: sourcesOfInterest },
+          'contact.createdAt': { $lt: dateFrom }
+        }
+      },
+      {
+        $lookup: {
+          from: 'activities',
+          let: { contactId: '$_id', firstAt: '$firstActivityAt' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$contact', '$$contactId'] },
+                    { $lt: ['$createdAt', '$$firstAt'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: -1 } },
+            { $limit: 1 },
+            { $project: { _id: 0, createdAt: 1 } }
+          ],
+          as: 'prevActivity'
+        }
+      },
+      {
+        $addFields: {
+          prevActivityAt: { $arrayElemAt: ['$prevActivity.createdAt', 0] }
+        }
+      },
+      {
+        $addFields: {
+          isReactivated: {
+            $or: [
+              { $eq: ['$prevActivityAt', null] },
+              {
+                $gte: [
+                  { $subtract: ['$firstActivityAt', '$prevActivityAt'] },
+                  silenceMs
+                ]
+              }
+            ]
+          }
+        }
+      },
+      { $match: { isReactivated: true } },
+      {
+        $project: {
+          _id: 1,
+          firstActivityAt: 1,
+          prevActivityAt: 1,
+          contact: {
+            _id: '$contact._id',
+            name: '$contact.name',
+            email: '$contact.email',
+            mrr: '$contact.mrr',
+            source: '$contact.source',
+            createdAt: '$contact.createdAt'
+          }
+        }
+      }
+    ]);
+
+    // Escludi dai "riattivati" quelli creati nel periodo (precedenza: creati)
+    const reactivatedContacts = reactivatedAgg
+      .filter((row) => !createdById.has(String(row._id)))
+      .map((row) => ({
+        ...row.contact,
+        cohortStartAt: row.firstActivityAt,
+        reactivatedAt: row.firstActivityAt,
+        previousActivityAt: row.prevActivityAt || null
+      }));
+
+    const reactivatedById = new Map(
+      reactivatedContacts.map((c) => [String(c._id), c])
+    );
+
+    // 3) Unione coorte (id -> info contatto + cohortStartAt)
+    const cohortById = new Map([...createdById.entries(), ...reactivatedById.entries()]);
+    const cohortIds = Array.from(cohortById.keys()).map((id) => new mongoose.Types.ObjectId(id));
+
+    // 4) Eventi di ingresso stati nel periodo per la coorte
+    const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won'];
+    const statusEvents = await Activity.find({
+      contact: { $in: cohortIds },
+      type: 'status_change',
+      createdAt: { $gte: dateFrom, $lte: dateTo },
+      'data.statusChange.newStatus': { $in: stageStatuses }
+    })
+      .select('contact createdAt data.statusChange.newStatus')
+      .lean();
+
+    // Per contatto: calcola min timestamp per ciascuno stato
+    const stageTimesByContact = new Map(); // id -> { qr?, ft?, won? }
+    for (const ev of statusEvents) {
+      const id = String(ev.contact);
+      const st = ev.data?.statusChange?.newStatus;
+      if (!st) continue;
+      const m = stageTimesByContact.get(id) || {};
+      const key =
+        st === 'qr code inviato' ? 'qr' : st === 'free trial iniziato' ? 'ft' : st === 'won' ? 'won' : null;
+      if (!key) continue;
+      const t = ev.createdAt;
+      if (!m[key] || t < m[key]) m[key] = t;
+      stageTimesByContact.set(id, m);
+    }
+
+    // 5) Costruisci risposta per sorgente
+    const initSource = () => ({
+      cohort: {
+        created: { count: 0, contacts: [] },
+        reactivated: { count: 0, contacts: [] },
+        total: { count: 0 }
+      },
+      steps: {
+        qrCodeSent: { count: 0, contacts: [] },
+        freeTrialStarted: { count: 0, contacts: [] },
+        won: { count: 0, contacts: [] }
+      }
+    });
+
+    const resultBySource = {};
+    sourcesOfInterest.forEach((s) => {
+      resultBySource[s] = initSource();
+    });
+
+    const toPublicContact = (c) => ({
+      id: String(c._id),
+      name: c.name,
+      email: c.email,
+      mrr: typeof c.mrr === 'number' ? c.mrr : null,
+      source: c.source,
+      cohortStartAt: c.cohortStartAt,
+      ...(c.reactivatedAt ? { reactivatedAt: c.reactivatedAt, previousActivityAt: c.previousActivityAt } : {})
+    });
+
+    // Riempie coorte created/reactivated
+    for (const c of createdContacts) {
+      const src = c.source;
+      if (!resultBySource[src]) resultBySource[src] = initSource();
+      resultBySource[src].cohort.created.contacts.push(toPublicContact({ ...c, cohortStartAt: c.createdAt }));
+    }
+    for (const c of reactivatedContacts) {
+      const src = c.source;
+      if (!resultBySource[src]) resultBySource[src] = initSource();
+      resultBySource[src].cohort.reactivated.contacts.push(toPublicContact(c));
+    }
+
+    // Conta totali coorte per sorgente
+    Object.values(resultBySource).forEach((srcObj) => {
+      srcObj.cohort.created.count = srcObj.cohort.created.contacts.length;
+      srcObj.cohort.reactivated.count = srcObj.cohort.reactivated.contacts.length;
+      srcObj.cohort.total.count = srcObj.cohort.created.count + srcObj.cohort.reactivated.count;
+    });
+
+    // Funnel cumulativo: won ⊆ freeTrial ⊆ qr
+    for (const [id, contact] of cohortById.entries()) {
+      const c = contact;
+      const src = c.source;
+      if (!resultBySource[src]) resultBySource[src] = initSource();
+
+      const times = stageTimesByContact.get(id) || {};
+      const hasWon = !!times.won;
+      const hasFt = !!times.ft || hasWon;
+      const hasQr = !!times.qr || hasFt;
+
+      const base = {
+        id: String(c._id),
+        name: c.name,
+        email: c.email,
+        mrr: typeof c.mrr === 'number' ? c.mrr : null,
+        source: c.source
+      };
+
+      if (hasQr) {
+        resultBySource[src].steps.qrCodeSent.contacts.push({
+          ...base,
+          enteredAt: times.qr || times.ft || times.won || null
+        });
+      }
+      if (hasFt) {
+        resultBySource[src].steps.freeTrialStarted.contacts.push({
+          ...base,
+          enteredAt: times.ft || times.won || null
+        });
+      }
+      if (hasWon) {
+        resultBySource[src].steps.won.contacts.push({
+          ...base,
+          enteredAt: times.won
+        });
+      }
+    }
+
+    // Sorting (più recenti prima)
+    const sortByEnteredDesc = (a, b) => {
+      const ta = a.enteredAt ? new Date(a.enteredAt).getTime() : 0;
+      const tb = b.enteredAt ? new Date(b.enteredAt).getTime() : 0;
+      return tb - ta;
+    };
+    const sortByCohortStartDesc = (a, b) =>
+      new Date(b.cohortStartAt).getTime() - new Date(a.cohortStartAt).getTime();
+
+    sourcesOfInterest.forEach((src) => {
+      const obj = resultBySource[src];
+      obj.cohort.created.contacts.sort(sortByCohortStartDesc);
+      obj.cohort.reactivated.contacts.sort(sortByCohortStartDesc);
+
+      obj.steps.qrCodeSent.contacts.sort(sortByEnteredDesc);
+      obj.steps.freeTrialStarted.contacts.sort(sortByEnteredDesc);
+      obj.steps.won.contacts.sort(sortByEnteredDesc);
+
+      obj.steps.qrCodeSent.count = obj.steps.qrCodeSent.contacts.length;
+      obj.steps.freeTrialStarted.count = obj.steps.freeTrialStarted.contacts.length;
+      obj.steps.won.count = obj.steps.won.contacts.length;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        period: { from: dateFrom, to: dateTo },
+        silenceDaysThreshold: SILENCE_DAYS,
+        sources: resultBySource
+      }
+    });
+  } catch (error) {
+    console.error('Errore nel recupero delle analytics lead a coorte:', error);
     res.status(500).json({
       success: false,
       message: 'Errore interno del server'
