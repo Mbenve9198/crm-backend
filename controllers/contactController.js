@@ -1869,10 +1869,11 @@ export const getWonContactsBySource = async (req, res) => {
  */
 export const getLeadCohortFunnelAnalytics = async (req, res) => {
   try {
-    const { from, to } = req.query;
+    const { from, to, owner } = req.query;
 
     let dateFrom;
     let dateTo;
+    let ownerId = null;
 
     if (from) {
       const parsedFrom = new Date(from);
@@ -1903,6 +1904,16 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       dateTo = new Date();
     }
 
+    if (owner && owner !== 'all') {
+      if (!mongoose.Types.ObjectId.isValid(owner)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Parametro "owner" non valido'
+        });
+      }
+      ownerId = new mongoose.Types.ObjectId(owner);
+    }
+
     const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
@@ -1912,7 +1923,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       source: { $in: sourcesOfInterest },
       createdAt: { $gte: dateFrom, $lte: dateTo },
       // Escludi sempre lead negativi
-      status: { $ne: 'non interessato' }
+      status: { $ne: 'non interessato' },
+      ...(ownerId ? { owner: ownerId } : {})
     })
       .select('_id name email mrr source createdAt')
       .lean();
@@ -1982,7 +1994,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
           'contact.source': { $in: sourcesOfInterest },
           'contact.createdAt': { $lt: dateFrom },
           // Escludi sempre lead negativi
-          'contact.status': { $ne: 'non interessato' }
+          'contact.status': { $ne: 'non interessato' },
+          ...(ownerId ? { 'contact.owner': ownerId } : {})
         }
       },
       // Se la prima activity è "negativa", NON considerarla riattivazione
