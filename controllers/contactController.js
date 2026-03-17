@@ -1910,7 +1910,9 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     // 1) COORTE "CREATI"
     const createdContacts = await Contact.find({
       source: { $in: sourcesOfInterest },
-      createdAt: { $gte: dateFrom, $lte: dateTo }
+      createdAt: { $gte: dateFrom, $lte: dateTo },
+      // Escludi sempre lead negativi
+      status: { $ne: 'non interessato' }
     })
       .select('_id name email mrr source createdAt')
       .lean();
@@ -1920,7 +1922,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     );
 
     // 2) COORTE "RIATTIVATI" (prima activity nel periodo + gap >= 40gg rispetto alla precedente)
-    // Pipeline su Activity per trovare firstActivityAt nel periodo per contatto
+    // Pipeline su Activity per trovare firstActivityAt nel periodo per contatto.
+    // ESCLUSIONE NEGATIVI: la prima activity del periodo non deve essere "negativa" (es. NON INTERESSATO / DO NOT CONTACT).
     const reactivatedAgg = await Activity.aggregate([
       {
         $match: {
@@ -1933,6 +1936,38 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
           firstActivityAt: { $min: '$createdAt' }
         }
       },
+      // Recupera il documento dell'activity "prima" nel periodo per poterla classificare (positiva/negativa)
+      {
+        $lookup: {
+          from: 'activities',
+          let: { contactId: '$_id', firstAt: '$firstActivityAt' },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ['$contact', '$$contactId'] },
+                    { $eq: ['$createdAt', '$$firstAt'] }
+                  ]
+                }
+              }
+            },
+            { $sort: { createdAt: 1, _id: 1 } },
+            { $limit: 1 },
+            {
+              $project: {
+                _id: 1,
+                type: 1,
+                title: 1,
+                createdAt: 1,
+                'data.statusChange.newStatus': 1
+              }
+            }
+          ],
+          as: 'firstActivity'
+        }
+      },
+      { $addFields: { firstActivity: { $arrayElemAt: ['$firstActivity', 0] } } },
       {
         $lookup: {
           from: 'contacts',
@@ -1945,7 +1980,42 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       {
         $match: {
           'contact.source': { $in: sourcesOfInterest },
-          'contact.createdAt': { $lt: dateFrom }
+          'contact.createdAt': { $lt: dateFrom },
+          // Escludi sempre lead negativi
+          'contact.status': { $ne: 'non interessato' }
+        }
+      },
+      // Se la prima activity è "negativa", NON considerarla riattivazione
+      {
+        $match: {
+          $expr: {
+            $and: [
+              // Se manca firstActivity (caso limite), trattalo come non valido per riattivazione
+              { $ne: ['$firstActivity', null] },
+              // Escludi status_change verso stati negativi
+              {
+                $not: {
+                  $and: [
+                    { $eq: ['$firstActivity.type', 'status_change'] },
+                    {
+                      $in: [
+                        '$firstActivity.data.statusChange.newStatus',
+                        ['non interessato']
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      // Escludi activity con titoli esplicitamente negativi (Smartlead salva titoli tipo "🚫 Lead NON INTERESSATO (AI)")
+      {
+        $match: {
+          'firstActivity.title': {
+            $not: /non interessato|do not contact|\uD83D\uDEAB|\uD83D\uDED1/i
+          }
         }
       },
       {
