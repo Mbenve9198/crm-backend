@@ -190,13 +190,24 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     // Aggiorna telefono se mancante
     if (!contact.phone && phone) contact.phone = phone;
 
-    // Aggiorna status: solo se il nuovo è "più avanzato" o è "interessato"
-    const hierarchy = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+  // Aggiorna status: solo se il nuovo è "più avanzato" o è "interessato"
+  const hierarchy = [
+    'da contattare',
+    'contattato',
+    'da richiamare',
+    'interessato',
+    'ghosted/bad timing',
+    'qr code inviato',
+    'free trial iniziato',
+    'won',
+    'lost before free trial',
+    'lost after free trial'
+  ];
     const currentIdx = hierarchy.indexOf(contact.status);
     const newIdx = hierarchy.indexOf(status);
     if (newIdx > currentIdx || status === 'interessato') {
       contact.status = status;
-      if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status)) {
+      if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status)) {
         if (contact.mrr === undefined || contact.mrr === null) contact.mrr = 0;
       }
     }
@@ -207,9 +218,9 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     await contact.save();
 
   } else {
-    // Se il lead è classificato come "non interessato", non creare un nuovo contatto in CRM
-    if (status === 'non interessato') {
-      console.log(`🚫 Smartlead: skip creazione nuovo contatto non interessato (${email})`);
+    // Se il lead è classificato come "lost before free trial", non creare un nuovo contatto in CRM
+    if (status === 'lost before free trial') {
+      console.log(`🚫 Smartlead: skip creazione nuovo contatto lost before free trial (${email})`);
       return null;
     }
 
@@ -264,7 +275,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
       phone: phone || undefined,
       lists: ['Smartlead Outbound Email'],
       status,
-      mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status) ? 0 : undefined,
+      mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status) ? 0 : undefined,
       source: 'smartlead_outbound',
       properties,
       owner: ownerForNewContact._id,
@@ -437,7 +448,7 @@ const handleEmailReply = async (webhookData) => {
       ? mapLeadDataToContact(smartleadLead, webhookBasic)
       : mapWebhookOnlyToContact(webhookBasic);
 
-    await createOrUpdateCrmContact(mapped, 'non interessato', {
+    await createOrUpdateCrmContact(mapped, 'lost before free trial', {
       type: 'email',
       title: category === 'DO_NOT_CONTACT'
         ? '🛑 Lead DO NOT CONTACT (AI)'
@@ -452,7 +463,7 @@ const handleEmailReply = async (webhookData) => {
         repliedAt: webhookData.event_timestamp
       }
     });
-    console.log(`🚫 CRM: contatto salvato come non interessato`);
+    console.log(`🚫 CRM: contatto salvato come lost before free trial`);
 
   } else {
     // OUT_OF_OFFICE: nessuna azione CRM
@@ -505,13 +516,13 @@ const handleLeadCategoryUpdated = async (webhookData) => {
     if (result) console.log(`✅ CRM: ${result.isNew ? 'creato' : 'aggiornato'} come interessato`);
 
   } else if (['not interested', 'not_interested', 'do not contact', 'do_not_contact'].includes(categoryLower)) {
-    await createOrUpdateCrmContact(mapped, 'non interessato', {
+    await createOrUpdateCrmContact(mapped, 'lost before free trial', {
       type: 'status_change',
       title: `Lead NON INTERESSATO (Smartlead: ${newCategoryName})`,
       description: `Campagna: ${mapped.campaignName}\nCategoria: ${oldCategoryName || 'N/A'} → ${newCategoryName}`,
       data: { campaignId: mapped.campaignId, campaignName: mapped.campaignName, oldCategory: oldCategoryName, newCategory: newCategoryName }
     });
-    console.log(`🚫 CRM: contatto salvato come non interessato`);
+    console.log(`🚫 CRM: contatto salvato come lost before free trial`);
 
   } else {
     console.log(`ℹ️ Categoria "${newCategoryName}" — nessuna azione CRM specifica`);

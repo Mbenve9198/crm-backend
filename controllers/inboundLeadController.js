@@ -430,7 +430,18 @@ export const receiveSmartleadLead = async (req, res) => {
       
       // Aggiorna status se fornito (es. 'interessato' da Smartlead)
       // Ma solo se non è già in uno stato più avanzato
-      const statusHierarchy = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+      const statusHierarchy = [
+        'da contattare',
+        'contattato',
+        'da richiamare',
+        'interessato',
+        'ghosted/bad timing',
+        'qr code inviato',
+        'free trial iniziato',
+        'won',
+        'lost before free trial',
+        'lost after free trial'
+      ];
       const currentStatusIndex = statusHierarchy.indexOf(contact.status);
       const newStatusIndex = statusHierarchy.indexOf(status);
       
@@ -438,7 +449,7 @@ export const receiveSmartleadLead = async (req, res) => {
         contact.status = status;
         
         // Imposta MRR se necessario
-        if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status)) {
+        if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status)) {
           if (contact.mrr === undefined || contact.mrr === null) {
             contact.mrr = mrr;
           }
@@ -505,7 +516,7 @@ export const receiveSmartleadLead = async (req, res) => {
         phone: phone || undefined,
         lists,
         status,
-        mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(status) ? mrr : undefined,
+        mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status) ? mrr : undefined,
         source,
         properties,
         owner: ownerForNewContact._id,

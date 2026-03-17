@@ -1400,7 +1400,9 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       'qr code inviato',
       'free trial iniziato',
       'won',
-      'lost'
+      'lost before free trial',
+      'lost after free trial',
+      'ghosted/bad timing'
     ];
 
     const pipeline = [
@@ -1439,7 +1441,11 @@ export const getLeadFunnelAnalytics = async (req, res) => {
           },
           lostCount: {
             $sum: {
-              $cond: [{ $eq: ['$status', 'lost'] }, 1, 0]
+              $cond: [
+                { $in: ['$status', ['lost before free trial', 'lost after free trial']] },
+                1,
+                0
+              ]
             }
           },
           mrrWon: {
@@ -1630,7 +1636,9 @@ export const getFunnelStatusEvents = async (req, res) => {
       'qr code inviato',
       'free trial iniziato',
       'won',
-      'lost'
+      'lost before free trial',
+      'lost after free trial',
+      'ghosted/bad timing'
     ];
 
     const timelinePipeline = [
@@ -1924,8 +1932,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const createdContacts = await Contact.find({
       source: { $in: sourcesOfInterest },
       createdAt: { $gte: dateFrom, $lte: dateTo },
-      // Escludi sempre lead negativi
-      status: { $ne: 'non interessato' },
+      // Escludi sempre lead negativi "prima del free trial"
+      status: { $ne: 'lost before free trial' },
       ...(ownerId ? { owner: ownerId } : {})
     })
       .select('_id name email mrr source createdAt')
@@ -1995,8 +2003,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         $match: {
           'contact.source': { $in: sourcesOfInterest },
           'contact.createdAt': { $lt: dateFrom },
-          // Escludi sempre lead negativi
-          'contact.status': { $ne: 'non interessato' },
+          // Escludi sempre lead negativi "prima del free trial"
+          'contact.status': { $ne: 'lost before free trial' },
           ...(ownerId ? { 'contact.owner': ownerId } : {})
         }
       },
@@ -2015,7 +2023,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
                     {
                       $in: [
                         '$firstActivity.data.statusChange.newStatus',
-                        ['non interessato']
+                        ['lost before free trial']
                       ]
                     }
                   ]
@@ -2030,7 +2038,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         $match: {
           'firstActivity.title': {
             // NB: MongoDB usa PCRE2 e non supporta escape \u.... nelle regex
-            $not: /non interessato|do not contact|🚫|🛑/i
+            $not: /lost before free trial|do not contact|🚫|🛑/i
           }
         }
       },
@@ -2381,7 +2389,18 @@ export const updateContactStatus = async (req, res) => {
       });
     }
 
-    const validStatuses = ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+    const validStatuses = [
+      'da contattare',
+      'contattato',
+      'da richiamare',
+      'interessato',
+      'ghosted/bad timing',
+      'qr code inviato',
+      'free trial iniziato',
+      'won',
+      'lost before free trial',
+      'lost after free trial'
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -2407,7 +2426,14 @@ export const updateContactStatus = async (req, res) => {
     }
 
     // Valida MRR per stati pipeline
-    const pipelineStatuses = ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'];
+    const pipelineStatuses = [
+      'interessato',
+      'qr code inviato',
+      'free trial iniziato',
+      'won',
+      'lost before free trial',
+      'lost after free trial'
+    ];
     if (pipelineStatuses.includes(status)) {
       if (mrr === undefined || mrr === null) {
         return res.status(400).json({

@@ -53,7 +53,18 @@ const contactSchema = new mongoose.Schema({
   // Status del contatto nel pipeline
   status: {
     type: String,
-    enum: ['da contattare', 'contattato', 'da richiamare', 'interessato', 'non interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'],
+    enum: [
+      'da contattare',
+      'contattato',
+      'da richiamare',
+      'interessato',
+      'ghosted/bad timing',
+      'qr code inviato',
+      'free trial iniziato',
+      'won',
+      'lost before free trial',
+      'lost after free trial'
+    ],
     default: 'da contattare',
     index: true
   },
@@ -63,7 +74,14 @@ const contactSchema = new mongoose.Schema({
     type: Number,
     min: [0, 'MRR non può essere negativo'],
     required: function() {
-      return ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost'].includes(this.status);
+      return [
+        'interessato',
+        'qr code inviato',
+        'free trial iniziato',
+        'won',
+        'lost before free trial',
+        'lost after free trial'
+      ].includes(this.status);
     }
   },
   
