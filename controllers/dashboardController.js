@@ -179,6 +179,9 @@ export const getDashboard = async (req, res) => {
             {
               $addFields: {
                 _cbAt: '$properties.callbackAt',
+                _hasCallbackAt: {
+                  $cond: [{ $and: [{ $ne: ['$properties.callbackAt', null] }, { $ne: ['$properties.callbackAt', ''] }] }, 1, 0]
+                },
                 _callbackSortKey: {
                   $switch: {
                     branches: [
@@ -200,7 +203,14 @@ export const getDashboard = async (req, res) => {
                 }
               }
             },
-            { $sort: { _callbackSortKey: 1, 'properties.callbackAt': 1 } },
+            {
+              $addFields: {
+                _noDateLastActivityAt: {
+                  $cond: [{ $eq: ['$_hasCallbackAt', 0] }, '$lastActivityAt', null]
+                }
+              }
+            },
+            { $sort: { _hasCallbackAt: -1, _callbackSortKey: 1, 'properties.callbackAt': 1, _noDateLastActivityAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectCallbackListFields }
           ],
