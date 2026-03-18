@@ -468,6 +468,30 @@ export const receiveSmartleadLead = async (req, res) => {
       console.log(`✅ Contatto aggiornato: ${contact.name}`);
       
     } else {
+      // Safety: non creare nuovi contatti se l'esito è di "non contattare / non interessato"
+      // (ma se esistono già li aggiorniamo comunque, vedi branch sopra).
+      const normalizedStatus = String(status || '').toLowerCase().trim();
+      const categoryFromProps = String(
+        properties.smartlead_category ||
+        properties.smartlead_lead_category ||
+        properties.lead_category ||
+        properties.category ||
+        ''
+      ).toLowerCase().trim();
+
+      const isHardStopCategory = ['do not contact', 'do_not_contact', 'not interested', 'not_interested'].includes(categoryFromProps);
+      const isLostStatus = ['lost before free trial', 'lost after free trial'].includes(normalizedStatus);
+
+      if (isLostStatus || isHardStopCategory) {
+        console.log(`🚫 Skip creazione nuovo contatto Smartlead: status="${status}", category="${categoryFromProps || 'N/A'}" (${email})`);
+        return res.status(200).json({
+          success: true,
+          message: 'Lead ricevuto ma non creato (esito non contattare/non interessato)',
+          isNew: false,
+          skippedCreate: true
+        });
+      }
+
       // CREA nuovo contatto
       console.log(`🆕 Creazione nuovo contatto...`);
       isNew = true;

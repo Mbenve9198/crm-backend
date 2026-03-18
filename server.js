@@ -16,6 +16,7 @@ import sessionMonitorRoutes from './routes/sessionMonitorRoutes.js';
 import inboundLeadRoutes from './routes/inboundLeadRoutes.js';
 import voiceFileRoutes from './routes/voiceFileRoutes.js';
 import testRoutes from './routes/testRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 import { statusCallback, recordingStatusCallback, testWebhook, answerCall, dialComplete, getRecordingProxy } from './controllers/callController.js';
 import whatsappService from './services/whatsappService.js';
 import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
@@ -436,6 +437,9 @@ app.use('/api/auth', authRoutes);
 
 // Routes per gestione utenti
 app.use('/api/users', userRoutes);
+
+// Routes per il cruscotto (sotto /api/dashboard)
+app.use('/api/dashboard', dashboardRoutes);
 
 // Routes per i contatti (tutte le API sotto /api/contacts)
 app.use('/api/contacts', contactRoutes);
