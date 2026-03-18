@@ -178,39 +178,12 @@ export const getDashboard = async (req, res) => {
             { $match: { status: 'da richiamare' } },
             {
               $addFields: {
-                _cbAt: '$properties.callbackAt',
-                _hasCallbackAt: {
-                  $cond: [{ $and: [{ $ne: ['$properties.callbackAt', null] }, { $ne: ['$properties.callbackAt', ''] }] }, 1, 0]
-                },
-                _callbackSortKey: {
-                  $switch: {
-                    branches: [
-                      {
-                        case: { $and: [{ $ne: ['$properties.callbackAt', null] }, { $lt: ['$properties.callbackAt', todayStartIso] }] },
-                        then: 0 // overdue first
-                      },
-                      {
-                        case: { $and: [{ $gte: ['$properties.callbackAt', todayStartIso] }, { $lt: ['$properties.callbackAt', todayEndIso] }] },
-                        then: 1 // today
-                      },
-                      {
-                        case: { $and: [{ $ne: ['$properties.callbackAt', null] }, { $gte: ['$properties.callbackAt', todayEndIso] }] },
-                        then: 2 // future
-                      }
-                    ],
-                    default: 3 // no date last
-                  }
+                _sortableCbAt: {
+                  $ifNull: ['$properties.callbackAt', '9999-12-31T23:59:59.999Z']
                 }
               }
             },
-            {
-              $addFields: {
-                _noDateLastActivityAt: {
-                  $cond: [{ $eq: ['$_hasCallbackAt', 0] }, '$lastActivityAt', null]
-                }
-              }
-            },
-            { $sort: { _hasCallbackAt: -1, _callbackSortKey: 1, 'properties.callbackAt': 1, _noDateLastActivityAt: -1 } },
+            { $sort: { _sortableCbAt: 1, lastActivityAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectCallbackListFields }
           ],
