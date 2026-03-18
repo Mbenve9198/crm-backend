@@ -2656,6 +2656,80 @@ export const bulkChangeOwner = async (req, res) => {
 };
 
 /**
+ * Aggiorna i dati di callback (richiamo) di un contatto
+ * PUT /contacts/:id/callback
+ */
+export const updateContactCallback = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { callbackAt, callbackNote } = req.body;
+
+    if (callbackAt !== null && callbackAt !== undefined) {
+      const d = new Date(callbackAt);
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'callbackAt deve essere una data ISO valida oppure null'
+        });
+      }
+    }
+
+    if (callbackNote !== null && callbackNote !== undefined) {
+      if (typeof callbackNote !== 'string' || callbackNote.length > 300) {
+        return res.status(400).json({
+          success: false,
+          message: 'callbackNote deve essere una stringa di massimo 300 caratteri oppure null'
+        });
+      }
+    }
+
+    const contact = await Contact.findById(id);
+    if (!contact) {
+      return res.status(404).json({ success: false, message: 'Contatto non trovato' });
+    }
+
+    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'Non hai i permessi per modificare questo contatto'
+      });
+    }
+
+    if (!contact.properties) contact.properties = {};
+
+    if (callbackAt === null) {
+      delete contact.properties.callbackAt;
+    } else if (callbackAt !== undefined) {
+      contact.properties.callbackAt = callbackAt;
+    }
+
+    if (callbackNote === null) {
+      delete contact.properties.callbackNote;
+    } else if (callbackNote !== undefined) {
+      contact.properties.callbackNote = callbackNote;
+    }
+
+    contact.lastModifiedBy = req.user._id;
+    contact.markModified('properties');
+    await contact.save();
+
+    await contact.populate('owner', 'firstName lastName email role');
+
+    res.json({
+      success: true,
+      message: 'Dati di callback aggiornati con successo',
+      data: contact
+    });
+  } catch (error) {
+    console.error('Errore aggiornamento callback:', error);
+    if (error.name === 'CastError') {
+      return res.status(400).json({ success: false, message: 'ID contatto non valido' });
+    }
+    res.status(500).json({ success: false, message: 'Errore interno del server' });
+  }
+};
+
+/**
  * 📞 Genera script di chiamata personalizzato usando AI (Claude)
  * GET /contacts/:id/call-script
  * 

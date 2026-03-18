@@ -5,7 +5,7 @@ import { buildContactsWithActivityStatsPipeline, addOperationalFlagsPipeline, no
  * GET /api/dashboard?ownerId=all|<mongoId>&limit=20
  *
  * Dashboard unica (Cruscotto):
- * - KPI per status + not touched + da toccare oggi + potential €
+ * - KPI per status + not touched + potential € + callback
  * - Liste operative (limit)
  */
 export const getDashboard = async (req, res) => {
@@ -15,6 +15,17 @@ export const getDashboard = async (req, res) => {
     const parsedLimit = Math.max(5, Math.min(100, parseInt(limit, 10) || 20));
 
     const baseMatch = ownerObjectId ? { owner: ownerObjectId } : {};
+
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+    const next7End = new Date(todayStart);
+    next7End.setDate(next7End.getDate() + 8);
+
+    const todayStartIso = todayStart.toISOString();
+    const todayEndIso = todayEnd.toISOString();
+    const next7EndIso = next7End.toISOString();
 
     // KPI (veloci, senza lookup)
     const kpiAgg = Contact.aggregate([
@@ -36,9 +47,6 @@ export const getDashboard = async (req, res) => {
               ]
             }
           },
-          // Potential Commissions:
-          // per ogni lead in qr_code_inviato o free_trial_iniziato con MRR valorizzato:
-          // 0.20 * (MRR * 12) + 50
           pipelinePotentialEur: {
             $sum: {
               $cond: [
@@ -86,6 +94,54 @@ export const getDashboard = async (req, res) => {
       { $project: { _id: 0, notTouched: 1 } }
     ]);
 
+    // Callback KPIs
+    const callbackKpiAgg = Contact.aggregate([
+      { $match: { ...baseMatch, status: 'da richiamare' } },
+      {
+        $addFields: {
+          _cbAt: '$properties.callbackAt'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          callbackOverdue: {
+            $sum: {
+              $cond: [
+                { $and: [{ $ne: ['$_cbAt', null] }, { $lt: ['$_cbAt', todayStartIso] }] },
+                1, 0
+              ]
+            }
+          },
+          callbackToday: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$_cbAt', todayStartIso] }, { $lt: ['$_cbAt', todayEndIso] }] },
+                1, 0
+              ]
+            }
+          },
+          callbackNext7Days: {
+            $sum: {
+              $cond: [
+                { $and: [{ $gte: ['$_cbAt', todayEndIso] }, { $lt: ['$_cbAt', next7EndIso] }] },
+                1, 0
+              ]
+            }
+          },
+          callbackNoDate: {
+            $sum: {
+              $cond: [
+                { $or: [{ $eq: ['$_cbAt', null] }, { $eq: [{ $type: '$_cbAt' }, 'missing'] }] },
+                1, 0
+              ]
+            }
+          }
+        }
+      },
+      { $project: { _id: 0 } }
+    ]);
+
     const projectListFields = {
       _id: 1,
       name: 1,
@@ -101,6 +157,12 @@ export const getDashboard = async (req, res) => {
       activitiesCount: 1
     };
 
+    const projectCallbackListFields = {
+      ...projectListFields,
+      'properties.callbackAt': 1,
+      'properties.callbackNote': 1
+    };
+
     const listsAgg = Contact.aggregate([
       ...buildContactsWithActivityStatsPipeline({ ownerObjectId }),
       ...addOperationalFlagsPipeline(),
@@ -114,8 +176,33 @@ export const getDashboard = async (req, res) => {
           ],
           callback: [
             { $match: { status: 'da richiamare' } },
+            {
+              $addFields: {
+                _cbAt: '$properties.callbackAt',
+                _callbackSortKey: {
+                  $switch: {
+                    branches: [
+                      {
+                        case: { $and: [{ $ne: ['$properties.callbackAt', null] }, { $lt: ['$properties.callbackAt', todayStartIso] }] },
+                        then: 0 // overdue first
+                      },
+                      {
+                        case: { $and: [{ $gte: ['$properties.callbackAt', todayStartIso] }, { $lt: ['$properties.callbackAt', todayEndIso] }] },
+                        then: 1 // today
+                      },
+                      {
+                        case: { $and: [{ $ne: ['$properties.callbackAt', null] }, { $gte: ['$properties.callbackAt', todayEndIso] }] },
+                        then: 2 // future
+                      }
+                    ],
+                    default: 3 // no date last
+                  }
+                }
+              }
+            },
+            { $sort: { _callbackSortKey: 1, 'properties.callbackAt': 1 } },
             { $limit: parsedLimit },
-            { $project: projectListFields }
+            { $project: projectCallbackListFields }
           ],
           freeTrial: [
             { $match: { status: 'free trial iniziato' } },
@@ -131,7 +218,7 @@ export const getDashboard = async (req, res) => {
       }
     ]);
 
-    const [kpiRes, opKpiRes, listsRes] = await Promise.all([kpiAgg, operationalKpiAgg, listsAgg]);
+    const [kpiRes, opKpiRes, cbKpiRes, listsRes] = await Promise.all([kpiAgg, operationalKpiAgg, callbackKpiAgg, listsAgg]);
     const kpis = kpiRes?.[0] || {
       total: 0,
       freeTrialStarted: 0,
@@ -142,6 +229,7 @@ export const getDashboard = async (req, res) => {
       pipelinePotentialEur: 0
     };
     const operational = opKpiRes?.[0] || { notTouched: 0 };
+    const cbKpis = cbKpiRes?.[0] || { callbackOverdue: 0, callbackToday: 0, callbackNext7Days: 0, callbackNoDate: 0 };
     const lists = listsRes?.[0] || {
       notTouched: [],
       callback: [],
@@ -155,7 +243,8 @@ export const getDashboard = async (req, res) => {
         ownerId: ownerObjectId ? String(ownerObjectId) : 'all',
         kpis: {
           ...kpis,
-          notTouched: operational.notTouched
+          notTouched: operational.notTouched,
+          ...cbKpis
         },
         lists
       }

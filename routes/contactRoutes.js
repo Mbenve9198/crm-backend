@@ -23,6 +23,7 @@ import {
   addContactsToListBulk,
   removeContactsFromListBulk,
   updateContactStatus,
+  updateContactCallback,
   bulkChangeOwner,
   generateCallScript
 } from '../controllers/contactController.js';
@@ -134,6 +135,9 @@ router.delete('/delete-all', restrictTo('manager', 'admin'), deleteAllContacts);
 
 // Aggiorna status contatto (prima di /:id per evitare conflitti)
 router.put('/:id/status', restrictTo('agent', 'manager', 'admin'), updateContactStatus);
+
+// Aggiorna dati callback/richiamo (prima di /:id per evitare conflitti)
+router.put('/:id/callback', restrictTo('agent', 'manager', 'admin'), updateContactCallback);
 
 // 📞 Genera script di chiamata personalizzato con AI (prima di /:id per evitare conflitti)
 router.get('/:id/call-script', restrictTo('agent', 'manager', 'admin'), generateCallScript);
