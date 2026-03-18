@@ -36,12 +36,24 @@ export const getDashboard = async (req, res) => {
               ]
             }
           },
-          // Placeholder: somma MRR degli stati "in corso"
+          // Potential Commissions:
+          // per ogni lead in qr_code_inviato o free_trial_iniziato con MRR valorizzato:
+          // 0.20 * (MRR * 12) + 50
           pipelinePotentialEur: {
             $sum: {
               $cond: [
-                { $in: ['$status', ['interessato', 'qr code inviato', 'free trial iniziato']] },
-                { $ifNull: ['$mrr', 0] },
+                {
+                  $and: [
+                    { $in: ['$status', ['qr code inviato', 'free trial iniziato']] },
+                    { $ne: ['$mrr', null] }
+                  ]
+                },
+                {
+                  $add: [
+                    { $multiply: [0.2, { $multiply: ['$mrr', 12] }] },
+                    50
+                  ]
+                },
                 0
               ]
             }
