@@ -2308,6 +2308,392 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
 };
 
 /**
+ * GET /contacts/analytics/owner-performance?from=&to=&source=
+ * Dashboard comparativa per owner: KPI stage-by-stage, conversion rate,
+ * tempo medio 1° tocco, ciclo vendita, lost, in stallo, trend vs periodo
+ * precedente.
+ */
+export const getOwnerPerformanceAnalytics = async (req, res) => {
+  try {
+    const { from, to, source } = req.query;
+
+    let dateFrom, dateTo;
+    if (from) {
+      const p = new Date(from);
+      if (isNaN(p.getTime())) return res.status(400).json({ success: false, message: '"from" non valido' });
+      dateFrom = p;
+    } else {
+      dateFrom = new Date();
+      dateFrom.setDate(1);
+      dateFrom.setHours(0, 0, 0, 0);
+    }
+    if (to) {
+      const p = new Date(to);
+      if (isNaN(p.getTime())) return res.status(400).json({ success: false, message: '"to" non valido' });
+      p.setHours(23, 59, 59, 999);
+      dateTo = p;
+    } else {
+      dateTo = new Date();
+    }
+
+    const sourcesOfInterest = source && source !== 'all'
+      ? [source]
+      : ['smartlead_outbound', 'inbound_rank_checker'];
+
+    const SILENCE_DAYS = 40;
+    const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
+    const OUTCOME_WINDOW_DAYS = 60;
+    const outcomeWindowMs = OUTCOME_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const STALL_DAYS = 7;
+
+    // Previous period (same duration, shifted back) for trend
+    const periodMs = dateTo.getTime() - dateFrom.getTime();
+    const prevFrom = new Date(dateFrom.getTime() - periodMs - 1);
+    const prevTo = new Date(dateFrom.getTime() - 1);
+
+    async function computeForPeriod(pFrom, pTo) {
+      // 1) COHORT "CREATED"
+      const createdContacts = await Contact.find({
+        source: { $in: sourcesOfInterest },
+        createdAt: { $gte: pFrom, $lte: pTo },
+        status: { $ne: 'lost before free trial' }
+      }).select('_id name email mrr source createdAt owner').lean();
+
+      const createdById = new Map(
+        createdContacts.map(c => [String(c._id), { ...c, cohortStartAt: c.createdAt }])
+      );
+
+      // 2) COHORT "REACTIVATED"
+      const reactivatedAgg = await Activity.aggregate([
+        { $match: { createdAt: { $gte: pFrom, $lte: pTo } } },
+        { $group: { _id: '$contact', firstActivityAt: { $min: '$createdAt' } } },
+        {
+          $lookup: {
+            from: 'activities',
+            let: { contactId: '$_id', firstAt: '$firstActivityAt' },
+            pipeline: [
+              { $match: { $expr: { $and: [{ $eq: ['$contact', '$$contactId'] }, { $eq: ['$createdAt', '$$firstAt'] }] } } },
+              { $sort: { createdAt: 1, _id: 1 } }, { $limit: 1 },
+              { $project: { _id: 1, type: 1, title: 1, createdAt: 1, 'data.statusChange.newStatus': 1 } }
+            ],
+            as: 'firstActivity'
+          }
+        },
+        { $addFields: { firstActivity: { $arrayElemAt: ['$firstActivity', 0] } } },
+        { $lookup: { from: 'contacts', localField: '_id', foreignField: '_id', as: 'contact' } },
+        { $unwind: '$contact' },
+        {
+          $match: {
+            'contact.source': { $in: sourcesOfInterest },
+            'contact.createdAt': { $lt: pFrom },
+            'contact.status': { $ne: 'lost before free trial' }
+          }
+        },
+        {
+          $match: {
+            $expr: {
+              $and: [
+                { $ne: ['$firstActivity', null] },
+                { $not: { $and: [{ $eq: ['$firstActivity.type', 'status_change'] }, { $in: ['$firstActivity.data.statusChange.newStatus', ['lost before free trial']] }] } }
+              ]
+            }
+          }
+        },
+        { $match: { 'firstActivity.title': { $not: /lost before free trial|do not contact|🚫|🛑/i } } },
+        {
+          $lookup: {
+            from: 'activities',
+            let: { contactId: '$_id', firstAt: '$firstActivityAt' },
+            pipeline: [
+              { $match: { $expr: { $and: [{ $eq: ['$contact', '$$contactId'] }, { $lt: ['$createdAt', '$$firstAt'] }] } } },
+              { $sort: { createdAt: -1 } }, { $limit: 1 },
+              { $project: { _id: 0, createdAt: 1 } }
+            ],
+            as: 'prevActivity'
+          }
+        },
+        { $addFields: { prevActivityAt: { $arrayElemAt: ['$prevActivity.createdAt', 0] } } },
+        {
+          $addFields: {
+            isReactivated: {
+              $or: [
+                { $eq: ['$prevActivityAt', null] },
+                { $gte: [{ $subtract: ['$firstActivityAt', '$prevActivityAt'] }, silenceMs] }
+              ]
+            }
+          }
+        },
+        { $match: { isReactivated: true } },
+        {
+          $project: {
+            _id: 1, firstActivityAt: 1, prevActivityAt: 1,
+            contact: { _id: '$contact._id', name: '$contact.name', email: '$contact.email', mrr: '$contact.mrr', source: '$contact.source', createdAt: '$contact.createdAt', owner: '$contact.owner' }
+          }
+        }
+      ]);
+
+      const reactivatedContacts = reactivatedAgg
+        .filter(row => !createdById.has(String(row._id)))
+        .map(row => ({ ...row.contact, cohortStartAt: row.firstActivityAt, reactivatedAt: row.firstActivityAt }));
+
+      // 3) Union cohort
+      const cohortById = new Map([...createdById.entries(), ...reactivatedContacts.map(c => [String(c._id), c])]);
+      const cohortIds = Array.from(cohortById.keys()).map(id => new mongoose.Types.ObjectId(id));
+
+      // 3b) Activity counts for "Not touched"
+      const activityCountsAgg = await Activity.aggregate([
+        { $match: { contact: { $in: cohortIds } } },
+        { $group: { _id: '$contact', count: { $sum: 1 } } }
+      ]);
+      const activityCountById = new Map(activityCountsAgg.map(r => [String(r._id), r.count]));
+
+      // 3c) First activity timestamp per contact (for "tempo medio 1° tocco")
+      const firstActivityAgg = await Activity.aggregate([
+        { $match: { contact: { $in: cohortIds } } },
+        { $group: { _id: '$contact', firstAt: { $min: '$createdAt' } } }
+      ]);
+      const firstActivityById = new Map(firstActivityAgg.map(r => [String(r._id), r.firstAt]));
+
+      // 4) Status change events for funnel + lost
+      const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'];
+      const maxOutcomeTo = new Date(pTo.getTime() + outcomeWindowMs);
+      const statusEvents = await Activity.find({
+        contact: { $in: cohortIds },
+        type: 'status_change',
+        createdAt: { $gte: pFrom, $lte: maxOutcomeTo },
+        'data.statusChange.newStatus': { $in: stageStatuses }
+      }).select('contact createdAt data.statusChange.newStatus').lean();
+
+      const stageTimesByContact = new Map();
+      for (const ev of statusEvents) {
+        const id = String(ev.contact);
+        const cohort = cohortById.get(id);
+        if (!cohort?.cohortStartAt) continue;
+        const cohortStartAt = new Date(cohort.cohortStartAt);
+        const outcomeEndAt = new Date(cohortStartAt.getTime() + outcomeWindowMs);
+        const st = ev.data?.statusChange?.newStatus;
+        if (!st) continue;
+        const keyMap = { 'qr code inviato': 'qr', 'free trial iniziato': 'ft', 'won': 'won', 'lost before free trial': 'lbft', 'lost after free trial': 'laft' };
+        const key = keyMap[st];
+        if (!key) continue;
+        const t = ev.createdAt;
+        if (t < cohortStartAt || t > outcomeEndAt) continue;
+        const m = stageTimesByContact.get(id) || {};
+        if (!m[key] || t < m[key]) m[key] = t;
+        stageTimesByContact.set(id, m);
+      }
+
+      // 5) Stalled contacts (status in qr/ft, last activity > STALL_DAYS ago)
+      const now = new Date();
+      const stallCutoff = new Date(now.getTime() - STALL_DAYS * 24 * 60 * 60 * 1000);
+      const stalledContacts = await Contact.find({
+        _id: { $in: cohortIds },
+        status: { $in: ['qr code inviato', 'free trial iniziato'] }
+      }).select('_id name email source status owner updatedAt').lean();
+
+      const lastActivityAgg = stalledContacts.length > 0
+        ? await Activity.aggregate([
+            { $match: { contact: { $in: stalledContacts.map(c => c._id) } } },
+            { $group: { _id: '$contact', lastAt: { $max: '$createdAt' } } }
+          ])
+        : [];
+      const lastActivityById = new Map(lastActivityAgg.map(r => [String(r._id), r.lastAt]));
+
+      const stalledList = stalledContacts
+        .filter(c => {
+          const lastAt = lastActivityById.get(String(c._id)) || c.updatedAt;
+          return lastAt < stallCutoff;
+        })
+        .map(c => ({
+          id: String(c._id),
+          name: c.name,
+          email: c.email,
+          source: c.source,
+          status: c.status,
+          owner: c.owner ? String(c.owner) : null,
+          lastActivityAt: lastActivityById.get(String(c._id)) || c.updatedAt
+        }));
+
+      // 6) Build per-owner data
+      const ownerMap = new Map(); // ownerId -> metrics
+
+      const ensureOwner = (ownerId) => {
+        if (!ownerMap.has(ownerId)) {
+          ownerMap.set(ownerId, {
+            cohort: 0, notTouched: 0,
+            qrCodeSent: 0, freeTrialStarted: 0, won: 0,
+            lostBFT: 0, lostAFT: 0, stalled: 0,
+            mrrWon: 0,
+            firstTouchDaysSum: 0, firstTouchCount: 0,
+            salesCycleDaysSum: 0, salesCycleCount: 0,
+            notTouchedContacts: [],
+            stalledContacts: [],
+            lostBFTContacts: [],
+            lostAFTContacts: [],
+            bySource: {}
+          });
+        }
+        return ownerMap.get(ownerId);
+      };
+
+      const ensureOwnerSource = (ownerData, src) => {
+        if (!ownerData.bySource[src]) {
+          ownerData.bySource[src] = {
+            cohort: 0, notTouched: 0, qrCodeSent: 0, freeTrialStarted: 0, won: 0,
+            lostBFT: 0, lostAFT: 0, mrrWon: 0
+          };
+        }
+        return ownerData.bySource[src];
+      };
+
+      for (const [id, contact] of cohortById.entries()) {
+        const ownerId = contact.owner ? String(contact.owner) : 'unassigned';
+        const src = contact.source;
+        const od = ensureOwner(ownerId);
+        const osd = ensureOwnerSource(od, src);
+
+        od.cohort++;
+        osd.cohort++;
+
+        // Not touched
+        const activitiesCount = activityCountById.get(id) || 0;
+        const isNotTouched = src === 'smartlead_outbound' ? activitiesCount <= 1 : activitiesCount === 0;
+        if (isNotTouched) {
+          od.notTouched++;
+          osd.notTouched++;
+          od.notTouchedContacts.push({
+            id, name: contact.name, email: contact.email, source: src,
+            createdAt: contact.createdAt || contact.cohortStartAt
+          });
+        }
+
+        // First touch time
+        const firstAt = firstActivityById.get(id);
+        if (firstAt && contact.createdAt) {
+          const diffDays = (new Date(firstAt).getTime() - new Date(contact.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+          if (diffDays >= 0) {
+            od.firstTouchDaysSum += diffDays;
+            od.firstTouchCount++;
+          }
+        }
+
+        // Funnel stages
+        const times = stageTimesByContact.get(id) || {};
+        const hasWon = !!times.won;
+        const hasFt = !!times.ft || hasWon;
+        const hasQr = !!times.qr || hasFt;
+        const hasLbft = !!times.lbft;
+        const hasLaft = !!times.laft;
+
+        if (hasQr) { od.qrCodeSent++; osd.qrCodeSent++; }
+        if (hasFt) { od.freeTrialStarted++; osd.freeTrialStarted++; }
+        if (hasWon) {
+          od.won++; osd.won++;
+          const mrr = typeof contact.mrr === 'number' ? contact.mrr : 0;
+          od.mrrWon += mrr; osd.mrrWon += mrr;
+
+          // Sales cycle: QR → Won
+          const qrTime = times.qr || times.ft || times.won;
+          if (qrTime && times.won) {
+            const cycleDays = (new Date(times.won).getTime() - new Date(qrTime).getTime()) / (1000 * 60 * 60 * 24);
+            if (cycleDays >= 0) {
+              od.salesCycleDaysSum += cycleDays;
+              od.salesCycleCount++;
+            }
+          }
+        }
+        if (hasLbft) { od.lostBFT++; osd.lostBFT++; od.lostBFTContacts.push({ id, name: contact.name, email: contact.email, source: src }); }
+        if (hasLaft) { od.lostAFT++; osd.lostAFT++; od.lostAFTContacts.push({ id, name: contact.name, email: contact.email, source: src }); }
+      }
+
+      // Add stalled contacts
+      for (const s of stalledList) {
+        const ownerId = s.owner || 'unassigned';
+        const od = ensureOwner(ownerId);
+        od.stalled++;
+        od.stalledContacts.push(s);
+      }
+
+      return ownerMap;
+    }
+
+    // Compute current and previous periods
+    const [currentMap, prevMap] = await Promise.all([
+      computeForPeriod(dateFrom, dateTo),
+      computeForPeriod(prevFrom, prevTo)
+    ]);
+
+    // Fetch owner details
+    const allOwnerIds = new Set([...currentMap.keys(), ...prevMap.keys()]);
+    allOwnerIds.delete('unassigned');
+    const ownerUsers = await User.find({ _id: { $in: Array.from(allOwnerIds) } }).select('firstName lastName email role').lean();
+    const ownerNameMap = new Map(ownerUsers.map(u => [String(u._id), `${u.firstName} ${u.lastName}`]));
+
+    // Build response
+    const owners = [];
+    for (const [ownerId, cur] of currentMap.entries()) {
+      const prev = prevMap.get(ownerId);
+      const pctNT = cur.cohort > 0 ? Math.round((cur.notTouched / cur.cohort) * 100) : 0;
+      const convQR = cur.cohort > 0 ? Math.round((cur.qrCodeSent / cur.cohort) * 100) : 0;
+      const convQRtoFT = cur.qrCodeSent > 0 ? Math.round((cur.freeTrialStarted / cur.qrCodeSent) * 100) : 0;
+      const convFTtoWon = cur.freeTrialStarted > 0 ? Math.round((cur.won / cur.freeTrialStarted) * 100) : 0;
+      const avgFirstTouch = cur.firstTouchCount > 0 ? +(cur.firstTouchDaysSum / cur.firstTouchCount).toFixed(1) : null;
+      const avgSalesCycle = cur.salesCycleCount > 0 ? +(cur.salesCycleDaysSum / cur.salesCycleCount).toFixed(1) : null;
+
+      let trendPctNT = null, trendConvQR = null, trendConvFTtoWon = null;
+      if (prev) {
+        const prevPctNT = prev.cohort > 0 ? (prev.notTouched / prev.cohort) * 100 : 0;
+        const prevConvQR = prev.cohort > 0 ? (prev.qrCodeSent / prev.cohort) * 100 : 0;
+        const prevConvFTtoWon = prev.freeTrialStarted > 0 ? (prev.won / prev.freeTrialStarted) * 100 : 0;
+        trendPctNT = Math.round(pctNT - prevPctNT);
+        trendConvQR = Math.round(convQR - prevConvQR);
+        trendConvFTtoWon = Math.round(convFTtoWon - prevConvFTtoWon);
+      }
+
+      owners.push({
+        ownerId,
+        ownerName: ownerNameMap.get(ownerId) || (ownerId === 'unassigned' ? 'Non assegnato' : ownerId),
+        cohort: cur.cohort,
+        notTouched: cur.notTouched,
+        pctNotTouched: pctNT,
+        avgFirstTouchDays: avgFirstTouch,
+        qrCodeSent: cur.qrCodeSent,
+        convToQR: convQR,
+        freeTrialStarted: cur.freeTrialStarted,
+        convQRtoFT: convQRtoFT,
+        won: cur.won,
+        convFTtoWon: convFTtoWon,
+        lostBFT: cur.lostBFT,
+        lostAFT: cur.lostAFT,
+        stalled: cur.stalled,
+        mrrWon: cur.mrrWon,
+        avgSalesCycleDays: avgSalesCycle,
+        trends: { pctNotTouched: trendPctNT, convToQR: trendConvQR, convFTtoWon: trendConvFTtoWon },
+        bySource: cur.bySource,
+        notTouchedContacts: cur.notTouchedContacts,
+        stalledContacts: cur.stalledContacts,
+        lostBFTContacts: cur.lostBFTContacts,
+        lostAFTContacts: cur.lostAFTContacts
+      });
+    }
+
+    owners.sort((a, b) => b.cohort - a.cohort);
+
+    res.json({
+      success: true,
+      data: {
+        period: { from: dateFrom, to: dateTo },
+        previousPeriod: { from: prevFrom, to: prevTo },
+        owners
+      }
+    });
+  } catch (error) {
+    console.error('Errore owner-performance analytics:', error);
+    res.status(500).json({ success: false, message: 'Errore interno del server' });
+  }
+};
+
+/**
  * Ottieni tutte le proprietà dinamiche disponibili per la mappatura CSV
  * GET /contacts/csv-mapping-options
  */

@@ -17,6 +17,7 @@ import {
   getFunnelStatusEvents,
   getWonContactsBySource,
   getLeadCohortFunnelAnalytics,
+  getOwnerPerformanceAnalytics,
   getDynamicProperties,
   getCsvMappingOptions,
   getContactLists,
@@ -85,6 +86,9 @@ router.get('/analytics/leads', restrictTo('admin'), getLeadFunnelAnalytics);
 
 // Analytics lead a coorte (creati + riattivati) + funnel (QR -> FT -> WON) - solo admin
 router.get('/analytics/leads-cohort', restrictTo('admin'), getLeadCohortFunnelAnalytics);
+
+// Analytics owner performance - solo admin
+router.get('/analytics/owner-performance', restrictTo('admin'), getOwnerPerformanceAnalytics);
 
 // Analytics funnel per eventi di cambio stato - solo admin
 router.get('/analytics/funnel-status-events', restrictTo('admin'), getFunnelStatusEvents);
