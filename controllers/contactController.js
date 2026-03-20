@@ -2539,7 +2539,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       const ensureOwnerSource = (ownerData, src) => {
         if (!ownerData.bySource[src]) {
           ownerData.bySource[src] = {
-            cohort: 0, notTouched: 0, qrCodeSent: 0, freeTrialStarted: 0, won: 0,
+            cohort: 0, reactivated: 0, notTouched: 0, qrCodeSent: 0, freeTrialStarted: 0, won: 0,
             lostBFT: 0, lostAFT: 0, mrrWon: 0
           };
         }
@@ -2554,6 +2554,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
         od.cohort++;
         osd.cohort++;
+        if (contact.reactivatedAt) osd.reactivated++;
 
         // Not touched
         const activitiesCount = activityCountById.get(id) || 0;
