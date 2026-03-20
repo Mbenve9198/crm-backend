@@ -2680,12 +2680,93 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     owners.sort((a, b) => b.cohort - a.cohort);
 
+    // Forecast: free trial iniziato → Won entro fine mese
+    const TRIAL_DAYS = 20;
+    const FORECAST_CONV_RATE = 0.5;
+    const nowForForecast = new Date();
+    const endOfMonth = new Date(nowForForecast.getFullYear(), nowForForecast.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    const ftContacts = await Contact.find({
+      status: 'free trial iniziato',
+      ...(sourcesOfInterest.length < 2 ? { source: { $in: sourcesOfInterest } } : {})
+    }).select('_id name email mrr owner source').lean();
+
+    const ftIds = ftContacts.map(c => c._id);
+    const ftStatusEvents = ftIds.length > 0
+      ? await Activity.aggregate([
+          { $match: { contact: { $in: ftIds }, type: 'status_change', 'data.statusChange.newStatus': 'free trial iniziato' } },
+          { $sort: { createdAt: 1 } },
+          { $group: { _id: '$contact', enteredAt: { $first: '$createdAt' } } }
+        ])
+      : [];
+    const ftEnteredMap = new Map(ftStatusEvents.map(r => [String(r._id), r.enteredAt]));
+
+    const forecastByOwner = new Map();
+    const forecastContacts = [];
+
+    for (const c of ftContacts) {
+      const ownerId = c.owner ? String(c.owner) : 'unassigned';
+      const enteredAt = ftEnteredMap.get(String(c._id));
+      const trialEnd = enteredAt ? new Date(new Date(enteredAt).getTime() + TRIAL_DAYS * 86400000) : null;
+      const closesThisMonth = trialEnd && trialEnd <= endOfMonth;
+
+      if (!closesThisMonth) continue;
+
+      const mrr = typeof c.mrr === 'number' ? c.mrr : 0;
+      const weightedMrr = Math.round(mrr * FORECAST_CONV_RATE);
+
+      if (!forecastByOwner.has(ownerId)) {
+        forecastByOwner.set(ownerId, { deals: 0, mrrPotential: 0, mrrForecast: 0 });
+      }
+      const fo = forecastByOwner.get(ownerId);
+      fo.deals++;
+      fo.mrrPotential += mrr;
+      fo.mrrForecast += weightedMrr;
+
+      forecastContacts.push({
+        id: String(c._id),
+        name: c.name,
+        email: c.email,
+        mrr,
+        source: c.source,
+        owner: ownerId,
+        enteredAt: enteredAt || null,
+        trialEndAt: trialEnd.toISOString(),
+        weightedMrr
+      });
+    }
+
+    const forecastOwners = owners.map(o => {
+      const fo = forecastByOwner.get(o.ownerId);
+      return {
+        ownerId: o.ownerId,
+        ownerName: o.ownerName,
+        deals: fo?.deals || 0,
+        mrrPotential: fo?.mrrPotential || 0,
+        mrrForecast: fo?.mrrForecast || 0
+      };
+    }).filter(o => o.deals > 0);
+
+    const forecastTotals = {
+      deals: forecastContacts.length,
+      mrrPotential: forecastContacts.reduce((s, c) => s + c.mrr, 0),
+      mrrForecast: forecastContacts.reduce((s, c) => s + c.weightedMrr, 0),
+      conversionRate: FORECAST_CONV_RATE,
+      trialDays: TRIAL_DAYS
+    };
+
     res.json({
       success: true,
       data: {
         period: { from: dateFrom, to: dateTo },
         previousPeriod: { from: prevFrom, to: prevTo },
-        owners
+        owners,
+        forecast: {
+          endOfMonth: endOfMonth.toISOString(),
+          totals: forecastTotals,
+          owners: forecastOwners,
+          contacts: forecastContacts
+        }
       }
     });
   } catch (error) {
