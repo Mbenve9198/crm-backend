@@ -2121,8 +2121,9 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const cohortIds = Array.from(cohortById.keys()).map((id) => new mongoose.Types.ObjectId(id));
 
     // 3b) Conteggio activity totali per contatto nella coorte (per "Not touched")
+    // Esclude le activity di riattivazione automatica (data.kind = 'reactivation')
     const activityCountsAgg = await Activity.aggregate([
-      { $match: { contact: { $in: cohortIds } } },
+      { $match: { contact: { $in: cohortIds }, 'data.kind': { $ne: 'reactivation' } } },
       { $group: { _id: '$contact', count: { $sum: 1 } } }
     ]);
     const activityCountById = new Map(
@@ -2441,8 +2442,9 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       const cohortIds = Array.from(cohortById.keys()).map(id => new mongoose.Types.ObjectId(id));
 
       // 3b) Activity counts for "Not touched"
+      // Esclude le activity di riattivazione automatica (data.kind = 'reactivation')
       const activityCountsAgg = await Activity.aggregate([
-        { $match: { contact: { $in: cohortIds } } },
+        { $match: { contact: { $in: cohortIds }, 'data.kind': { $ne: 'reactivation' } } },
         { $group: { _id: '$contact', count: { $sum: 1 } } }
       ]);
       const activityCountById = new Map(activityCountsAgg.map(r => [String(r._id), r.count]));

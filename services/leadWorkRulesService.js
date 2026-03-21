@@ -45,7 +45,7 @@ export function buildContactsWithActivityStatsPipeline({ ownerObjectId } = {}) {
         from: 'activities',
         let: { contactId: '$_id' },
         pipeline: [
-          { $match: { $expr: { $eq: ['$contact', '$$contactId'] } } },
+          { $match: { $expr: { $eq: ['$contact', '$$contactId'] }, 'data.kind': { $ne: 'reactivation' } } },
           { $sort: { createdAt: -1 } },
           {
             $group: {
