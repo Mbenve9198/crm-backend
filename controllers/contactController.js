@@ -2680,11 +2680,10 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     owners.sort((a, b) => b.cohort - a.cohort);
 
-    // Forecast: free trial iniziato → Won entro fine mese
-    const TRIAL_DAYS = 20;
+    // Forecast: free trial iniziato con chiusura entro 30gg dall'ingresso in QR code inviato
+    const SALES_CYCLE_DAYS = 30;
     const FORECAST_CONV_RATE = 0.5;
     const nowForForecast = new Date();
-    const endOfMonth = new Date(nowForForecast.getFullYear(), nowForForecast.getMonth() + 1, 0, 23, 59, 59, 999);
 
     const ftContacts = await Contact.find({
       status: 'free trial iniziato',
@@ -2692,6 +2691,17 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
     }).select('_id name email mrr owner source').lean();
 
     const ftIds = ftContacts.map(c => c._id);
+    // Fetch QR entry date for each contact (first status_change to "qr code inviato")
+    const qrStatusEvents = ftIds.length > 0
+      ? await Activity.aggregate([
+          { $match: { contact: { $in: ftIds }, type: 'status_change', 'data.statusChange.newStatus': 'qr code inviato' } },
+          { $sort: { createdAt: 1 } },
+          { $group: { _id: '$contact', enteredAt: { $first: '$createdAt' } } }
+        ])
+      : [];
+    const qrEnteredMap = new Map(qrStatusEvents.map(r => [String(r._id), r.enteredAt]));
+
+    // Also fetch FT entry date for display
     const ftStatusEvents = ftIds.length > 0
       ? await Activity.aggregate([
           { $match: { contact: { $in: ftIds }, type: 'status_change', 'data.statusChange.newStatus': 'free trial iniziato' } },
@@ -2706,11 +2716,12 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     for (const c of ftContacts) {
       const ownerId = c.owner ? String(c.owner) : 'unassigned';
-      const enteredAt = ftEnteredMap.get(String(c._id));
-      const trialEnd = enteredAt ? new Date(new Date(enteredAt).getTime() + TRIAL_DAYS * 86400000) : null;
-      const closesThisMonth = trialEnd && trialEnd <= endOfMonth;
+      const qrEnteredAt = qrEnteredMap.get(String(c._id));
+      const ftEnteredAt = ftEnteredMap.get(String(c._id));
+      const deadline = qrEnteredAt ? new Date(new Date(qrEnteredAt).getTime() + SALES_CYCLE_DAYS * 86400000) : null;
+      const closesWithin30 = deadline && deadline >= nowForForecast;
 
-      if (!closesThisMonth) continue;
+      if (!closesWithin30) continue;
 
       const mrr = typeof c.mrr === 'number' ? c.mrr : 0;
       const weightedMrr = Math.round(mrr * FORECAST_CONV_RATE);
@@ -2730,8 +2741,9 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         mrr,
         source: c.source,
         owner: ownerId,
-        enteredAt: enteredAt || null,
-        trialEndAt: trialEnd.toISOString(),
+        qrEnteredAt: qrEnteredAt || null,
+        ftEnteredAt: ftEnteredAt || null,
+        deadlineAt: deadline.toISOString(),
         weightedMrr
       });
     }
@@ -2752,7 +2764,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       mrrPotential: forecastContacts.reduce((s, c) => s + c.mrr, 0),
       mrrForecast: forecastContacts.reduce((s, c) => s + c.weightedMrr, 0),
       conversionRate: FORECAST_CONV_RATE,
-      trialDays: TRIAL_DAYS
+      salesCycleDays: SALES_CYCLE_DAYS
     };
 
     res.json({
@@ -2762,7 +2774,6 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         previousPeriod: { from: prevFrom, to: prevTo },
         owners,
         forecast: {
-          endOfMonth: endOfMonth.toISOString(),
           totals: forecastTotals,
           owners: forecastOwners,
           contacts: forecastContacts
