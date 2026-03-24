@@ -2948,12 +2948,13 @@ export const updateContactStatus = async (req, res) => {
       contact.mrr = mrr;
     }
 
-    // closeDate: se fornita dal frontend usala, altrimenti auto-set a +25gg quando si entra in "qr code inviato"
+    // closeDate: se fornita dal frontend usala, altrimenti auto-set a +25gg quando si entra in QR o FT
+    const closeDateStatuses = ['qr code inviato', 'free trial iniziato'];
     if (closeDate !== undefined) {
       if (!contact.properties) contact.properties = {};
       contact.properties.closeDate = closeDate || null;
       contact.markModified('properties');
-    } else if (status === 'qr code inviato' && oldStatus !== 'qr code inviato') {
+    } else if (closeDateStatuses.includes(status) && !closeDateStatuses.includes(oldStatus)) {
       if (!contact.properties) contact.properties = {};
       if (!contact.properties.closeDate) {
         const auto = new Date();
