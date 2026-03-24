@@ -2682,31 +2682,31 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     owners.sort((a, b) => b.cohort - a.cohort);
 
-    // Forecast: free trial iniziato con chiusura entro 30gg dall'ingresso in QR code inviato
-    const SALES_CYCLE_DAYS = 30;
+    // Prove attive: contatti in "qr code inviato" o "free trial iniziato" con closeDate nel periodo selezionato
+    const DEFAULT_CLOSE_DAYS = 25;
     const FORECAST_CONV_RATE = 0.5;
-    const nowForForecast = new Date();
 
-    const ftContacts = await Contact.find({
-      status: 'free trial iniziato',
+    const activeTrialContacts = await Contact.find({
+      status: { $in: ['qr code inviato', 'free trial iniziato'] },
       ...(sourcesOfInterest.length < 2 ? { source: { $in: sourcesOfInterest } } : {})
-    }).select('_id name email mrr owner source').lean();
+    }).select('_id name email mrr owner source status properties').lean();
 
-    const ftIds = ftContacts.map(c => c._id);
-    // Fetch QR entry date for each contact (first status_change to "qr code inviato")
-    const qrStatusEvents = ftIds.length > 0
+    const atIds = activeTrialContacts.map(c => c._id);
+
+    // QR entry dates (for fallback closeDate and display)
+    const qrStatusEvents = atIds.length > 0
       ? await Activity.aggregate([
-          { $match: { contact: { $in: ftIds }, type: 'status_change', 'data.statusChange.newStatus': 'qr code inviato' } },
+          { $match: { contact: { $in: atIds }, type: 'status_change', 'data.statusChange.newStatus': 'qr code inviato' } },
           { $sort: { createdAt: 1 } },
           { $group: { _id: '$contact', enteredAt: { $first: '$createdAt' } } }
         ])
       : [];
     const qrEnteredMap = new Map(qrStatusEvents.map(r => [String(r._id), r.enteredAt]));
 
-    // Also fetch FT entry date for display
-    const ftStatusEvents = ftIds.length > 0
+    // FT entry dates (for display)
+    const ftStatusEvents = atIds.length > 0
       ? await Activity.aggregate([
-          { $match: { contact: { $in: ftIds }, type: 'status_change', 'data.statusChange.newStatus': 'free trial iniziato' } },
+          { $match: { contact: { $in: atIds }, type: 'status_change', 'data.statusChange.newStatus': 'free trial iniziato' } },
           { $sort: { createdAt: 1 } },
           { $group: { _id: '$contact', enteredAt: { $first: '$createdAt' } } }
         ])
@@ -2716,14 +2716,22 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
     const forecastByOwner = new Map();
     const forecastContacts = [];
 
-    for (const c of ftContacts) {
+    for (const c of activeTrialContacts) {
       const ownerId = c.owner ? String(c.owner) : 'unassigned';
       const qrEnteredAt = qrEnteredMap.get(String(c._id));
       const ftEnteredAt = ftEnteredMap.get(String(c._id));
-      const deadline = qrEnteredAt ? new Date(new Date(qrEnteredAt).getTime() + SALES_CYCLE_DAYS * 86400000) : null;
-      const closesWithin30 = deadline && deadline >= nowForForecast;
 
-      if (!closesWithin30) continue;
+      // closeDate: use manual property if set, otherwise QR entry + 25 days
+      let closeDateStr = c.properties?.closeDate || null;
+      if (!closeDateStr && qrEnteredAt) {
+        const auto = new Date(new Date(qrEnteredAt).getTime() + DEFAULT_CLOSE_DAYS * 86400000);
+        closeDateStr = auto.toISOString();
+      }
+      if (!closeDateStr) continue;
+
+      const closeDateObj = new Date(closeDateStr);
+      // Filter: closeDate must fall within the selected period
+      if (closeDateObj < dateFrom || closeDateObj > dateTo) continue;
 
       const mrr = typeof c.mrr === 'number' ? c.mrr : 0;
       const weightedMrr = Math.round(mrr * FORECAST_CONV_RATE);
@@ -2743,9 +2751,11 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         mrr,
         source: c.source,
         owner: ownerId,
+        status: c.status,
         qrEnteredAt: qrEnteredAt || null,
         ftEnteredAt: ftEnteredAt || null,
-        deadlineAt: deadline.toISOString(),
+        closeDateAt: closeDateStr,
+        isManualCloseDate: !!(c.properties?.closeDate),
         weightedMrr
       });
     }
@@ -2765,8 +2775,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       deals: forecastContacts.length,
       mrrPotential: forecastContacts.reduce((s, c) => s + c.mrr, 0),
       mrrForecast: forecastContacts.reduce((s, c) => s + c.weightedMrr, 0),
-      conversionRate: FORECAST_CONV_RATE,
-      salesCycleDays: SALES_CYCLE_DAYS
+      conversionRate: FORECAST_CONV_RATE
     };
 
     res.json({
@@ -2860,7 +2869,7 @@ export const getCsvMappingOptions = async (req, res) => {
 export const updateContactStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, mrr } = req.body;
+    const { status, mrr, closeDate } = req.body;
 
     // Validazioni di base
     if (!status) {
@@ -2938,6 +2947,22 @@ export const updateContactStatus = async (req, res) => {
     if (mrr !== undefined) {
       contact.mrr = mrr;
     }
+
+    // closeDate: se fornita dal frontend usala, altrimenti auto-set a +25gg quando si entra in "qr code inviato"
+    if (closeDate !== undefined) {
+      if (!contact.properties) contact.properties = {};
+      contact.properties.closeDate = closeDate || null;
+      contact.markModified('properties');
+    } else if (status === 'qr code inviato' && oldStatus !== 'qr code inviato') {
+      if (!contact.properties) contact.properties = {};
+      if (!contact.properties.closeDate) {
+        const auto = new Date();
+        auto.setDate(auto.getDate() + 25);
+        contact.properties.closeDate = auto.toISOString();
+        contact.markModified('properties');
+      }
+    }
+
     contact.lastModifiedBy = req.user._id;
 
     await contact.save();
