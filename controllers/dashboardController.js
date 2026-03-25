@@ -154,7 +154,8 @@ export const getDashboard = async (req, res) => {
       createdAt: 1,
       updatedAt: 1,
       lastActivityAt: 1,
-      activitiesCount: 1
+      activitiesCount: 1,
+      'properties.closeDate': 1
     };
 
     const projectCallbackListFields = {
@@ -171,6 +172,7 @@ export const getDashboard = async (req, res) => {
         $facet: {
           notTouched: [
             { $match: { isNotTouched: true } },
+            { $sort: { createdAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
           ],
