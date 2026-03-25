@@ -855,58 +855,63 @@ export const getRecordingProxy = async (req, res) => {
     
     console.log(`🎵 Richiesta registrazione: ${recordingSid}`);
     
-    // Verifica che il recordingSid esista nel database (per sicurezza)
     const call = await Call.findOne({ recordingSid });
     if (!call) {
       console.log(`❌ Recording non trovato nel DB: ${recordingSid}`);
       return res.status(404).json({
         success: false,
-        message: 'Registrazione non trovata'
+        message: 'Registrazione non trovata nel database'
       });
     }
     
     console.log(`✅ Recording trovato nel DB per la chiamata: ${call.twilioCallSid}`);
 
-    // Costruisci l'URL della registrazione Twilio
-    const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}`;
-    console.log(`📡 URL Twilio: ${recordingUrl}`);
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+
+    if (!accountSid || !authToken) {
+      console.log('❌ Credenziali Twilio mancanti');
+      return res.status(500).json({ success: false, message: 'Configurazione Twilio mancante' });
+    }
+
+    // .wav per ottenere il file audio (senza estensione Twilio restituisce metadata)
+    const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${recordingSid}.wav`;
     
-    // Fai la richiesta a Twilio con le credenziali
     const response = await fetch(recordingUrl, {
       headers: {
-        'Authorization': `Basic ${Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64')}`
-      }
+        'Authorization': `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`
+      },
+      redirect: 'follow'
     });
 
     console.log(`📞 Risposta Twilio: ${response.status} ${response.statusText}`);
 
     if (!response.ok) {
-      console.log(`❌ Errore Twilio: ${response.status}`);
-      return res.status(404).json({
+      const body = await response.text();
+      console.log(`❌ Errore Twilio ${response.status}: ${body.slice(0, 300)}`);
+      return res.status(response.status === 404 ? 404 : 502).json({
         success: false,
-        message: 'Registrazione non trovata'
+        message: `Twilio ha risposto con errore ${response.status}`
       });
     }
 
-    // Ottieni il tipo di contenuto dalla risposta Twilio
     const contentType = response.headers.get('content-type') || 'audio/wav';
-    console.log(`🎵 Content-Type: ${contentType}`);
+    const contentLength = response.headers.get('content-length');
 
-    // Imposta gli header appropriati per l'audio
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Disposition', `inline; filename="recording-${recordingSid}.wav"`);
-    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache per 1 ora
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
     
-    // Converti la risposta in buffer e inviala
     const audioBuffer = await response.arrayBuffer();
     res.send(Buffer.from(audioBuffer));
-    console.log(`✅ Streaming registrazione ${recordingSid}`);
+    console.log(`✅ Streaming registrazione ${recordingSid} (${audioBuffer.byteLength} bytes)`);
 
   } catch (error) {
     console.error('Errore nel servire la registrazione:', error);
     res.status(500).json({
       success: false,
-      message: 'Errore nel caricare la registrazione'
+      message: 'Errore interno nel caricare la registrazione'
     });
   }
 }; 
