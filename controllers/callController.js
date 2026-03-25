@@ -92,8 +92,8 @@ export const initiateCall = async (req, res) => {
     }
 
     // URL del webhook per gestire gli eventi della chiamata
-    const statusCallbackUrl = `${process.env.BACKEND_URL || 'https://crm-backend-8gwn.onrender.com'}/api/calls/status-callback`;
-    const answerUrl = `${process.env.BACKEND_URL || 'https://crm-backend-8gwn.onrender.com'}/api/calls/answer`;
+    const statusCallbackUrl = `${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/status-callback`;
+    const answerUrl = `${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/answer`;
     
     console.log('🌐 BACKEND_URL configurato:', process.env.BACKEND_URL);
     console.log('📡 Status callback URL:', statusCallbackUrl);
@@ -222,9 +222,9 @@ export const answerCall = async (req, res) => {
 <Response>
   <Say voice="alice" language="it-IT">Collegamento in corso</Say>
   <Dial record="${recordCall ? 'record-from-answer' : 'do-not-record'}" 
-        action="${process.env.BACKEND_URL || 'https://crm-backend-8gwn.onrender.com'}/api/calls/dial-complete" 
+        action="${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/dial-complete" 
         method="POST"
-        recordingStatusCallback="${process.env.BACKEND_URL || 'https://crm-backend-8gwn.onrender.com'}/api/calls/recording-status">
+        recordingStatusCallback="${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/recording-status">
     <Number>${contactPhone}</Number>
   </Dial>
 </Response>`;
