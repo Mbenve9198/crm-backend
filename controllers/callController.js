@@ -1,4 +1,5 @@
 import twilio from 'twilio';
+import mongoose from 'mongoose';
 import Call from '../models/callModel.js';
 import Contact from '../models/contactModel.js';
 import Activity from '../models/activityModel.js';
@@ -914,4 +915,232 @@ export const getRecordingProxy = async (req, res) => {
       message: 'Errore interno nel caricare la registrazione'
     });
   }
-}; 
+};
+
+/**
+ * Lista chiamate con filtri avanzati (admin/manager)
+ * GET /api/calls/all?from=&to=&owner=&outcome=&minDuration=&maxDuration=&hasRecording=&flag=&page=&limit=
+ */
+export const getAllCalls = async (req, res) => {
+  try {
+    const {
+      from, to, owner, outcome, status,
+      minDuration, maxDuration, hasRecording, flag,
+      page = 1, limit = 30, sort = 'createdAt', order = 'desc'
+    } = req.query;
+
+    const match = {};
+
+    if (from || to) {
+      match.createdAt = {};
+      if (from) match.createdAt.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        match.createdAt.$lte = toDate;
+      }
+    }
+    if (owner && owner !== 'all') {
+      match.initiatedBy = new mongoose.Types.ObjectId(owner);
+    }
+    if (outcome) match.outcome = outcome;
+    if (status) match.status = status;
+    if (flag) match.flag = flag;
+    if (minDuration || maxDuration) {
+      match.duration = {};
+      if (minDuration) match.duration.$gte = parseInt(minDuration);
+      if (maxDuration) match.duration.$lte = parseInt(maxDuration);
+    }
+    if (hasRecording === 'true') match.recordingSid = { $ne: null };
+    if (hasRecording === 'false') match.recordingSid = null;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sortObj = { [sort]: order === 'asc' ? 1 : -1 };
+
+    const [calls, totalCalls] = await Promise.all([
+      Call.find(match)
+        .populate('contact', 'name phone email source')
+        .populate('initiatedBy', 'firstName lastName')
+        .populate('coachingComments.author', 'firstName lastName')
+        .sort(sortObj)
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Call.countDocuments(match)
+    ]);
+
+    res.json({
+      success: true,
+      data: calls,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalCalls / parseInt(limit)),
+        totalCalls,
+        hasNext: skip + parseInt(limit) < totalCalls,
+        hasPrev: parseInt(page) > 1
+      }
+    });
+  } catch (error) {
+    console.error('Errore getAllCalls:', error);
+    res.status(500).json({ success: false, message: 'Errore interno del server' });
+  }
+};
+
+/**
+ * Analytics chiamate per owner
+ * GET /api/calls/analytics?from=&to=
+ */
+export const getCallsAnalytics = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const match = {};
+
+    if (from || to) {
+      match.createdAt = {};
+      if (from) match.createdAt.$gte = new Date(from);
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        match.createdAt.$lte = toDate;
+      }
+    }
+
+    const pipeline = [
+      { $match: match },
+      {
+        $group: {
+          _id: '$initiatedBy',
+          totalCalls: { $sum: 1 },
+          completedCalls: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } },
+          answeredCalls: { $sum: { $cond: [{ $in: ['$status', ['completed', 'in-progress']] }, 1, 0] } },
+          noAnswerCalls: { $sum: { $cond: [{ $eq: ['$status', 'no-answer'] }, 1, 0] } },
+          busyCalls: { $sum: { $cond: [{ $eq: ['$status', 'busy'] }, 1, 0] } },
+          failedCalls: { $sum: { $cond: [{ $in: ['$status', ['failed', 'canceled']] }, 1, 0] } },
+          totalDuration: { $sum: '$duration' },
+          avgDuration: { $avg: { $cond: [{ $gt: ['$duration', 0] }, '$duration', null] } },
+          withRecording: { $sum: { $cond: [{ $ne: ['$recordingSid', null] }, 1, 0] } },
+          outcomeInterested: { $sum: { $cond: [{ $eq: ['$outcome', 'interested'] }, 1, 0] } },
+          outcomeMeetingSet: { $sum: { $cond: [{ $eq: ['$outcome', 'meeting-set'] }, 1, 0] } },
+          outcomeSaleMade: { $sum: { $cond: [{ $eq: ['$outcome', 'sale-made'] }, 1, 0] } },
+          outcomeNotInterested: { $sum: { $cond: [{ $eq: ['$outcome', 'not-interested'] }, 1, 0] } },
+          outcomeCallback: { $sum: { $cond: [{ $eq: ['$outcome', 'callback'] }, 1, 0] } },
+          outcomeVoicemail: { $sum: { $cond: [{ $eq: ['$outcome', 'voicemail'] }, 1, 0] } },
+          ratedCalls: { $sum: { $cond: [{ $ne: ['$rating', null] }, 1, 0] } },
+          avgRating: { $avg: '$rating' },
+          flaggedBestPractice: { $sum: { $cond: [{ $eq: ['$flag', 'best-practice'] }, 1, 0] } },
+          flaggedNeedsReview: { $sum: { $cond: [{ $eq: ['$flag', 'needs-review'] }, 1, 0] } },
+          callDates: { $push: '$createdAt' },
+          callHours: { $push: { $hour: '$createdAt' } }
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'owner'
+        }
+      },
+      { $unwind: '$owner' },
+      { $sort: { totalCalls: -1 } }
+    ];
+
+    const ownerStats = await Call.aggregate(pipeline);
+
+    // Daily breakdown for trend
+    const dailyPipeline = [
+      { $match: match },
+      {
+        $group: {
+          _id: {
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+            owner: '$initiatedBy'
+          },
+          calls: { $sum: 1 },
+          duration: { $sum: '$duration' },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } }
+        }
+      },
+      { $sort: { '_id.date': 1 } }
+    ];
+
+    const dailyStats = await Call.aggregate(dailyPipeline);
+
+    const owners = ownerStats.map(o => {
+      const hourDistribution = new Array(24).fill(0);
+      (o.callHours || []).forEach(h => { hourDistribution[h]++; });
+
+      return {
+        ownerId: String(o._id),
+        ownerName: `${o.owner.firstName} ${o.owner.lastName}`,
+        totalCalls: o.totalCalls,
+        completedCalls: o.completedCalls,
+        answeredCalls: o.answeredCalls,
+        noAnswerCalls: o.noAnswerCalls,
+        busyCalls: o.busyCalls,
+        failedCalls: o.failedCalls,
+        answerRate: o.totalCalls > 0 ? Math.round((o.answeredCalls / o.totalCalls) * 100) : 0,
+        totalDuration: Math.round(o.totalDuration || 0),
+        avgDuration: Math.round(o.avgDuration || 0),
+        withRecording: o.withRecording,
+        outcomes: {
+          interested: o.outcomeInterested,
+          meetingSet: o.outcomeMeetingSet,
+          saleMade: o.outcomeSaleMade,
+          notInterested: o.outcomeNotInterested,
+          callback: o.outcomeCallback,
+          voicemail: o.outcomeVoicemail
+        },
+        coaching: {
+          ratedCalls: o.ratedCalls,
+          avgRating: o.avgRating ? Math.round(o.avgRating * 10) / 10 : null,
+          bestPractice: o.flaggedBestPractice,
+          needsReview: o.flaggedNeedsReview
+        },
+        hourDistribution
+      };
+    });
+
+    res.json({
+      success: true,
+      data: { owners, daily: dailyStats }
+    });
+  } catch (error) {
+    console.error('Errore getCallsAnalytics:', error);
+    res.status(500).json({ success: false, message: 'Errore interno del server' });
+  }
+};
+
+/**
+ * Aggiorna campi coaching di una chiamata
+ * PUT /api/calls/:callId/coaching
+ */
+export const updateCallCoaching = async (req, res) => {
+  try {
+    const { callId } = req.params;
+    const { rating, flag, comment } = req.body;
+
+    const call = await Call.findById(callId);
+    if (!call) {
+      return res.status(404).json({ success: false, message: 'Chiamata non trovata' });
+    }
+
+    if (rating !== undefined) call.rating = rating;
+    if (flag !== undefined) call.flag = flag;
+    if (comment) {
+      call.coachingComments.push({ author: req.user._id, text: comment });
+    }
+
+    await call.save();
+    await call.populate([
+      { path: 'contact', select: 'name phone email source' },
+      { path: 'initiatedBy', select: 'firstName lastName' },
+      { path: 'coachingComments.author', select: 'firstName lastName' }
+    ]);
+
+    res.json({ success: true, data: call });
+  } catch (error) {
+    console.error('Errore updateCallCoaching:', error);
+    res.status(500).json({ success: false, message: 'Errore interno del server' });
+  }
+};

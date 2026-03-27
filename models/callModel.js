@@ -139,6 +139,25 @@ const callSchema = new mongoose.Schema({
     type: String
   },
   
+  // Coaching fields
+  rating: {
+    type: Number,
+    min: 1,
+    max: 5
+  },
+
+  flag: {
+    type: String,
+    enum: ['best-practice', 'needs-review', null],
+    default: null
+  },
+
+  coachingComments: [{
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    text: { type: String, required: true, maxLength: 2000 },
+    createdAt: { type: Date, default: Date.now }
+  }],
+
   // Metadati aggiuntivi da Twilio
   twilioData: {
     type: mongoose.Schema.Types.Mixed,

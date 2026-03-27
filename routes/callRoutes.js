@@ -10,7 +10,10 @@ import {
   getRecording,
   testWebhook,
   cancelCall,
-  cleanupStuckCalls
+  cleanupStuckCalls,
+  getAllCalls,
+  getCallsAnalytics,
+  updateCallCoaching
 } from '../controllers/callController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -25,6 +28,12 @@ const router = express.Router();
 // Inizia una chiamata verso un contatto
 router.post('/initiate', protect, initiateCall);
 
+// Lista chiamate con filtri avanzati (admin/manager)
+router.get('/all', protect, restrictTo('admin', 'manager'), getAllCalls);
+
+// Analytics chiamate per owner (admin/manager)
+router.get('/analytics', protect, restrictTo('admin', 'manager'), getCallsAnalytics);
+
 // Ottieni le mie chiamate
 router.get('/my-calls', protect, getMyCalls);
 
@@ -38,6 +47,9 @@ router.put('/:callId', protect, updateCall);
 router.get('/:callId/recording', protect, getRecording);
 
 // Proxy per registrazione audio ora è nel server.js come route pubblica
+
+// Coaching: rating, flag, commenti (admin/manager)
+router.put('/:callId/coaching', protect, restrictTo('admin', 'manager'), updateCallCoaching);
 
 // Cancella una chiamata attiva
 router.post('/:callId/cancel', protect, cancelCall);
