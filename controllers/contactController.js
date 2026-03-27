@@ -2356,8 +2356,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       // 1) COHORT "CREATED"
       const createdContacts = await Contact.find({
         source: { $in: sourcesOfInterest },
-        createdAt: { $gte: pFrom, $lte: pTo },
-        status: { $ne: 'lost before free trial' }
+        createdAt: { $gte: pFrom, $lte: pTo }
       }).select('_id name email mrr source createdAt owner').lean();
 
       const createdById = new Map(
@@ -2386,8 +2385,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         {
           $match: {
             'contact.source': { $in: sourcesOfInterest },
-            'contact.createdAt': { $lt: pFrom },
-            'contact.status': { $ne: 'lost before free trial' }
+            'contact.createdAt': { $lt: pFrom }
           }
         },
         {
