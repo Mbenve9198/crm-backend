@@ -1395,29 +1395,11 @@ export const getLeadFunnelAnalytics = async (req, res) => {
     }
 
     const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
-    const smartleadPipelineStatuses = [
-      'interessato',
-      'qr code inviato',
-      'free trial iniziato',
-      'won',
-      'lost before free trial',
-      'lost after free trial',
-      'ghosted/bad timing'
-    ];
-
     const pipeline = [
       {
         $match: {
-          createdAt: { $gte: dateFrom, $lte: dateTo },
-          $or: [
-            // Inbound Rank Checker: includi tutti i lead
-            { source: 'inbound_rank_checker' },
-            // Smartlead outbound: conta solo i lead che sono nel percorso "interessato" (o successivi)
-            {
-              source: 'smartlead_outbound',
-              status: { $in: smartleadPipelineStatuses }
-            }
-          ]
+          source: { $in: sourcesOfInterest },
+          createdAt: { $gte: dateFrom, $lte: dateTo }
         }
       },
       {
