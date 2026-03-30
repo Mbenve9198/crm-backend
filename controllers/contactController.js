@@ -2518,6 +2518,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
             mrrWon: 0,
             firstTouchDaysSum: 0, firstTouchCount: 0,
             salesCycleDaysSum: 0, salesCycleCount: 0,
+            cohortContacts: [],
             notTouchedContacts: [],
             qrContacts: [],
             ftContacts: [],
@@ -2549,6 +2550,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
         od.cohort++;
         osd.cohort++;
+        od.cohortContacts.push({ id, name: contact.name, email: contact.email, source: src });
         if (contact.reactivatedAt) osd.reactivated++;
 
         // Not touched
@@ -2669,6 +2671,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         avgSalesCycleDays: avgSalesCycle,
         trends: { pctNotTouched: trendPctNT, convToQR: trendConvQR, convFTtoWon: trendConvFTtoWon },
         bySource: cur.bySource,
+        cohortContacts: cur.cohortContacts,
         notTouchedContacts: cur.notTouchedContacts,
         qrContacts: cur.qrContacts,
         ftContacts: cur.ftContacts,
