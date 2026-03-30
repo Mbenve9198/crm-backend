@@ -15,7 +15,7 @@ const activitySchema = new mongoose.Schema({
   // Tipo di activity
   type: {
     type: String,
-    enum: ['email', 'call', 'whatsapp', 'instagram_dm', 'status_change'],
+    enum: ['email', 'call', 'whatsapp', 'instagram_dm', 'status_change', 'note'],
     required: [true, 'Il tipo di activity è obbligatorio']
   },
   
@@ -131,7 +131,8 @@ activitySchema.virtual('typeDisplay').get(function() {
     'call': 'Chiamata',
     'whatsapp': 'WhatsApp',
     'instagram_dm': 'DM Instagram',
-    'status_change': 'Cambio Stato'
+    'status_change': 'Cambio Stato',
+    'note': 'Nota'
   };
   return typeMap[this.type] || this.type;
 });
@@ -143,7 +144,8 @@ activitySchema.virtual('typeIcon').get(function() {
     'call': 'phone',
     'whatsapp': 'message-circle',
     'instagram_dm': 'instagram',
-    'status_change': 'arrow-right'
+    'status_change': 'arrow-right',
+    'note': 'sticky-note'
   };
   return iconMap[this.type] || 'activity';
 });
@@ -155,7 +157,8 @@ activitySchema.methods.generateTitle = function() {
     'call': 'Chiamata effettuata',
     'whatsapp': 'Messaggio WhatsApp',
     'instagram_dm': 'DM Instagram',
-    'status_change': 'Cambio stato'
+    'status_change': 'Cambio stato',
+    'note': 'Nota'
   };
   
   switch (this.type) {
