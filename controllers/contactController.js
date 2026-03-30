@@ -2519,6 +2519,9 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
             firstTouchDaysSum: 0, firstTouchCount: 0,
             salesCycleDaysSum: 0, salesCycleCount: 0,
             notTouchedContacts: [],
+            qrContacts: [],
+            ftContacts: [],
+            wonContacts: [],
             stalledContacts: [],
             lostBFTContacts: [],
             lostAFTContacts: [],
@@ -2578,12 +2581,14 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         const hasLbft = !!times.lbft;
         const hasLaft = !!times.laft;
 
-        if (hasQr) { od.qrCodeSent++; osd.qrCodeSent++; }
-        if (hasFt) { od.freeTrialStarted++; osd.freeTrialStarted++; }
+        const contactRef = { id, name: contact.name, email: contact.email, source: src };
+        if (hasQr) { od.qrCodeSent++; osd.qrCodeSent++; od.qrContacts.push(contactRef); }
+        if (hasFt) { od.freeTrialStarted++; osd.freeTrialStarted++; od.ftContacts.push(contactRef); }
         if (hasWon) {
           od.won++; osd.won++;
           const mrr = typeof contact.mrr === 'number' ? contact.mrr : 0;
           od.mrrWon += mrr; osd.mrrWon += mrr;
+          od.wonContacts.push({ ...contactRef, mrr });
 
           // Sales cycle: QR → Won
           const qrTime = times.qr || times.ft || times.won;
@@ -2665,6 +2670,9 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         trends: { pctNotTouched: trendPctNT, convToQR: trendConvQR, convFTtoWon: trendConvFTtoWon },
         bySource: cur.bySource,
         notTouchedContacts: cur.notTouchedContacts,
+        qrContacts: cur.qrContacts,
+        ftContacts: cur.ftContacts,
+        wonContacts: cur.wonContacts,
         stalledContacts: cur.stalledContacts,
         lostBFTContacts: cur.lostBFTContacts,
         lostAFTContacts: cur.lostAFTContacts
