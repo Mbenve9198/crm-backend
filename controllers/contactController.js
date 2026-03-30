@@ -2298,7 +2298,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
  */
 export const getOwnerPerformanceAnalytics = async (req, res) => {
   try {
-    const { from, to, source } = req.query;
+    const { from, to, source, closeDateFrom, closeDateTo } = req.query;
 
     let dateFrom, dateTo;
     if (from) {
@@ -2317,6 +2317,16 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       dateTo = p;
     } else {
       dateTo = new Date();
+    }
+
+    let closeDateFromD = dateFrom, closeDateToD = dateTo;
+    if (closeDateFrom) {
+      const p = new Date(closeDateFrom);
+      if (!isNaN(p.getTime())) closeDateFromD = p;
+    }
+    if (closeDateTo) {
+      const p = new Date(closeDateTo);
+      if (!isNaN(p.getTime())) { p.setHours(23, 59, 59, 999); closeDateToD = p; }
     }
 
     const sourcesOfInterest = source && source !== 'all'
@@ -2711,8 +2721,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       if (!closeDateStr) continue;
 
       const closeDateObj = new Date(closeDateStr);
-      // Filter: closeDate must fall within the selected period
-      if (closeDateObj < dateFrom || closeDateObj > dateTo) continue;
+      if (closeDateObj < closeDateFromD || closeDateObj > closeDateToD) continue;
 
       const mrr = typeof c.mrr === 'number' ? c.mrr : 0;
       const weightedMrr = Math.round(mrr * FORECAST_CONV_RATE);
@@ -2766,6 +2775,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         previousPeriod: { from: prevFrom, to: prevTo },
         owners,
         forecast: {
+          period: { from: closeDateFromD, to: closeDateToD },
           totals: forecastTotals,
           owners: forecastOwners,
           contacts: forecastContacts
