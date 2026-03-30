@@ -446,7 +446,7 @@ export const receiveSmartleadLead = async (req, res) => {
       const currentStatusIndex = statusHierarchy.indexOf(contact.status);
       const newStatusIndex = statusHierarchy.indexOf(status);
       
-      if (newStatusIndex > currentStatusIndex || status === 'interessato') {
+      if (newStatusIndex > currentStatusIndex) {
         contact.status = status;
         
         // Imposta MRR se necessario

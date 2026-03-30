@@ -190,7 +190,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     // Aggiorna telefono se mancante
     if (!contact.phone && phone) contact.phone = phone;
 
-  // Aggiorna status: solo se il nuovo è "più avanzato" o è "interessato"
+  // Aggiorna status: solo se il nuovo è "più avanzato"
   const hierarchy = [
     'da contattare',
     'contattato',
@@ -205,7 +205,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
   ];
     const currentIdx = hierarchy.indexOf(contact.status);
     const newIdx = hierarchy.indexOf(status);
-    if (newIdx > currentIdx || status === 'interessato') {
+    if (newIdx > currentIdx) {
       contact.status = status;
       if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status)) {
         if (contact.mrr === undefined || contact.mrr === null) contact.mrr = 0;
@@ -227,12 +227,11 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     console.log(`🆕 Nuovo contatto: ${name} (${email})`);
     isNew = true;
 
-    // Round robin puro tra Alessandro Totti ed Emanuele Funai
-    // Applicato SOLO ai nuovi lead Smartlead INTERESSATI
+    // Round robin per nuovi lead Smartlead
     let ownerForNewContact = defaultOwner;
-    const isSmartleadInterested = status === 'interessato' && !!properties.smartlead_campaign_id;
+    const isSmartleadLead = !!properties.smartlead_campaign_id;
 
-    if (isSmartleadInterested) {
+    if (isSmartleadLead) {
       const roundRobinEmails = [
         'alessandro.totti@menuchat.it',
         'emanuele.funai@menuchat.it',
@@ -408,8 +407,8 @@ const handleEmailReply = async (webhookData) => {
       mapped = mapWebhookOnlyToContact(webhookBasic);
     }
 
-    // 3b. Crea/aggiorna contatto CRM come "interessato"
-    const result = await createOrUpdateCrmContact(mapped, 'interessato', {
+    // 3b. Crea/aggiorna contatto CRM
+    const result = await createOrUpdateCrmContact(mapped, 'da contattare', {
       type: 'email',
       title: '✨ Lead INTERESSATO (AI) — Risposta positiva',
       description: `Campagna: ${mapped.campaignName}\n\n🤖 AI: ${category} (${(confidence * 100).toFixed(0)}%)\nMotivo: ${reason}\n\nRisposta:\n${replyText}`,
@@ -424,7 +423,7 @@ const handleEmailReply = async (webhookData) => {
     });
 
     if (result) {
-      console.log(`${result.isNew ? '🆕' : '🔄'} CRM: contatto ${result.contact.name} → interessato`);
+      console.log(`${result.isNew ? '🆕' : '🔄'} CRM: contatto ${result.contact.name} → da contattare`);
     }
 
     // 3c. Invia notifica email al team
@@ -508,13 +507,13 @@ const handleLeadCategoryUpdated = async (webhookData) => {
   const categoryLower = newCategoryName.toLowerCase();
 
   if (categoryLower === 'interested') {
-    const result = await createOrUpdateCrmContact(mapped, 'interessato', {
+    const result = await createOrUpdateCrmContact(mapped, 'da contattare', {
       type: 'email',
       title: 'Lead categorizzato come INTERESSATO (Smartlead)',
       description: `Categoria cambiata: ${oldCategoryName || 'N/A'} → ${newCategoryName}\nCampagna: ${mapped.campaignName}\n\nUltima risposta:\n${lastReply.email_body ? stripHtml(lastReply.email_body).substring(0, 500) : 'N/A'}`,
       data: { campaignId: mapped.campaignId, campaignName: mapped.campaignName, oldCategory: oldCategoryName, newCategory: newCategoryName }
     });
-    if (result) console.log(`✅ CRM: ${result.isNew ? 'creato' : 'aggiornato'} come interessato`);
+    if (result) console.log(`✅ CRM: ${result.isNew ? 'creato' : 'aggiornato'} come da contattare`);
 
   } else if (['not interested', 'not_interested', 'do not contact', 'do_not_contact'].includes(categoryLower)) {
     await createOrUpdateCrmContact(mapped, 'lost before free trial', {
