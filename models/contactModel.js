@@ -63,7 +63,9 @@ const contactSchema = new mongoose.Schema({
       'free trial iniziato',
       'won',
       'lost before free trial',
-      'lost after free trial'
+      'lost after free trial',
+      'bad_data',
+      'non_qualificato'
     ],
     default: 'da contattare',
     index: true

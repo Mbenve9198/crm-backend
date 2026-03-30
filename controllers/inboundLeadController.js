@@ -441,7 +441,9 @@ export const receiveSmartleadLead = async (req, res) => {
         'free trial iniziato',
         'won',
         'lost before free trial',
-        'lost after free trial'
+        'lost after free trial',
+        'bad_data',
+        'non_qualificato'
       ];
       const currentStatusIndex = statusHierarchy.indexOf(contact.status);
       const newStatusIndex = statusHierarchy.indexOf(status);

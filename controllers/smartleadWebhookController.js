@@ -201,7 +201,9 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     'free trial iniziato',
     'won',
     'lost before free trial',
-    'lost after free trial'
+    'lost after free trial',
+    'bad_data',
+    'non_qualificato'
   ];
     const currentIdx = hierarchy.indexOf(contact.status);
     const newIdx = hierarchy.indexOf(status);
