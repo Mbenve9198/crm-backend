@@ -2612,9 +2612,10 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
     const ownerUsers = await User.find({ _id: { $in: Array.from(allOwnerIds) } }).select('firstName lastName email role').lean();
     const ownerNameMap = new Map(ownerUsers.map(u => [String(u._id), `${u.firstName} ${u.lastName}`]));
 
-    // Build response
+    // Build response (skip unassigned / null owner)
     const owners = [];
     for (const [ownerId, cur] of currentMap.entries()) {
+      if (!ownerId || ownerId === 'unassigned' || ownerId === 'null') continue;
       const prev = prevMap.get(ownerId);
       const pctNT = cur.cohort > 0 ? Math.round((cur.notTouched / cur.cohort) * 100) : 0;
       const convQR = cur.cohort > 0 ? Math.round((cur.qrCodeSent / cur.cohort) * 100) : 0;
