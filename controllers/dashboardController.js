@@ -88,7 +88,7 @@ export const getDashboard = async (req, res) => {
       {
         $group: {
           _id: null,
-          notTouched: { $sum: { $cond: ['$isNotTouched', 1, 0] } }
+          notTouched: { $sum: { $cond: [{ $and: ['$isNotTouched', '$isActiveStatus'] }, 1, 0] } }
         }
       },
       { $project: { _id: 0, notTouched: 1 } }
@@ -171,7 +171,7 @@ export const getDashboard = async (req, res) => {
       {
         $facet: {
           notTouched: [
-            { $match: { isNotTouched: true } },
+            { $match: { isNotTouched: true, isActiveStatus: true } },
             { $sort: { createdAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
