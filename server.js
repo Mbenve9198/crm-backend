@@ -273,10 +273,13 @@ app.get('/health', async (req, res) => {
     // Controlla la connessione al database
     const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
     
+    const commitHash = process.env.RAILWAY_GIT_COMMIT_SHA || 'unknown';
     res.json({
       success: true,
       status: 'healthy',
       timestamp: new Date().toISOString(),
+      commitHash,
+      uptimeSeconds: Math.round(process.uptime()),
       services: {
         database: {
           status: dbStatus,
