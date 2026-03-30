@@ -235,7 +235,8 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     if (isSmartleadInterested) {
       const roundRobinEmails = [
         'alessandro.totti@menuchat.it',
-        'emanuele.funai@menuchat.it'
+        'emanuele.funai@menuchat.it',
+        'marco@menuchat.com'
       ];
 
       // Recupera utenti per le email configurate (filtra solo attivi)

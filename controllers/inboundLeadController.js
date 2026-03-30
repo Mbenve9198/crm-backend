@@ -267,12 +267,13 @@ export const receiveRankCheckerLead = async (req, res) => {
       // Contatto nuovo → CREA
       console.log(`🆕 Creazione nuovo contatto...`);
 
-      // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead inbound (Rank Checker)
+      // Round robin per i lead inbound (Rank Checker)
       let ownerForNewContact = defaultOwner;
       try {
         const roundRobinEmails = [
           'alessandro.totti@menuchat.it',
-          'emanuele.funai@menuchat.it'
+          'emanuele.funai@menuchat.it',
+          'marco@menuchat.com'
         ];
 
         const owners = await User.find({
@@ -496,12 +497,13 @@ export const receiveSmartleadLead = async (req, res) => {
       console.log(`🆕 Creazione nuovo contatto...`);
       isNew = true;
 
-      // Round robin puro tra Alessandro Totti ed Emanuele Funai per i lead Smartlead inbound
+      // Round robin per i lead Smartlead inbound
       let ownerForNewContact = defaultOwner;
       try {
         const roundRobinEmails = [
           'alessandro.totti@menuchat.it',
-          'emanuele.funai@menuchat.it'
+          'emanuele.funai@menuchat.it',
+          'marco@menuchat.com'
         ];
 
         const owners = await User.find({
