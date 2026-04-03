@@ -31,9 +31,16 @@ export const startRankCheckerOutreachJob = () => {
 };
 
 /**
- * Processa i lead rank checker pronti per outreach
+ * Processa i lead rank checker pronti per outreach.
+ * Solo in orari civili (9-20 Europe/Rome) -- i ristoratori non leggono email alle 3 di notte.
  */
 const processRankCheckerOutreach = async () => {
+  const now = new Date();
+  const romeHour = parseInt(now.toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
+  if (romeHour < 9 || romeHour >= 20) {
+    return;
+  }
+
   const minCreatedAt = new Date(Date.now() - MIN_AGE_HOURS * 60 * 60 * 1000);
   const maxCreatedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 

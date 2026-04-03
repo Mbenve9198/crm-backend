@@ -486,9 +486,12 @@ setTimeout(() => {
     console.log('ℹ️ Agent outreach disabilitato (ENABLE_AGENT_OUTREACH != true)');
   }
 
-  // Follow-up job: processa conversazioni con nextActionAt scaduto (ogni 15 min)
+  // Follow-up job: processa conversazioni con nextActionAt scaduto (ogni 15 min, solo 9-20 Rome)
   setInterval(async () => {
     try {
+      const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
+      if (romeH < 9 || romeH >= 20) return;
+
       const pending = await Conversation.findPendingActions();
       if (pending.length === 0) return;
       console.log(`🔄 Follow-up job: ${pending.length} conversazioni da ricontattare`);
