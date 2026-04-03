@@ -471,6 +471,44 @@ app.use('/api/voice-files', voiceFileRoutes);
 // Routes per il monitor sessioni (sotto /api/session-monitor)
 app.use('/api/session-monitor', sessionMonitorRoutes);
 
+// Routes per l'AI Sales Agent
+import agentRoutes from './routes/agentRoutes.js';
+app.use('/api/agent', agentRoutes);
+
+// Rank Checker Outreach Job + Follow-up Job (avvia dopo il boot del server)
+import { startRankCheckerOutreachJob } from './services/rankCheckerAgentService.js';
+import Conversation from './models/conversationModel.js';
+
+setTimeout(() => {
+  if (process.env.ENABLE_AGENT_OUTREACH === 'true') {
+    startRankCheckerOutreachJob();
+  } else {
+    console.log('ℹ️ Agent outreach disabilitato (ENABLE_AGENT_OUTREACH != true)');
+  }
+
+  // Follow-up job: processa conversazioni con nextActionAt scaduto (ogni 15 min)
+  setInterval(async () => {
+    try {
+      const pending = await Conversation.findPendingActions();
+      if (pending.length === 0) return;
+      console.log(`🔄 Follow-up job: ${pending.length} conversazioni da ricontattare`);
+      const { runAgentLoop } = await import('./services/salesAgentService.js');
+      for (const conv of pending) {
+        try {
+          conv.status = 'active';
+          await conv.save();
+          const note = conv.context?.nextAction || 'Follow-up programmato';
+          await runAgentLoop(conv, `[ISTRUZIONE INTERNA] È il momento del follow-up programmato. Nota: "${note}". Ricontatta il lead in modo naturale, come se ti fossi ricordato di loro.`);
+        } catch (err) {
+          console.error(`❌ Follow-up fallito per conv ${conv._id}:`, err.message);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Follow-up job error:', err.message);
+    }
+  }, 15 * 60 * 1000);
+}, 10000);
+
 // Endpoint per la documentazione delle API
 app.get('/api-docs', (req, res) => {
   res.json({

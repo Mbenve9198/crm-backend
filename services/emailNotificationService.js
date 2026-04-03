@@ -100,4 +100,81 @@ export const sendSmartleadInterestedNotification = async (data) => {
   }
 };
 
-export default { sendSmartleadInterestedNotification };
+/**
+ * Invia email al team quando l'agente AI ha bisogno di review umano
+ */
+export const sendAgentHumanReviewEmail = async (data) => {
+  try {
+    if (!resend) {
+      console.warn('⚠️ Resend non configurato, skip email review');
+      return { success: false, error: 'Resend non configurato' };
+    }
+
+    const {
+      restaurantName, city, rank, keyword, rating, reviewsCount,
+      leadMessage, draftReply, reason, conversationId,
+      contactEmail, msgCount, objections,
+      approveLink, modifyLink, discardLink
+    } = data;
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;">
+<div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+
+<div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 25px 20px; text-align: center;">
+  <h1 style="margin: 0; font-size: 22px;">🤖 AI Agent chiede consiglio</h1>
+  <p style="margin: 8px 0 0 0; font-size: 14px; opacity: 0.9;">${restaurantName}${city ? ` (${city})` : ''}</p>
+</div>
+
+<div style="padding: 25px 20px;">
+  <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+    <strong>Perché chiedo:</strong> ${reason}
+  </div>
+
+  <div style="margin-bottom: 15px;">
+    <strong>Contesto:</strong><br>
+    ${rank ? `Posizione: ${rank}° per "${keyword || 'N/A'}"<br>` : ''}
+    ${rating ? `Rating: ${rating}/5 con ${reviewsCount || '?'} recensioni<br>` : ''}
+    ${msgCount ? `Messaggi nella conversazione: ${msgCount}<br>` : ''}
+    ${objections?.length > 0 ? `Obiezioni: ${objections.join(', ')}<br>` : ''}
+  </div>
+
+  <div style="background-color: #ede9fe; border-left: 4px solid #8b5cf6; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+    <strong>Risposta del lead:</strong><br>
+    <div style="background: white; padding: 10px; border-radius: 6px; margin-top: 8px; font-style: italic; white-space: pre-wrap;">${(leadMessage || '').substring(0, 800)}</div>
+  </div>
+
+  ${draftReply ? `
+  <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+    <strong>Bozza dell'agente:</strong><br>
+    <div style="background: white; padding: 10px; border-radius: 6px; margin-top: 8px; white-space: pre-wrap;">${draftReply.substring(0, 800)}</div>
+  </div>` : ''}
+
+  <div style="text-align: center; margin-top: 25px;">
+    ${draftReply ? `<a href="${approveLink}" style="display: inline-block; background: #10b981; color: white; padding: 12px 25px; text-decoration: none; border-radius: 20px; font-weight: bold; margin: 5px;">✅ Approva e Invia</a>` : ''}
+    <a href="${modifyLink}" style="display: inline-block; background: #6366f1; color: white; padding: 12px 25px; text-decoration: none; border-radius: 20px; font-weight: bold; margin: 5px;">✏️ Modifica nel CRM</a>
+    <a href="${discardLink}" style="display: inline-block; background: #ef4444; color: white; padding: 12px 25px; text-decoration: none; border-radius: 20px; font-weight: bold; margin: 5px;">🗑️ Scarta</a>
+  </div>
+
+  <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 11px; color: #6c757d; text-align: center;">
+    <p>Conversazione ID: ${conversationId} | Lead: ${contactEmail}</p>
+  </div>
+</div>
+</div></body></html>`;
+
+    const result = await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      subject: `🤖 [AI Agent] Consiglio su: ${restaurantName}${city ? ` (${city})` : ''} — ${reason}`,
+      html
+    });
+
+    return { success: true, resendId: result.data?.id };
+  } catch (error) {
+    console.error('❌ Errore invio email review agente:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail };

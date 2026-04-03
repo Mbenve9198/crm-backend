@@ -5,6 +5,7 @@ import AssignmentState from '../models/assignmentStateModel.js';
 import { classifyReply } from '../services/replyClassifierService.js';
 import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
+import { handleAgentConversation, routeLeadReply } from '../services/salesAgentService.js';
 
 /**
  * Controller per i webhook Smartlead
@@ -363,25 +364,29 @@ const handleEmailReply = async (webhookData) => {
   const replyBody = replyMessage.html || webhookData.reply_body || '';
   const replyText = replyMessage.text || webhookData.preview_text || stripHtml(replyBody);
   const subject = webhookData.subject;
+  const fromEmail = webhookData.from_email || webhookData.from || '';
 
   console.log(`💬 EMAIL_REPLY da: ${webhookBasic.email}`);
   console.log(`   Nome (webhook): ${webhookBasic.toName}`);
   console.log(`   Campagna: ${webhookBasic.campaignName} (ID: ${webhookBasic.campaignId})`);
   console.log(`   Lead ID Smartlead: ${webhookBasic.leadId || 'N/A'}`);
+  console.log(`   From (sender): ${fromEmail}`);
   console.log(`   Preview: ${replyText.substring(0, 150)}...`);
 
-  // 1. Classifica con AI
+  // 1. Classifica con AI + estrai entità
   const aiResult = await classifyReply(replyText, {
     restaurantName: webhookBasic.toName,
     campaignName: webhookBasic.campaignName,
     subject
   });
 
-  const { category, confidence, reason, shouldStopSequence } = aiResult;
-  const emoji = category === 'INTERESTED' ? '✨' : category === 'NOT_INTERESTED' ? '🚫' : '📋';
+  const { category, confidence, reason, shouldStopSequence, extracted } = aiResult;
+  const emojiMap = { INTERESTED: '✨', NEUTRAL: '🔵', NOT_INTERESTED: '🚫', DO_NOT_CONTACT: '🛑', OUT_OF_OFFICE: '📋' };
 
-  console.log(`${emoji} AI: ${category} (${(confidence * 100).toFixed(0)}%) — ${reason}`);
+  console.log(`${emojiMap[category] || '❓'} AI: ${category} (${(confidence * 100).toFixed(0)}%) — ${reason}`);
   console.log(`   Stop sequenza: ${shouldStopSequence ? 'SÌ' : 'NO'}`);
+  if (extracted?.phone) console.log(`   📱 Telefono estratto dalla risposta: ${extracted.phone}`);
+  if (extracted?.contactName) console.log(`   👤 Contatto estratto: ${extracted.contactName}`);
 
   // 2. Aggiorna categoria su Smartlead via API
   const { smartleadCategory, shouldPause } = mapAiCategoryToSmartlead(category);
@@ -394,9 +399,19 @@ const handleEmailReply = async (webhookData) => {
     }
   }
 
+  const activityData = {
+    emailSubject: subject,
+    campaignId: webhookBasic.campaignId,
+    campaignName: webhookBasic.campaignName,
+    aiClassification: { category, confidence, reason },
+    extractedEntities: extracted || {},
+    replyText: replyText.substring(0, 2000),
+    repliedAt: webhookData.event_timestamp,
+    fromEmail
+  };
+
   // 3. Azioni in base alla categoria
   if (category === 'INTERESTED') {
-    // 3a. Fetch dati completi del lead da Smartlead API per popolare il CRM
     console.log(`🔍 Recupero dati completi del lead da Smartlead...`);
     const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
 
@@ -409,26 +424,41 @@ const handleEmailReply = async (webhookData) => {
       mapped = mapWebhookOnlyToContact(webhookBasic);
     }
 
-    // 3b. Crea/aggiorna contatto CRM
+    // CRM hydration: popola dati estratti dalla risposta
+    hydrateFromExtracted(mapped, extracted);
+
     const result = await createOrUpdateCrmContact(mapped, 'da contattare', {
       type: 'email',
       title: '✨ Lead INTERESSATO (AI) — Risposta positiva',
       description: `Campagna: ${mapped.campaignName}\n\n🤖 AI: ${category} (${(confidence * 100).toFixed(0)}%)\nMotivo: ${reason}\n\nRisposta:\n${replyText}`,
-      data: {
-        emailSubject: subject,
-        campaignId: mapped.campaignId,
-        campaignName: mapped.campaignName,
-        aiClassification: { category, confidence, reason },
-        replyText: replyText.substring(0, 2000),
-        repliedAt: webhookData.event_timestamp
-      }
+      data: activityData
     });
 
     if (result) {
       console.log(`${result.isNew ? '🆕' : '🔄'} CRM: contatto ${result.contact.name} → da contattare`);
+
+      // Route to AI agent or direct handoff
+      const routing = routeLeadReply(category, confidence, extracted, replyText);
+      if (routing.action === 'direct_handoff') {
+        console.log(`🎯 Direct handoff → team vendite (lead caldo con telefono)`);
+      } else if (routing.action === 'agent') {
+        try {
+          const agentResult = await handleAgentConversation({
+            contact: result.contact,
+            replyText,
+            category,
+            confidence,
+            extracted,
+            fromEmail,
+            webhookBasic
+          });
+          console.log(`🤖 Agent: ${agentResult.action} (stage: ${agentResult.conversation?.stage || 'N/A'})`);
+        } catch (agentErr) {
+          console.error('⚠️ Errore agent (non bloccante):', agentErr.message);
+        }
+      }
     }
 
-    // 3c. Invia notifica email al team
     const emailResult = await sendSmartleadInterestedNotification({
       email: mapped.email,
       name: mapped.name,
@@ -443,8 +473,42 @@ const handleEmailReply = async (webhookData) => {
     });
     if (emailResult.success) console.log(`📧 Notifica team inviata!`);
 
+  } else if (category === 'NEUTRAL') {
+    // NEUTRAL: ferma sequenza, salva nel CRM per tracking ma NON notifica il team
+    const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
+    const mapped = smartleadLead
+      ? mapLeadDataToContact(smartleadLead, webhookBasic)
+      : mapWebhookOnlyToContact(webhookBasic);
+
+    hydrateFromExtracted(mapped, extracted);
+
+    const neutralResult = await createOrUpdateCrmContact(mapped, 'da contattare', {
+      type: 'email',
+      title: '🔵 Lead NEUTRAL (AI) — Risposta ambigua',
+      description: `Campagna: ${mapped.campaignName}\n\n🤖 AI: ${category} (${(confidence * 100).toFixed(0)}%)\nMotivo: ${reason}\n\nRisposta:\n${replyText}`,
+      data: activityData
+    });
+    console.log(`🔵 CRM: contatto salvato come da contattare (NEUTRAL — nessuna notifica team)`);
+
+    // Route NEUTRAL leads to AI agent for nurturing
+    if (neutralResult?.contact) {
+      try {
+        const agentResult = await handleAgentConversation({
+          contact: neutralResult.contact,
+          replyText,
+          category,
+          confidence,
+          extracted,
+          fromEmail,
+          webhookBasic
+        });
+        console.log(`🤖 Agent (NEUTRAL): ${agentResult.action}`);
+      } catch (agentErr) {
+        console.error('⚠️ Errore agent NEUTRAL (non bloccante):', agentErr.message);
+      }
+    }
+
   } else if (category === 'NOT_INTERESTED' || category === 'DO_NOT_CONTACT') {
-    // Fetch dati anche per NOT_INTERESTED per popolare CRM per tracking
     const smartleadLead = await fetchLeadByEmail(webhookBasic.email);
     const mapped = smartleadLead
       ? mapLeadDataToContact(smartleadLead, webhookBasic)
@@ -456,20 +520,11 @@ const handleEmailReply = async (webhookData) => {
         ? '🛑 Lead DO NOT CONTACT (AI)'
         : '🚫 Lead NON INTERESSATO (AI)',
       description: `Campagna: ${mapped.campaignName}\n\n🤖 AI: ${category} (${(confidence * 100).toFixed(0)}%)\nMotivo: ${reason}\n\nRisposta:\n${replyText}`,
-      data: {
-        emailSubject: subject,
-        campaignId: mapped.campaignId,
-        campaignName: mapped.campaignName,
-        aiClassification: { category, confidence, reason },
-        replyText: replyText.substring(0, 2000),
-        repliedAt: webhookData.event_timestamp
-      }
+      data: activityData
     });
     console.log(`🚫 CRM: contatto salvato come lost before free trial`);
 
   } else {
-    // OUT_OF_OFFICE: nessuna azione CRM
-    // Smartlead potrebbe aver gia fermato la sequenza, quindi RESUME
     console.log(`📋 OUT_OF_OFFICE — riattivo la sequenza su Smartlead`);
 
     if (webhookBasic.campaignId && webhookBasic.leadId) {
@@ -484,6 +539,35 @@ const handleEmailReply = async (webhookData) => {
   }
 
   console.log(`✅ EMAIL_REPLY processato [${webhookBasic.email} → ${category}]`);
+};
+
+/**
+ * Popola dati del contatto con entità estratte dalla risposta AI
+ */
+const hydrateFromExtracted = (mapped, extracted) => {
+  if (!extracted) return;
+
+  if (extracted.phone && !mapped.phone) {
+    mapped.phone = extracted.phone;
+    console.log(`📱 CRM hydration: telefono dalla risposta → ${extracted.phone}`);
+  }
+  if (extracted.contactName) {
+    mapped.properties = mapped.properties || {};
+    mapped.properties.contact_person = extracted.contactName;
+    console.log(`👤 CRM hydration: contatto → ${extracted.contactName}`);
+  }
+  if (extracted.availability) {
+    mapped.properties = mapped.properties || {};
+    mapped.properties.preferred_availability = extracted.availability;
+  }
+  if (extracted.preferredChannel) {
+    mapped.properties = mapped.properties || {};
+    mapped.properties.preferred_channel = extracted.preferredChannel;
+  }
+  if (extracted.specificRequest) {
+    mapped.properties = mapped.properties || {};
+    mapped.properties.specific_request = extracted.specificRequest;
+  }
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

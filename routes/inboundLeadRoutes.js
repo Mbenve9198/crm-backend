@@ -1,6 +1,7 @@
 import express from 'express';
 import { receiveRankCheckerLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
 import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
+import { handleResendInbound } from '../controllers/resendWebhookController.js';
 
 const router = express.Router();
 
@@ -9,30 +10,20 @@ const router = express.Router();
  * PUBBLICHE - non richiedono autenticazione (webhook da sistemi esterni)
  */
 
-/**
- * Riceve lead dal Rank Checker di MenuChat
- * POST /api/inbound/rank-checker-lead
- */
 router.post('/rank-checker-lead', receiveRankCheckerLead);
-
-/**
- * Riceve lead da Smartlead (formato legacy - chiamata diretta)
- * POST /api/inbound/smartlead-lead
- */
 router.post('/smartlead-lead', receiveSmartleadLead);
+router.post('/smartlead-webhook', handleSmartleadWebhook);
 
 /**
- * Webhook Smartlead con classificazione AI
- * POST /api/inbound/smartlead-webhook
- * 
- * Flusso: Webhook → AI classifica risposta → mappa campi → crea/aggiorna contatto CRM
- * 
- * Gestisce:
- * - EMAIL_REPLY → AI classifica → INTERESTED (CRM + notifica) / NOT_INTERESTED (CRM) / OUT_OF_OFFICE (skip)
- * - LEAD_CATEGORY_UPDATED → sincronizza categoria al CRM
- * - EMAIL_SENT → solo log
+ * Resend Inbound Webhook — intercetta reply dei rank checker leads
+ * POST /api/inbound/resend-webhook
+ *
+ * Prerequisiti:
+ * - Dominio reply.menuchat.it con MX → inbound-smtp.resend.com
+ * - Resend Dashboard: Inbound endpoint → questo URL
+ * - SOAP Opera reply-to: agent+{leadId}@reply.menuchat.it
  */
-router.post('/smartlead-webhook', handleSmartleadWebhook);
+router.post('/resend-webhook', handleResendInbound);
 
 export default router;
 

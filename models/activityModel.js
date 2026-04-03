@@ -76,7 +76,29 @@ const activitySchema = new mongoose.Schema({
       type: String,
       maxLength: [200, 'L\'oggetto email non può superare 200 caratteri']
     },
-    
+
+    // Smartlead webhook / AI classification data
+    replyText: {
+      type: String,
+      maxLength: [2000, 'Il testo della risposta non può superare 2000 caratteri']
+    },
+    campaignId: { type: String },
+    campaignName: { type: String },
+    aiClassification: {
+      category: String,
+      confidence: Number,
+      reason: String
+    },
+    extractedEntities: {
+      phone: String,
+      contactName: String,
+      preferredChannel: String,
+      availability: String,
+      specificRequest: String
+    },
+    repliedAt: { type: Date },
+    fromEmail: { type: String },
+
     // Per i cambi di stato
     statusChange: {
       oldStatus: String,

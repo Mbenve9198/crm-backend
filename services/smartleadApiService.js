@@ -128,10 +128,64 @@ export const resumeLead = async (campaignId, leadId) => {
 export const mapAiCategoryToSmartlead = (aiCategory) => {
   switch (aiCategory) {
     case 'INTERESTED': return { smartleadCategory: 'Interested', shouldPause: true };
+    case 'NEUTRAL': return { smartleadCategory: 'Information Request', shouldPause: true };
     case 'NOT_INTERESTED': return { smartleadCategory: 'Not Interested', shouldPause: true };
     case 'DO_NOT_CONTACT': return { smartleadCategory: 'Do Not Contact', shouldPause: true };
     case 'OUT_OF_OFFICE': return { smartleadCategory: 'Out Of Office', shouldPause: false };
     default: return { smartleadCategory: null, shouldPause: false };
+  }
+};
+
+/**
+ * Recupera la cronologia messaggi per un lead in una campagna
+ * GET /campaigns/{campaign_id}/leads/{lead_id}/message-history
+ */
+export const fetchMessageHistory = async (campaignId, leadId) => {
+  try {
+    if (!campaignId || !leadId) return [];
+
+    const response = await axios.get(
+      buildUrl(`/campaigns/${campaignId}/leads/${leadId}/message-history`),
+      { timeout: 15000 }
+    );
+
+    return response.data?.history || [];
+  } catch (error) {
+    console.error('❌ Errore fetch message history:', error.response?.data || error.message);
+    return [];
+  }
+};
+
+/**
+ * Risponde in-thread a un lead tramite Smartlead
+ * POST /campaigns/{campaign_id}/reply-email-thread
+ */
+export const replyToEmailThread = async (campaignId, leadId, emailBody, replyMessageId) => {
+  try {
+    if (!campaignId || !leadId || !emailBody) {
+      return { success: false, reason: 'Parametri mancanti' };
+    }
+
+    const body = {
+      lead_id: leadId,
+      email_body: emailBody,
+      reply_email_time: new Date().toISOString()
+    };
+    if (replyMessageId) body.reply_message_id = replyMessageId;
+
+    console.log(`📧 Smartlead API: reply-email-thread per lead ${leadId} in campagna ${campaignId}`);
+
+    const response = await axios.post(
+      buildUrl(`/campaigns/${campaignId}/reply-email-thread`),
+      body,
+      { timeout: 15000, headers: { 'Content-Type': 'application/json' } }
+    );
+
+    console.log(`✅ Reply inviata via Smartlead thread`);
+    return { success: true, data: response.data };
+  } catch (error) {
+    console.error('❌ Errore reply-email-thread:', error.response?.data || error.message);
+    return { success: false, error: error.response?.data || error.message };
   }
 };
 
@@ -204,5 +258,7 @@ export default {
   fetchLeadByEmail,
   mapAiCategoryToSmartlead,
   extractLeadId,
-  stripHtml
+  stripHtml,
+  fetchMessageHistory,
+  replyToEmailThread
 };
