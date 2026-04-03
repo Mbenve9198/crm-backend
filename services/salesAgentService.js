@@ -118,15 +118,31 @@ export const runAgentLoop = async (conversation, leadMessage) => {
 
   let contextBlock = '\nCONTESTO LEAD ATTUALE:';
   if (contact) {
+    const p = contact.properties || {};
     contextBlock += `\n- Nome ristorante: ${contact.name}`;
     contextBlock += `\n- Email: ${contact.email}`;
     if (contact.phone) contextBlock += `\n- Telefono: ${contact.phone}`;
-    if (contact.properties?.location) contextBlock += `\n- Zona: ${contact.properties.location}`;
-    if (contact.properties?.rating) contextBlock += `\n- Rating Google: ${contact.properties.rating}`;
-    if (contact.properties?.reviews_count) contextBlock += `\n- Recensioni: ${contact.properties.reviews_count}`;
-    if (contact.properties?.google_maps_link) contextBlock += `\n- Google Maps: ${contact.properties.google_maps_link}`;
-    if (contact.properties?.contact_person) contextBlock += `\n- Persona da contattare: ${contact.properties.contact_person}`;
-    if (contact.properties?.preferred_availability) contextBlock += `\n- Disponibilità preferita: ${contact.properties.preferred_availability}`;
+    const city = p.city || p['Città'] || p.location || '';
+    if (city) contextBlock += `\n- Città/Zona: ${city}`;
+    const address = p.full_address || p['Indirizzo'] || '';
+    if (address) contextBlock += `\n- Indirizzo: ${address}`;
+    const rating = p.rating || p.Rating;
+    if (rating) contextBlock += `\n- Rating Google: ${rating}/5`;
+    const reviews = p.reviews_count || p.Recensioni;
+    if (reviews) contextBlock += `\n- Recensioni Google: ${reviews}`;
+    if (p.google_maps_link) contextBlock += `\n- Google Maps: ${p.google_maps_link}`;
+    if (p.site || p.Website) contextBlock += `\n- Sito web: ${p.site || p.Website}`;
+    if (p.category || p.business_type) contextBlock += `\n- Tipo locale: ${p.category || p.business_type}`;
+    if (p.current_rank) contextBlock += `\n- Posizione Google Maps: ${p.current_rank}° per "${p.keyword || 'N/A'}"`;
+    if (p.estimated_lost_customers) contextBlock += `\n- Clienti persi stimati/settimana: ~${p.estimated_lost_customers}`;
+    if (p.competitor_1_name) {
+      contextBlock += `\n- Competitor principali:`;
+      contextBlock += `\n  - ${p.competitor_1_name}: posizione ${p.competitor_1_rank || '?'}, ${p.competitor_1_reviews || '?'} recensioni, rating ${p.competitor_1_rating || '?'}`;
+      if (p.competitor_2_name) contextBlock += `\n  - ${p.competitor_2_name}: posizione ${p.competitor_2_rank || '?'}, ${p.competitor_2_reviews || '?'} recensioni`;
+      if (p.competitor_3_name) contextBlock += `\n  - ${p.competitor_3_name}`;
+    }
+    if (p.contact_person) contextBlock += `\n- Persona da contattare: ${p.contact_person}`;
+    if (p.preferred_availability) contextBlock += `\n- Disponibilità preferita: ${p.preferred_availability}`;
     if (contact.source) contextBlock += `\n- Fonte lead: ${contact.source}`;
   }
 
@@ -296,9 +312,10 @@ export const handleAgentConversation = async ({
         },
         restaurantData: {
           name: contact.name,
-          city: contact.properties?.location,
+          city: contact.properties?.city || contact.properties?.['Città'] || contact.properties?.location,
           googleMapsLink: contact.properties?.google_maps_link
-        }
+        },
+        smartleadLeadId: webhookBasic?.leadId
       },
       assignedTo: contact.owner
     });
