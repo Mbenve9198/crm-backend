@@ -4,6 +4,7 @@ import Contact from '../models/contactModel.js';
 import AgentMetric from '../models/agentMetricModel.js';
 import agentLogger from './agentLogger.js';
 import { AGENT_TOOLS, executeTools } from './agentToolsService.js';
+import { sendAgentActivityReport } from './emailNotificationService.js';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -336,6 +337,7 @@ export const handleAgentConversation = async ({
     conversation.stage = 'handoff';
     await conversation.save();
     agentLogger.info('direct_handoff', { conversationId: conversation._id, contactEmail: contact.email, data: 'Lead caldo → team vendite' });
+    sendAgentActivityReport({ action: 'direct_handoff', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone || extracted?.phone, agentName: identity.name, leadMessage: replyText, category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
     return { action: 'direct_handoff', conversation };
   }
 
@@ -368,15 +370,20 @@ export const handleAgentConversation = async ({
     const hasScheduledFollowup = agentResult.toolsUsed.some(t => t.name === 'schedule_followup');
 
     if (hasRequestedHelp) {
+      const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
+      sendAgentActivityReport({ action: 'awaiting_human', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
       return { action: 'awaiting_human', conversation };
     }
 
     if (hasSentMessage) {
       agentLogger.info('auto_sent', { conversationId: conversation._id, contactEmail: contact.email });
+      const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
+      sendAgentActivityReport({ action: 'auto_sent', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
       return { action: 'auto_sent', conversation };
     }
 
     if (hasScheduledFollowup) {
+      sendAgentActivityReport({ action: 'scheduled_followup', contactName: contact.name, contactEmail: contact.email, agentName: identity.name, leadMessage: replyText, agentReply: `Follow-up programmato: ${conversation.context?.nextAction || ''}`, toolsUsed: agentResult.toolsUsed.map(t => t.name), conversationId: conversation._id, source: contact.source }).catch(() => {});
       return { action: 'scheduled_followup', conversation };
     }
 

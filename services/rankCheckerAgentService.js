@@ -109,6 +109,9 @@ const initiateRankCheckerOutreach = async (contact) => {
 
     if (hasSent) {
       console.log(`✅ Outreach inviato a ${contact.name}`);
+      const { sendAgentActivityReport } = await import('./emailNotificationService.js');
+      const agentMsg = conversation.messages?.filter(m => m.role === 'agent').pop();
+      sendAgentActivityReport({ action: 'outreach_sent', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), conversationId: conversation._id, source: 'inbound_rank_checker' }).catch(() => {});
     } else {
       console.log(`⚠️ Agente non ha inviato outreach per ${contact.name} — escalation`);
       const { executeTools } = await import('./agentToolsService.js');

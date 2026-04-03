@@ -177,4 +177,80 @@ export const sendAgentHumanReviewEmail = async (data) => {
   }
 };
 
-export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail };
+/**
+ * Invia email di report interna per ogni attivita dell'agente AI.
+ * Per monitoraggio in tempo reale durante il periodo iniziale.
+ */
+export const sendAgentActivityReport = async ({ action, contactName, contactEmail, contactPhone, agentName, leadMessage, agentReply, toolsUsed, category, confidence, conversationId, source }) => {
+  try {
+    if (!resend) return;
+
+    const actionLabels = {
+      'auto_sent': 'RISPOSTA INVIATA',
+      'awaiting_human': 'RICHIESTA REVIEW',
+      'direct_handoff': 'LEAD CALDO → TEAM',
+      'scheduled_followup': 'FOLLOW-UP PROGRAMMATO',
+      'track_lost': 'LEAD PERSO',
+      'stop': 'DO NOT CONTACT',
+      'resume_sequence': 'OUT OF OFFICE',
+      'error': 'ERRORE',
+      'outreach_sent': 'OUTREACH INVIATO',
+      'classified': 'CLASSIFICAZIONE'
+    };
+
+    const actionLabel = actionLabels[action] || action;
+    const actionColors = {
+      'auto_sent': '#10b981',
+      'awaiting_human': '#f59e0b',
+      'direct_handoff': '#3b82f6',
+      'outreach_sent': '#8b5cf6',
+      'track_lost': '#ef4444',
+      'stop': '#dc2626',
+      'classified': '#6366f1'
+    };
+    const color = actionColors[action] || '#6b7280';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.5;color:#333;margin:0;padding:0;background:#f4f4f4">
+<div style="max-width:600px;margin:15px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+<div style="background:${color};color:white;padding:15px 20px">
+  <h2 style="margin:0;font-size:16px">AI Agent: ${actionLabel}</h2>
+  <p style="margin:4px 0 0;font-size:13px;opacity:0.9">${contactName || 'Lead'} ${source ? '(' + source + ')' : ''}</p>
+</div>
+<div style="padding:15px 20px;font-size:13px">
+  <table style="width:100%;border-collapse:collapse">
+    <tr><td style="padding:3px 8px 3px 0;color:#6b7280;width:120px">Ristorante</td><td style="padding:3px 0"><strong>${contactName || '-'}</strong></td></tr>
+    <tr><td style="padding:3px 8px 3px 0;color:#6b7280">Email</td><td style="padding:3px 0">${contactEmail || '-'}</td></tr>
+    ${contactPhone ? `<tr><td style="padding:3px 8px 3px 0;color:#6b7280">Telefono</td><td style="padding:3px 0"><strong>${contactPhone}</strong></td></tr>` : ''}
+    ${category ? `<tr><td style="padding:3px 8px 3px 0;color:#6b7280">Classificazione</td><td style="padding:3px 0">${category} (${((confidence || 0) * 100).toFixed(0)}%)</td></tr>` : ''}
+    <tr><td style="padding:3px 8px 3px 0;color:#6b7280">Agente</td><td style="padding:3px 0">${agentName || '-'}</td></tr>
+    ${toolsUsed?.length ? `<tr><td style="padding:3px 8px 3px 0;color:#6b7280">Tool usati</td><td style="padding:3px 0">${toolsUsed.join(', ')}</td></tr>` : ''}
+  </table>
+
+  ${leadMessage ? `<div style="margin-top:12px;padding:10px;background:#f3f4f6;border-left:3px solid #6366f1;border-radius:4px">
+    <div style="font-size:11px;color:#6b7280;margin-bottom:4px">Messaggio lead:</div>
+    <div style="white-space:pre-wrap">${leadMessage.substring(0, 500)}</div>
+  </div>` : ''}
+
+  ${agentReply ? `<div style="margin-top:8px;padding:10px;background:#f0fdf4;border-left:3px solid #10b981;border-radius:4px">
+    <div style="font-size:11px;color:#6b7280;margin-bottom:4px">Risposta agente:</div>
+    <div style="white-space:pre-wrap">${agentReply.substring(0, 800)}</div>
+  </div>` : ''}
+
+  ${conversationId ? `<div style="margin-top:10px;text-align:center"><a href="${process.env.FRONTEND_URL || 'https://crm-frontend-pied-sigma.vercel.app'}/agent/review?id=${conversationId}" style="display:inline-block;background:${color};color:white;padding:8px 20px;text-decoration:none;border-radius:15px;font-size:12px;font-weight:bold">Vedi nel CRM</a></div>` : ''}
+
+  <div style="margin-top:10px;font-size:10px;color:#9ca3af;text-align:center">${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}</div>
+</div></div></body></html>`;
+
+    await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      subject: `[AI Agent] ${actionLabel}: ${contactName || contactEmail || 'Lead'}`,
+      html
+    });
+  } catch {
+    // Non bloccante -- il report e' solo per monitoraggio
+  }
+};
+
+export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail, sendAgentActivityReport };
