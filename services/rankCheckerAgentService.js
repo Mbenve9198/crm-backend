@@ -50,9 +50,7 @@ const processRankCheckerOutreach = async () => {
     createdAt: { $lte: minCreatedAt, $gte: maxCreatedAt }
   }).populate('owner', 'email firstName lastName').lean();
 
-  const existingConvContactIds = await Conversation.distinct('contact', {
-    status: { $nin: ['dead'] }
-  });
+  const existingConvContactIds = await Conversation.distinct('contact');
   const existingSet = new Set(existingConvContactIds.map(id => id.toString()));
 
   const eligibleLeads = leads.filter(l => !existingSet.has(l._id.toString()));
