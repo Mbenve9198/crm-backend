@@ -1394,7 +1394,7 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       dateTo = new Date();
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
     const pipeline = [
       {
         $match: {
@@ -1601,7 +1601,7 @@ export const getFunnelStatusEvents = async (req, res) => {
       resultBySource[src].uniqueLeadsByStatus[status] = row.contacts.length;
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
     sourcesOfInterest.forEach((src) => {
       if (!resultBySource[src]) {
         resultBySource[src] = {
@@ -1904,7 +1904,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       ownerId = new mongoose.Types.ObjectId(owner);
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
     const OUTCOME_WINDOW_DAYS = 60;
@@ -2331,7 +2331,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     const sourcesOfInterest = source && source !== 'all'
       ? [source]
-      : ['smartlead_outbound', 'inbound_rank_checker'];
+      : ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
 
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
