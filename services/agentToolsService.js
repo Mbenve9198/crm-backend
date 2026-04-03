@@ -157,10 +157,11 @@ async function toolSearchSimilarClients({ cuisine_type, city, region }) {
           city: r.address?.city || r.address?.formattedAddress?.split(',').slice(-2, -1)[0]?.trim(),
           googleReviews: r.googleRating?.reviewCount,
           rating: r.googleRating?.rating,
-          menuUrl: `https://menuchat.it/menu/${r._id}`,
-          reviewsCollectedLastMonth: r.reviewsCollectedLastMonth || null
+          menuUrl: r.menuUrl || `https://menuchat.it/menu/${r._id}`,
+          menuItemCount: r.menuItemCount || 0,
+          hasCompletedMenu: r.hasCompletedMenu || false
         })),
-        note: 'Questi sono clienti reali MenuChat attivi. Puoi citare i loro dati e condividere il link al menu.'
+        note: 'Questi sono clienti reali MenuChat attivi con menu digitale completo. Puoi condividere il link al menu (menuUrl) al lead per fargli vedere un esempio concreto di come appare il menu digitale di un ristorante simile al suo.'
       };
     }
 
