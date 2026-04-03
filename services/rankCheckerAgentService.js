@@ -166,44 +166,50 @@ const buildRestaurantContext = (contact) => {
 const buildOutreachPrompt = (contact, identity) => {
   const rc = contact.rankCheckerData || {};
   const ranking = rc.ranking || {};
+  const covers = rc.dailyCovers || 0;
+  const estimatedIn2Weeks = covers > 0 ? Math.round(covers * 14 * 0.06) : null;
 
   let prompt = `[ISTRUZIONE INTERNA - NON MOSTRARE AL LEAD]
-Devi contattare per PRIMO questo ristoratore. Ha usato il nostro Rank Checker e ha visto i suoi dati di ranking su Google Maps. Ha lasciato email e telefono.
+Questo è un PRIMO CONTATTO. Il ristoratore ha usato il nostro Rank Checker e ha visto i suoi dati. NON ha scritto a noi — sei TU che scrivi per primo. Devi sembrare una persona vera che ha guardato i suoi dati e si fa vivo.
 
-CONTATTO:
+DATI DEL RISTORANTE:
 - Nome: ${contact.name}
 - Email: ${contact.email}
 - Telefono: ${contact.phone || 'non disponibile'}`;
 
-  if (rc.keyword) prompt += `\n- Keyword analizzata: "${rc.keyword}"`;
-  if (ranking.mainRank) prompt += `\n- Posizione trovata: ${ranking.mainRank}`;
-  if (ranking.estimatedLostCustomers) prompt += `\n- Clienti persi stimati: ~${ranking.estimatedLostCustomers}/settimana`;
-  if (rc.dailyCovers) prompt += `\n- Coperti/giorno: ${rc.dailyCovers}`;
+  if (rc.keyword) prompt += `\n- Keyword: "${rc.keyword}"`;
+  if (ranking.mainRank) prompt += `\n- Posizione su Google Maps: ${ranking.mainRank}°`;
+  if (covers) prompt += `\n- Coperti/giorno: ${covers}`;
+  if (estimatedIn2Weeks) prompt += `\n- STIMA RECENSIONI IN 2 SETTIMANE DI PROVA: ${estimatedIn2Weeks}`;
   if (rc.hasDigitalMenu !== undefined) prompt += `\n- Ha menu digitale: ${rc.hasDigitalMenu ? 'sì' : 'no'}`;
 
+  const restaurantData = rc.restaurantData || {};
+  if (restaurantData.rating) prompt += `\n- Rating Google: ${restaurantData.rating}`;
+  if (restaurantData.reviewCount) prompt += `\n- Recensioni attuali: ${restaurantData.reviewCount}`;
+
   if (ranking.fullResults?.competitors?.length > 0) {
-    prompt += `\n- Competitor principali:`;
+    prompt += `\n- Competitor davanti a loro:`;
     for (const c of ranking.fullResults.competitors.slice(0, 3)) {
       prompt += `\n  - ${c.name}: posizione ${c.rank}, ${c.reviews || '?'} recensioni`;
     }
   }
 
-  prompt += `\n\nCOSA DEVI FARE:
-1. Usa "search_similar_clients" per trovare un ristorante simile nella sua zona che usa MenuChat — ti serve come esempio concreto
-2. Componi un messaggio email PERSONALIZZATO usando i dati di ranking che hai qui sopra
-3. Il messaggio deve:
-   - Aprire citando un dato specifico del SUO ristorante (posizione, competitor, recensioni)
-   - Spiegare in 2 frasi come MenuChat risolve il problema (QR -> WhatsApp -> recensioni automatiche)
-   - Se hai trovato un cliente simile, citalo con i numeri reali
-   - Proporre una CHIAMATA AL CELLULARE veloce (5-10 minuti) per spiegargli come funziona
-   - Menzionare la prova gratuita 2 settimane
-   - Max 150 parole, tono da amico imprenditore
-4. Invia via email (send_email_reply) — per ora solo email, WhatsApp verrà dopo
-5. NON proporre MAI videochiamate o Google Meet — noi facciamo chiamate al cellulare
+  prompt += `\n\nREGOLE ASSOLUTE PER IL PRIMO CONTATTO:
+- NON citare MAI il prezzo. Né 1.290€, né nessun altro numero. Il prezzo si discute DOPO la chiamata
+- NON spiegare nel dettaglio come funziona il sistema. Quello si fa nella chiamata
+- L'email deve essere BREVE (max 100 parole). I ristoratori non leggono email lunghe
 
-OBIETTIVO FINALE: portare il lead a una chiamata veloce al telefono → poi prova gratuita 2 settimane di MenuChat.
+STRUTTURA DEL MESSAGGIO:
+1. Apri con qualcosa di specifico sui SUOI dati: "Ho visto che [nome] è [posizione]° per [keyword] a [città]..."
+2. Proponi la scommessa: "Ti offriamo 2 settimane di prova gratuita. Scommettiamo che in 2 settimane raccogli almeno ${estimatedIn2Weeks || 'X'} recensioni in più?"
+3. Se hai trovato un cliente simile con search_similar_clients, citalo brevemente come prova
+4. CTA: chiedi quando sentirvi per una chiamata veloce di 5 minuti${contact.phone ? `\n5. Conferma il numero: "Il tuo numero è ${contact.phone}? Ti chiamo io"` : '\n5. Chiedi il numero: "A che numero posso chiamarti?"'}
 
-Il messaggio NON deve sembrare una cold email generica. Deve sembrare che hai PERSONALMENTE guardato i suoi dati e ti stai facendo vivo perché hai visto qualcosa di interessante.`;
+COSA FARE:
+1. Usa "search_similar_clients" per trovare un esempio concreto nella sua zona
+2. Componi il messaggio seguendo la struttura sopra
+3. Invia via email (send_email_reply)
+4. NON mandare WhatsApp al primo contatto (serve template approvato)`;
 
   return prompt;
 };
