@@ -218,9 +218,10 @@ Ti va di sentirci 5 minuti? ${contact.phone ? `Il tuo numero è ${contact.phone}
 ${identity.name}"
 
 COSA FARE:
-1. Componi il messaggio ispirandoti all'esempio, personalizzandolo con i dati reali (posizione, competitor, rating, menu digitale si/no)
-2. Invia via email (send_email_reply)
-3. NON mandare WhatsApp`;
+1. PRIMA DI TUTTO usa "search_similar_clients" per trovare un cliente MenuChat simile nella sua zona — se lo trovi citalo nel messaggio con il link al menu
+2. Componi il messaggio ispirandoti all'esempio, personalizzandolo con i dati reali (posizione, competitor, rating, menu digitale si/no, cliente simile se trovato)
+3. Invia via email (send_email_reply)
+4. NON mandare WhatsApp`;
 };
 
 const extractCity = (contact) => {
