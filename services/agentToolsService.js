@@ -345,10 +345,20 @@ async function toolSendEmail({ message, subject }, ctx) {
 async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
   const conversation = ctx?.conversation;
 
-  if (is_first_contact) {
+  // Verifica se esiste una session window attiva (il lead ha scritto su WA di recente)
+  const hasActiveSession = conversation?.messages?.some(m =>
+    m.channel === 'whatsapp' && m.role === 'lead' &&
+    m.createdAt && (Date.now() - new Date(m.createdAt).getTime()) < 24 * 60 * 60 * 1000
+  );
+
+  if (!hasActiveSession) {
+    // Primo contatto o session scaduta: SERVE un template approvato
     const contentSid = process.env.TWILIO_AGENT_TEMPLATE_SID;
-    if (!contentSid) {
-      return { sent: false, note: 'Template WhatsApp per l\'agente non configurato (TWILIO_AGENT_TEMPLATE_SID). Usa email.' };
+    if (!contentSid || contentSid.startsWith('(')) {
+      return {
+        sent: false,
+        note: 'Non posso mandare WhatsApp: il lead non ha ancora scritto su WhatsApp (nessuna session window attiva) e il template non è configurato (TWILIO_AGENT_TEMPLATE_SID). Usa email come canale alternativo.'
+      };
     }
     const result = await sendWhatsAppTemplate(phone, contentSid, { '1': message.substring(0, 500) });
     if (result.success && conversation) {
@@ -358,6 +368,7 @@ async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
     return { sent: result.success, channel: 'whatsapp_template', messageSid: result.messageSid };
   }
 
+  // Session window attiva: messaggio libero
   const result = await sendWhatsAppMessage(phone, message);
   if (result.success && conversation) {
     conversation.addMessage('agent', message, 'whatsapp', { twilioMessageSid: result.messageSid });
