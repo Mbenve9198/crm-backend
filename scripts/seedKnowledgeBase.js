@@ -73,13 +73,12 @@ Il QR lo mandiamo stampato o il ristoratore lo stampa. Si mette sui tavoli e bas
   },
   {
     content: `Numeri reali di MenuChat:
-- Ogni 100 persone che aprono il menu, circa 10 lasciano la recensione su Google
-- Il 65% di chi clicca il link della recensione completa il processo
-- Un ristorante con 100 coperti al giorno può aspettarsi circa 250-300 recensioni al mese
+- Come numero generico: circa 100 recensioni al mese. Se non sai quanti coperti fa il ristorante, di' "circa 100 al mese"
+- Se conosci i coperti: calcola con il 5-7% di conversione. Esempio: 50 coperti/giorno = circa 65-90 recensioni/mese. 100 coperti/giorno = circa 100-120 recensioni/mese
+- I nostri migliori clienti raccolgono fino a 150 recensioni al mese — ma è il massimo, non la norma
 - In 2-3 mesi si possono guadagnare 5-10 posizioni su Google Maps
 - Il sistema funziona 7 giorni su 7, automaticamente, senza intervento del ristoratore
-
-Questi numeri sono conservativi — molti ristoranti fanno di più perché il messaggio arriva al momento giusto su WhatsApp, dove tutti lo leggono.`,
+- NON dire MAI "250-300 al mese" — è un numero irrealistico`,
     category: 'product', tags: ['numeri', 'risultati', 'conversione', 'recensioni', 'posizioni'], source: 'manual'
   },
 
@@ -119,7 +118,7 @@ Sì. Il QR code apre WhatsApp, che funziona con i dati mobili del telefono del c
   },
   {
     content: `FAQ "Quante recensioni posso aspettarmi?" — Risposta:
-Dipende da quanta gente entra nel locale. La regola è semplice: ogni 100 persone che aprono il menu, circa 10 lasciano la recensione su Google. Se fai 100 coperti al giorno, sono circa 250-300 recensioni al mese. Se ne fai 50, circa 120-150. Sono numeri enormi — la maggior parte dei ristoranti ne riceve 2-3 a settimana senza sistema.`,
+Dipende da quanta gente entra nel locale. Come numero generico diciamo circa 100 al mese. Se conosci i coperti, calcola con il 5-7%: 50 coperti al giorno fanno circa 65-90 recensioni al mese, 100 coperti circa 100-120. I nostri migliori clienti arrivano a 150 al mese. Senza un sistema come il nostro, la maggior parte dei ristoranti ne riceve 2-3 a settimana — con MenuChat il salto è enorme.`,
     category: 'faq', tags: ['quante_recensioni', 'stima', 'coperti', 'previsione'], source: 'manual'
   },
   {
@@ -148,7 +147,7 @@ Prima di mandarlo su Google, gli chiediamo come è andata. Se dà 4 o 5 stelle, 
 5. Setup in 10 minuti, lo facciamo noi
 6. Prova gratuita 2 settimane — se non funziona, cancelli
 7. Non è come chiedere le recensioni a voce (imbarazzante e non scalabile) — è automatico e naturale
-8. I numeri sono prevedibili: 10 recensioni ogni 100 persone che vedono il menu`,
+8. I numeri sono prevedibili: circa 100 recensioni al mese per un ristorante medio`,
     category: 'product', tags: ['vantaggi', 'vendita', 'punti_chiave', 'persuasione'], source: 'manual'
   }
 ];

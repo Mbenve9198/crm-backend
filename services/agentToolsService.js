@@ -201,7 +201,7 @@ async function toolResearchBusiness({ place_id, business_name, city }) {
     const response = await axios.get('https://serpapi.com/search.json', { params, timeout: 15000 });
     const data = response.data;
 
-    if (place_id && data.place_results) {
+    if (data.place_results) {
       const p = data.place_results;
       return {
         name: p.title,
@@ -210,11 +210,12 @@ async function toolResearchBusiness({ place_id, business_name, city }) {
         address: p.address,
         phone: p.phone,
         website: p.website,
-        type: p.type || p.types?.join(', '),
+        type: Array.isArray(p.type) ? p.type.join(', ') : (p.type || ''),
         hours: p.hours,
         price_range: p.price,
         description: p.description,
-        recent_reviews: (p.reviews_per_score ? Object.entries(p.reviews_per_score).map(([stars, count]) => `${stars} stelle: ${count}`) : []),
+        place_id: p.place_id,
+        reviews_breakdown: p.reviews_per_score || {},
         note: 'Dati aggiornati da Google Maps. Usali per personalizzare la risposta.'
       };
     }

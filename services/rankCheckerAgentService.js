@@ -176,12 +176,27 @@ CONTATTO:
   if (rc.dailyCovers) prompt += `\n- Coperti/giorno: ${rc.dailyCovers}`;
   if (rc.hasDigitalMenu !== undefined) prompt += `\n- Ha menu digitale: ${rc.hasDigitalMenu ? 'sì' : 'no'}`;
 
+  if (ranking.fullResults?.competitors?.length > 0) {
+    prompt += `\n- Competitor principali:`;
+    for (const c of ranking.fullResults.competitors.slice(0, 3)) {
+      prompt += `\n  - ${c.name}: posizione ${c.rank}, ${c.reviews || '?'} recensioni`;
+    }
+  }
+
   prompt += `\n\nCOSA DEVI FARE:
-1. Prima, usa "search_similar_clients" per trovare un ristorante simile nella sua zona che usa MenuChat
-2. Se hai il place_id o dati sufficienti, usa "research_business_serpapi" per avere info aggiornate sul ristorante
-3. Componi un messaggio email personalizzato basato sui DATI REALI che hai trovato (non inventare nulla)
-4. Invia via email (send_email_reply) E se ha il telefono, invia anche su WhatsApp (send_whatsapp)
-5. Il messaggio deve essere breve (max 150 parole), umano, e basato sui suoi dati di ranking
+1. Usa "search_similar_clients" per trovare un ristorante simile nella sua zona che usa MenuChat — ti serve come esempio concreto
+2. Componi un messaggio email PERSONALIZZATO usando i dati di ranking che hai qui sopra
+3. Il messaggio deve:
+   - Aprire citando un dato specifico del SUO ristorante (posizione, competitor, recensioni)
+   - Spiegare in 2 frasi come MenuChat risolve il problema (QR -> WhatsApp -> recensioni automatiche)
+   - Se hai trovato un cliente simile, citalo con i numeri reali
+   - Proporre una CHIAMATA AL CELLULARE veloce (5-10 minuti) per spiegargli come funziona
+   - Menzionare la prova gratuita 2 settimane
+   - Max 150 parole, tono da amico imprenditore
+4. Invia via email (send_email_reply) — per ora solo email, WhatsApp verrà dopo
+5. NON proporre MAI videochiamate o Google Meet — noi facciamo chiamate al cellulare
+
+OBIETTIVO FINALE: portare il lead a una chiamata veloce al telefono → poi prova gratuita 2 settimane di MenuChat.
 
 Il messaggio NON deve sembrare una cold email generica. Deve sembrare che hai PERSONALMENTE guardato i suoi dati e ti stai facendo vivo perché hai visto qualcosa di interessante.`;
 
