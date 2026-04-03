@@ -308,8 +308,8 @@ async function toolSendEmail({ message, subject }, ctx) {
   let result;
 
   if (isSmartlead) {
-    const { campaignId, leadId, lastMessageId } = conversation.context.smartleadData;
-    result = await replyToEmailThread(campaignId, leadId, htmlBody, lastMessageId);
+    const { campaignId, leadId } = conversation.context.smartleadData;
+    result = await replyToEmailThread(campaignId, leadId, htmlBody);
   } else {
     if (!resend) return { error: 'Resend non configurato' };
 

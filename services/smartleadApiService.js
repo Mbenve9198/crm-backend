@@ -157,23 +157,35 @@ export const fetchMessageHistory = async (campaignId, leadId) => {
 };
 
 /**
- * Risponde in-thread a un lead tramite Smartlead
- * POST /campaigns/{campaign_id}/reply-email-thread
+ * Risponde in-thread a un lead tramite Smartlead.
+ * Richiede email_stats_id (il campo stats_id dal message-history).
+ * Se non fornito, lo recupera automaticamente.
  */
-export const replyToEmailThread = async (campaignId, leadId, emailBody, replyMessageId) => {
+export const replyToEmailThread = async (campaignId, leadId, emailBody, emailStatsId) => {
   try {
-    if (!campaignId || !leadId || !emailBody) {
-      return { success: false, reason: 'Parametri mancanti' };
+    if (!campaignId || !emailBody) {
+      return { success: false, reason: 'Parametri mancanti (campaignId, emailBody)' };
+    }
+
+    if (!emailStatsId && leadId) {
+      const history = await fetchMessageHistory(campaignId, leadId);
+      if (history.length > 0) {
+        emailStatsId = history[0].stats_id;
+        console.log(`📋 email_stats_id recuperato dal message-history: ${emailStatsId}`);
+      }
+    }
+
+    if (!emailStatsId) {
+      return { success: false, reason: 'email_stats_id non trovato — il lead potrebbe non avere messaggi nella campagna' };
     }
 
     const body = {
-      lead_id: leadId,
+      email_stats_id: emailStatsId,
       email_body: emailBody,
-      reply_email_time: new Date().toISOString()
+      add_signature: true
     };
-    if (replyMessageId) body.reply_message_id = replyMessageId;
 
-    console.log(`📧 Smartlead API: reply-email-thread per lead ${leadId} in campagna ${campaignId}`);
+    console.log(`📧 Smartlead API: reply-email-thread (stats_id: ${emailStatsId})`);
 
     const response = await axios.post(
       buildUrl(`/campaigns/${campaignId}/reply-email-thread`),
