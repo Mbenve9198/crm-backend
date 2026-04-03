@@ -171,50 +171,56 @@ const buildOutreachPrompt = (contact, identity) => {
   const ranking = rc.ranking || {};
   const covers = rc.dailyCovers || 0;
   const estimatedIn2Weeks = covers > 0 ? Math.round(covers * 14 * 0.06) : null;
-
-  let prompt = `[ISTRUZIONE INTERNA - NON MOSTRARE AL LEAD]
-Questo è un PRIMO CONTATTO. Il ristoratore ha usato il nostro Rank Checker e ha visto i suoi dati. NON ha scritto a noi — sei TU che scrivi per primo. Devi sembrare una persona vera che ha guardato i suoi dati e si fa vivo.
-
-DATI DEL RISTORANTE:
-- Nome: ${contact.name}
-- Email: ${contact.email}
-- Telefono: ${contact.phone || 'non disponibile'}`;
-
-  if (rc.keyword) prompt += `\n- Keyword: "${rc.keyword}"`;
-  if (ranking.mainRank) prompt += `\n- Posizione su Google Maps: ${ranking.mainRank}°`;
-  if (covers) prompt += `\n- Coperti/giorno: ${covers}`;
-  if (estimatedIn2Weeks) prompt += `\n- STIMA RECENSIONI IN 2 SETTIMANE DI PROVA: ${estimatedIn2Weeks}`;
-  if (rc.hasDigitalMenu !== undefined) prompt += `\n- Ha menu digitale: ${rc.hasDigitalMenu ? 'sì' : 'no'}`;
-
+  const city = extractCity(contact);
   const restaurantData = rc.restaurantData || {};
-  if (restaurantData.rating) prompt += `\n- Rating Google: ${restaurantData.rating}`;
-  if (restaurantData.reviewCount) prompt += `\n- Recensioni attuali: ${restaurantData.reviewCount}`;
 
-  if (ranking.fullResults?.competitors?.length > 0) {
-    prompt += `\n- Competitor davanti a loro:`;
-    for (const c of ranking.fullResults.competitors.slice(0, 3)) {
-      prompt += `\n  - ${c.name}: posizione ${c.rank}, ${c.reviews || '?'} recensioni`;
-    }
+  let menuNote = '';
+  if (rc.hasDigitalMenu === true) {
+    menuNote = `Ha GIA un menu digitale — è a un passo dal sistema completo.`;
+  } else if (rc.hasDigitalMenu === false) {
+    menuNote = `NON ha menu digitale ma ha detto che lo metterebbe.`;
   }
 
-  prompt += `\n\nREGOLE ASSOLUTE PER IL PRIMO CONTATTO:
-- NON citare MAI il prezzo. Né 1.290€, né nessun altro numero. Il prezzo si discute DOPO la chiamata
-- NON spiegare nel dettaglio come funziona il sistema. Quello si fa nella chiamata
-- L'email deve essere BREVE (max 100 parole). I ristoratori non leggono email lunghe
+  let competitorInfo = '';
+  if (ranking.fullResults?.competitors?.length > 0) {
+    const comps = ranking.fullResults.competitors.slice(0, 2);
+    competitorInfo = comps.map(c => `${c.name}: pos ${c.rank}, ${c.reviews || '?'} rec`).join(' | ');
+  }
 
-STRUTTURA DEL MESSAGGIO:
-1. Apri con qualcosa di specifico sui SUOI dati: "Ho visto che [nome] è [posizione]° per [keyword] a [città]..."
-2. Proponi la scommessa: "Ti offriamo 2 settimane di prova gratuita. Scommettiamo che in 2 settimane raccogli almeno ${estimatedIn2Weeks || 'X'} recensioni in più?"
-3. Se hai trovato un cliente simile con search_similar_clients, citalo brevemente come prova
-4. CTA: chiedi quando sentirvi per una chiamata veloce di 5 minuti${contact.phone ? `\n5. Conferma il numero: "Il tuo numero è ${contact.phone}? Ti chiamo io"` : '\n5. Chiedi il numero: "A che numero posso chiamarti?"'}
+  return `[ISTRUZIONE INTERNA]
+PRIMO CONTATTO. Scrivi come una persona vera, come un messaggio veloce. NON come un AI.
+
+DATI:
+- ${contact.name} | ${city} | ${contact.email} | Tel: ${contact.phone || 'N/A'}
+- Keyword "${rc.keyword || '?'}" → posizione ${ranking.mainRank || '?'}°
+- Rating ${restaurantData.rating || '?'}/5 con ${restaurantData.reviewCount || '?'} recensioni
+- ${covers} coperti/giorno → stima 2 settimane prova: ${estimatedIn2Weeks || '?'} recensioni
+- Menu digitale: ${menuNote || 'info non disponibile'}
+- Competitor: ${competitorInfo || 'N/A'}
+
+REGOLE TASSATIVE:
+- MAI citare il prezzo
+- MAI spiegare come funziona il sistema (QR, WhatsApp, filtro etc) — si spiega nella chiamata
+- Max 80 parole
+- INIZIA con "Ciao, sono ${identity.name} di MenuChat!" e ringrazia per aver usato il Rank Checker
+- Firma solo col nome
+
+ESEMPIO (adattalo ai dati sopra, NON copiarlo identico, personalizza):
+
+"Ciao, sono ${identity.name} di MenuChat!
+
+Grazie per aver provato il nostro Rank Checker — ho dato un'occhiata ai tuoi dati.
+
+Abbiamo creato l'unico menu digitale al mondo che permette di raccogliere fino a 100 recensioni Google al mese, in automatico. Con i tuoi ${covers || '?'} coperti al giorno, scommettiamo che in sole 2 settimane di prova gratuita ne raccogli almeno ${estimatedIn2Weeks || '?'}.
+
+Ti va di sentirci 5 minuti? ${contact.phone ? `Il tuo numero è ${contact.phone} — ti chiamo io!` : 'A che numero posso chiamarti?'}
+
+${identity.name}"
 
 COSA FARE:
-1. Usa "search_similar_clients" per trovare un esempio concreto nella sua zona
-2. Componi il messaggio seguendo la struttura sopra
-3. Invia via email (send_email_reply)
-4. NON mandare WhatsApp al primo contatto (serve template approvato)`;
-
-  return prompt;
+1. Componi il messaggio ispirandoti all'esempio, personalizzandolo con i dati reali (posizione, competitor, rating, menu digitale si/no)
+2. Invia via email (send_email_reply)
+3. NON mandare WhatsApp`;
 };
 
 const extractCity = (contact) => {
