@@ -8,7 +8,7 @@ const knowledgeChunkSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: ['product', 'objection', 'case_study', 'pricing', 'competitor', 'faq', 'conversation_example'],
+    enum: ['product', 'objection', 'case_study', 'pricing', 'competitor', 'faq', 'conversation_example', 'learned_rule'],
     required: true,
     index: true
   },

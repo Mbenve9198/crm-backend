@@ -6,33 +6,55 @@ import KnowledgeChunk from '../models/knowledgeChunkModel.js';
 import agentLogger from './agentLogger.js';
 import { AGENT_TOOLS, executeTools } from './agentToolsService.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
+import { fetchMessageHistory, fetchLeadByEmail, stripHtml } from './smartleadApiService.js';
+import redisManager from '../config/redis.js';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const AGENT_MODEL = 'claude-opus-4-20250514';
+const AGENT_MODEL = 'claude-sonnet-4-20250514';
 const AGENT_TEMPERATURE = 0.35;
 const MAX_TOOL_ROUNDS = 5;
 
-const OPUS_INPUT_RATE = 5 / 1_000_000;
-const OPUS_OUTPUT_RATE = 25 / 1_000_000;
+const AGENT_INPUT_RATE = 3 / 1_000_000;
+const AGENT_OUTPUT_RATE = 15 / 1_000_000;
 
-// Lock per-conversation per evitare esecuzioni parallele sullo stesso contatto
-const conversationLocks = new Map();
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+const conversationLocksInMemory = new Map();
 
-const acquireLock = (contactId) => {
-  const key = contactId.toString();
+const acquireLock = async (contactId) => {
+  const key = `agent_lock:${contactId.toString()}`;
+
+  if (redisManager.isAvailable()) {
+    try {
+      const result = await redisManager.getClient().set(key, Date.now(), 'PX', LOCK_TIMEOUT_MS, 'NX');
+      return result === 'OK';
+    } catch {
+      // fallback in-memory
+    }
+  }
+
   const now = Date.now();
-  const existing = conversationLocks.get(key);
+  const existing = conversationLocksInMemory.get(key);
   if (existing && now - existing < LOCK_TIMEOUT_MS) {
     return false;
   }
-  conversationLocks.set(key, now);
+  conversationLocksInMemory.set(key, now);
   return true;
 };
 
-const releaseLock = (contactId) => {
-  conversationLocks.delete(contactId.toString());
+const releaseLock = async (contactId) => {
+  const key = `agent_lock:${contactId.toString()}`;
+
+  if (redisManager.isAvailable()) {
+    try {
+      await redisManager.getClient().del(key);
+      return;
+    } catch {
+      // fallback in-memory
+    }
+  }
+
+  conversationLocksInMemory.delete(key);
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -270,8 +292,35 @@ const inferStage = (conversation, toolsUsed) => {
   return conversation.stage || 'initial_reply';
 };
 
+const extractInsightsWithLLM = async (leadMessage) => {
+  try {
+    const insightClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await insightClient.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 300,
+      messages: [{ role: 'user', content: `Analizza questo messaggio di un ristoratore italiano che risponde a una proposta commerciale. Estrai obiezioni e pain point.
+
+MESSAGGIO: "${leadMessage}"
+
+Rispondi SOLO con JSON valido:
+{"objections":["etichetta_obiezione"],"painPoints":["etichetta_pain_point"]}
+
+Etichette obiezioni valide: no_tempo, mandami_mail, prezzo, ha_gia_fornitore, non_interessa, bad_timing, troppo_caro, no_bisogno, esperienza_negativa_competitor, non_capisce_valore
+Etichette pain point valide: poche_recensioni, competitor_visibili, no_menu_digitale, bassa_visibilita, recensioni_negative, calo_clienti, gestione_manuale, reputazione_online, difficolta_marketing
+Se non ci sono obiezioni o pain point, usa array vuoti.` }]
+    });
+    const parsed = JSON.parse(response.content[0].text.match(/\{[\s\S]*\}/)?.[0] || '{}');
+    return {
+      objections: Array.isArray(parsed.objections) ? parsed.objections : [],
+      painPoints: Array.isArray(parsed.painPoints) ? parsed.painPoints : []
+    };
+  } catch {
+    return extractInsightsFromMessage(leadMessage);
+  }
+};
+
 const updateConversationInsights = async (conversation, leadMessage, toolsUsed) => {
-  const { objections, painPoints } = extractInsightsFromMessage(leadMessage);
+  const { objections, painPoints } = await extractInsightsWithLLM(leadMessage);
 
   let changed = false;
 
@@ -299,6 +348,28 @@ const updateConversationInsights = async (conversation, leadMessage, toolsUsed) 
   if (newStage !== conversation.stage) {
     conversation.stage = newStage;
     changed = true;
+  }
+
+  // Auto-generazione conversationSummary quando i messaggi superano 8
+  const msgCount = conversation.messages?.length || 0;
+  if (msgCount > 8 && (!conversation.context.conversationSummary || msgCount % 4 === 0)) {
+    try {
+      const summaryClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+      const allMsgs = conversation.messages.map(m =>
+        `[${m.role.toUpperCase()}]: ${m.content?.substring(0, 300)}`
+      ).join('\n');
+
+      const summaryResponse = await summaryClient.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: `Riassumi in max 200 parole questa conversazione di vendita tra un agente MenuChat e un ristoratore. Includi: chi è il lead, cosa ha detto, quali obiezioni ha fatto, quali pain point ha espresso, a che punto siamo. Rispondi in italiano.\n\n${allMsgs}` }]
+      });
+
+      conversation.context.conversationSummary = summaryResponse.content[0].text;
+      changed = true;
+    } catch {
+      // non bloccante
+    }
   }
 
   if (changed) {
@@ -386,6 +457,30 @@ export const runAgentLoop = async (conversation, leadMessage) => {
     }
   }
 
+  // Storico email SmartLead: carica le email gia inviate al lead per dare contesto
+  const slData = conversation.context?.smartleadData;
+  if (slData?.campaignId && slData?.leadId) {
+    try {
+      const slHistory = await fetchMessageHistory(slData.campaignId, slData.leadId);
+      if (slHistory && slHistory.length > 0) {
+        contextBlock += `\n\nEMAIL GIA INVIATE AL LEAD (storico SmartLead, ${slHistory.length} messaggi):`;
+        for (const msg of slHistory.slice(-5)) {
+          const type = msg.type === 'SENT' ? 'NOI' : 'LEAD';
+          const body = stripHtml(msg.email_body || '').substring(0, 400);
+          contextBlock += `\n[${type}] Oggetto: ${msg.subject || 'N/A'}\n${body}\n---`;
+        }
+        contextBlock += `\n- Numero sequenza: email #${slHistory.filter(m => m.type === 'SENT').length} inviata`;
+      }
+
+      const slLead = await fetchLeadByEmail(contact?.email);
+      if (slLead?.lead_campaign_data?.[0]?.last_email_sequence_sent) {
+        contextBlock += `\n- Il lead sta rispondendo alla sequenza #${slLead.lead_campaign_data[0].last_email_sequence_sent}`;
+      }
+    } catch {
+      // non bloccante
+    }
+  }
+
   contextBlock += `\n\nFASE CONVERSAZIONE: ${conversation.stage || 'initial_reply'}`;
   contextBlock += `\n- Messaggi scambiati: ${conversation.messages?.length || 0}`;
 
@@ -394,6 +489,29 @@ export const runAgentLoop = async (conversation, leadMessage) => {
   }
   if (conversation.context?.painPoints?.length > 0) {
     contextBlock += `\nPAIN POINTS RILEVATI: ${conversation.context.painPoints.join(', ')}`;
+  }
+
+  // Conversation summary per conversazioni lunghe
+  if (conversation.context?.conversationSummary) {
+    contextBlock += `\n\nRIASSUNTO CONVERSAZIONE PRECEDENTE:\n${conversation.context.conversationSummary}`;
+  }
+
+  // Regole apprese dal feedback umano
+  try {
+    const learnedRules = await KnowledgeChunk.find({
+      category: 'learned_rule',
+      isActive: true,
+      effectiveness: { $gte: 0.5 }
+    }).sort({ effectiveness: -1 }).limit(10);
+
+    if (learnedRules.length > 0) {
+      contextBlock += '\n\nREGOLE APPRESE DA FEEDBACK UMANO (segui SEMPRE):';
+      for (const rule of learnedRules) {
+        contextBlock += `\n- ${rule.content}`;
+      }
+    }
+  } catch {
+    // non bloccante
   }
 
   // Knowledge base: inietta chunk rilevanti in base al messaggio del lead
@@ -433,7 +551,7 @@ export const runAgentLoop = async (conversation, leadMessage) => {
         model: AGENT_MODEL,
         inputTokens,
         outputTokens,
-        costUsd: (inputTokens * OPUS_INPUT_RATE) + (outputTokens * OPUS_OUTPUT_RATE),
+        costUsd: (inputTokens * AGENT_INPUT_RATE) + (outputTokens * AGENT_OUTPUT_RATE),
         durationMs: llmDuration
       }
     }).catch(() => {});
@@ -526,7 +644,7 @@ export const handleAgentConversation = async ({
   fromEmail,
   webhookBasic
 }) => {
-  if (!acquireLock(contact._id)) {
+  if (!(await acquireLock(contact._id))) {
     agentLogger.warn('conversation_locked', { contactEmail: contact.email, data: 'Agente già in esecuzione per questo contatto, skip' });
     return { action: 'locked', conversation: null };
   }
@@ -600,11 +718,44 @@ export const handleAgentConversation = async ({
     }
 
     const hasSentMessage = agentResult.toolsUsed.some(t =>
-      t.name === 'send_email_reply' || t.name === 'send_whatsapp'
+      (t.name === 'send_email_reply' || t.name === 'send_whatsapp') && t.result?.sent === true
+    );
+    const hasDraftedMessage = agentResult.toolsUsed.some(t =>
+      (t.name === 'send_email_reply' || t.name === 'send_whatsapp') && t.result?.draft === true
     );
     const hasRequestedHelp = agentResult.toolsUsed.some(t => t.name === 'request_human_help');
     const hasScheduledFollowup = agentResult.toolsUsed.some(t => t.name === 'schedule_followup');
     const hasBookedCallback = agentResult.toolsUsed.some(t => t.name === 'book_callback');
+
+    if (hasDraftedMessage) {
+      agentLogger.info('draft_saved', { conversationId: conversation._id, contactEmail: contact.email });
+      const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
+
+      const { generateSignedActionUrl } = await import('./signedUrlService.js');
+      const { sendAgentHumanReviewEmail } = await import('./emailNotificationService.js');
+      const frontendUrl = process.env.FRONTEND_URL || 'https://crm-frontend-pied-sigma.vercel.app';
+      await sendAgentHumanReviewEmail({
+        restaurantName: conversation.context?.restaurantData?.name || contact.name,
+        city: conversation.context?.restaurantData?.city || '',
+        rank: conversation.context?.restaurantData?.rank,
+        keyword: conversation.context?.restaurantData?.keyword,
+        rating: conversation.context?.restaurantData?.rating,
+        reviewsCount: conversation.context?.restaurantData?.reviewsCount,
+        leadMessage: replyText,
+        draftReply: agentMsg?.content,
+        reason: 'Bozza generata dall\'agente — in attesa di approvazione',
+        conversationId: conversation._id,
+        contactEmail: contact.email,
+        msgCount: conversation.metrics?.messagesCount || 0,
+        objections: conversation.context?.objections || [],
+        approveLink: generateSignedActionUrl(conversation._id, 'approve'),
+        modifyLink: `${frontendUrl}/agent/review?id=${conversation._id}`,
+        discardLink: generateSignedActionUrl(conversation._id, 'discard')
+      }).catch(() => {});
+
+      sendAgentActivityReport({ action: 'awaiting_human', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
+      return { action: 'awaiting_human', conversation, draftReply: agentMsg?.content };
+    }
 
     if (hasRequestedHelp) {
       const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
@@ -666,7 +817,7 @@ export const handleAgentConversation = async ({
 
     return { action: 'error', conversation, error: error.message };
   } finally {
-    releaseLock(contact._id);
+    await releaseLock(contact._id);
   }
 };
 

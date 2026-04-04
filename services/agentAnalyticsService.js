@@ -3,6 +3,7 @@ import Conversation from '../models/conversationModel.js';
 import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import KnowledgeChunk from '../models/knowledgeChunkModel.js';
 import AgentLog from '../models/agentLogModel.js';
+import AgentFeedback from '../models/agentFeedbackModel.js';
 import { sendAgentHumanReviewEmail } from './emailNotificationService.js';
 import agentLogger from './agentLogger.js';
 
@@ -37,6 +38,23 @@ export const closeConversation = async (conversationId, outcome, humanFeedback =
   });
 
   await outcomeDoc.save();
+
+  // Aggiorna effectiveness dei knowledge chunks usati in questa conversazione
+  const wasSuccessful = ['converted', 'call_booked'].includes(outcome);
+  const feedbacks = await AgentFeedback.find({ conversation: conversationId }).lean();
+  const approvedFeedbacks = feedbacks.filter(f => f.action === 'approved');
+
+  if (feedbacks.length > 0) {
+    const chunks = await KnowledgeChunk.find({
+      isActive: true,
+      lastUsed: { $gte: new Date(conversation.createdAt) }
+    });
+
+    for (const chunk of chunks) {
+      await updateChunkEffectiveness(chunk._id, wasSuccessful && approvedFeedbacks.length > 0);
+    }
+  }
+
   return outcomeDoc;
 };
 
@@ -189,11 +207,91 @@ Formato: testo strutturato, conciso, orientato all'azione. Max 1500 parole.`;
         await sendWeeklyAnalysisReport({ summary, analysis: analysisText, dropOffs: dropOffData.length, objectionCounts });
       }
     } catch {
-      // sendWeeklyAnalysisReport potrebbe non esistere ancora
       console.log('ℹ️ sendWeeklyAnalysisReport non disponibile, report solo su log');
     }
 
-    return { summary, analysis: analysisText, sampleCount: conversationSamples.length, dropOffs: dropOffData.length };
+    // Analisi feedback umano per apprendimento
+    let feedbackAnalysisResult = null;
+    try {
+      const feedbacks = await AgentFeedback.find({ createdAt: { $gte: oneWeekAgo } }).lean();
+
+      if (feedbacks.length >= 3) {
+        const fbStats = {
+          total: feedbacks.length,
+          approved: feedbacks.filter(f => f.action === 'approved').length,
+          modified: feedbacks.filter(f => f.action === 'modified').length,
+          discarded: feedbacks.filter(f => f.action === 'discarded').length
+        };
+        fbStats.approvalRate = ((fbStats.approved / fbStats.total) * 100).toFixed(1);
+
+        const discardReasons = {};
+        for (const f of feedbacks.filter(fb => fb.action === 'discarded')) {
+          discardReasons[f.discardReason || 'other'] = (discardReasons[f.discardReason || 'other'] || 0) + 1;
+        }
+
+        const modificationSamples = feedbacks
+          .filter(f => f.action === 'modified' && f.agentDraft && f.finalSent)
+          .slice(0, 5)
+          .map(f => ({
+            agentWrote: f.agentDraft.substring(0, 300),
+            humanChanged: f.finalSent.substring(0, 300),
+            stage: f.conversationContext?.stage,
+            source: f.conversationContext?.source
+          }));
+
+        const feedbackAnalysis = await client.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2000,
+          messages: [{ role: 'user', content: `Analizza questi feedback umani sulle risposte dell'AI Sales Agent di MenuChat.
+
+STATISTICHE:
+- Tasso di approvazione: ${fbStats.approvalRate}%
+- Approvati senza modifiche: ${fbStats.approved}
+- Modificati: ${fbStats.modified}
+- Scartati: ${fbStats.discarded}
+- Motivi scarto: ${JSON.stringify(discardReasons)}
+
+CAMPIONE MODIFICHE (cosa l'agente ha scritto vs cosa l'umano ha cambiato):
+${JSON.stringify(modificationSamples, null, 2)}
+
+Rispondi in italiano con JSON valido:
+{
+  "patterns": ["pattern errore 1", "pattern errore 2"],
+  "rules": ["SEMPRE fai X quando Y", "MAI fare X quando Y"],
+  "goldenExamples": ["esempio messaggio efficace approvato senza modifiche"]
+}` }]
+        });
+
+        try {
+          const parsed = JSON.parse(feedbackAnalysis.content[0].text.match(/\{[\s\S]*\}/)?.[0] || '{}');
+          feedbackAnalysisResult = parsed;
+
+          if (parsed.rules && parsed.rules.length > 0) {
+            for (const rule of parsed.rules) {
+              const existing = await KnowledgeChunk.findOne({ category: 'learned_rule', content: rule });
+              if (!existing) {
+                await KnowledgeChunk.create({
+                  content: rule,
+                  category: 'learned_rule',
+                  tags: ['feedback', 'auto-learned'],
+                  source: 'feedback',
+                  effectiveness: 0.7
+                });
+              }
+            }
+            agentLogger.info('learned_rules_created', { data: { count: parsed.rules.length, rules: parsed.rules } });
+          }
+        } catch {
+          agentLogger.warn('feedback_analysis_parse_error', { data: feedbackAnalysis.content[0].text.substring(0, 500) });
+        }
+
+        agentLogger.info('feedback_analysis_completed', { data: { fbStats, feedbackAnalysisResult } });
+      }
+    } catch (fbErr) {
+      agentLogger.warn('feedback_analysis_error', { data: fbErr.message });
+    }
+
+    return { summary, analysis: analysisText, sampleCount: conversationSamples.length, dropOffs: dropOffData.length, feedbackAnalysis: feedbackAnalysisResult };
   } catch (error) {
     agentLogger.error('weekly_analysis_error', { data: error.message });
     return { summary, analysis: null, error: error.message };

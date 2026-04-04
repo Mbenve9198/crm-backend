@@ -321,6 +321,23 @@ async function toolSendEmail({ message, subject }, ctx) {
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { error: 'Contatto non trovato' };
 
+  if (process.env.AGENT_APPROVAL_MODE === 'true') {
+    conversation.addMessage('agent', message, 'email', {
+      wasAutoSent: false,
+      isDraft: true,
+      draftSubject: subject
+    });
+    conversation.status = 'awaiting_human';
+    conversation.markModified('context');
+    await conversation.save();
+    return {
+      sent: false,
+      draft: true,
+      channel: 'email',
+      note: 'Messaggio salvato come bozza. In attesa di approvazione umana.'
+    };
+  }
+
   const htmlBody = message.split('\n').map(line => line.trim() ? `<p>${line}</p>` : '<br>').join('');
 
   const isSmartlead = conversation.context?.leadSource === 'smartlead_outbound' &&
@@ -365,7 +382,23 @@ async function toolSendEmail({ message, subject }, ctx) {
 async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
   const conversation = ctx?.conversation;
 
-  // Verifica se esiste una session window attiva (il lead ha scritto su WA di recente)
+  if (process.env.AGENT_APPROVAL_MODE === 'true' && conversation) {
+    conversation.addMessage('agent', message, 'whatsapp', {
+      wasAutoSent: false,
+      isDraft: true,
+      draftPhone: phone
+    });
+    conversation.status = 'awaiting_human';
+    conversation.markModified('context');
+    await conversation.save();
+    return {
+      sent: false,
+      draft: true,
+      channel: 'whatsapp',
+      note: 'Messaggio WhatsApp salvato come bozza. In attesa di approvazione umana.'
+    };
+  }
+
   const hasActiveSession = conversation?.messages?.some(m =>
     m.channel === 'whatsapp' && m.role === 'lead' &&
     m.createdAt && (Date.now() - new Date(m.createdAt).getTime()) < 24 * 60 * 60 * 1000
@@ -415,6 +448,7 @@ async function toolRequestHumanHelp({ reason, draft_reply, urgency }, ctx) {
   const contact = await Contact.findById(conversation.contact).lean();
   const frontendUrl = process.env.FRONTEND_URL || 'https://crm-frontend-pied-sigma.vercel.app';
 
+  const { generateSignedActionUrl } = await import('./signedUrlService.js');
   const { sendAgentHumanReviewEmail } = await import('./emailNotificationService.js');
   await sendAgentHumanReviewEmail({
     restaurantName: conversation.context?.restaurantData?.name || contact?.name,
@@ -430,9 +464,9 @@ async function toolRequestHumanHelp({ reason, draft_reply, urgency }, ctx) {
     contactEmail: contact?.email,
     msgCount: conversation.metrics?.messagesCount || 0,
     objections: conversation.context?.objections || [],
-    approveLink: `${frontendUrl}/agent/review?id=${conversation._id}`,
+    approveLink: generateSignedActionUrl(conversation._id, 'approve'),
     modifyLink: `${frontendUrl}/agent/review?id=${conversation._id}`,
-    discardLink: `${frontendUrl}/agent/review?id=${conversation._id}`
+    discardLink: generateSignedActionUrl(conversation._id, 'discard')
   });
 
   return { status: 'awaiting_human', reason, note: 'Marco riceverà una notifica e vedrà la richiesta nel CRM.' };

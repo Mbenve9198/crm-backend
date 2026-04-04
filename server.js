@@ -317,6 +317,77 @@ app.get('/health', async (req, res) => {
 // Webhook per lead inbound da MenuChat - PUBBLICO
 app.use('/api/inbound', inboundLeadRoutes);
 
+// Endpoint pubblico per approvazione bozze agente via email (URL firmati HMAC)
+import { verifySignedUrl, renderHtmlPage, buildFeedbackContext, getISOWeek } from './services/signedUrlService.js';
+import AgentFeedback from './models/agentFeedbackModel.js';
+import { approveAndSend, discardReply } from './services/salesAgentService.js';
+
+app.get('/api/agent/email-action', async (req, res) => {
+  try {
+    const { id, action, exp, token } = req.query;
+
+    if (!id || !action || !exp || !token || !verifySignedUrl(id, action, exp, token)) {
+      return res.status(403).send(renderHtmlPage(
+        'Link scaduto o non valido',
+        'Questo link non è valido o è scaduto. Apri la conversazione nel CRM.',
+        '#ef4444'
+      ));
+    }
+
+    const conversation = await Conversation.findById(id);
+    if (!conversation || conversation.status !== 'awaiting_human') {
+      return res.status(404).send(renderHtmlPage(
+        'Già gestita',
+        'Questa conversazione è già stata gestita o non esiste più.',
+        '#f59e0b'
+      ));
+    }
+
+    const agentDraft = conversation.messages.filter(m => m.role === 'agent').pop()?.content;
+
+    if (action === 'approve') {
+      await approveAndSend(id);
+      await AgentFeedback.create({
+        conversation: id,
+        contact: conversation.contact,
+        agentDraft: agentDraft || '',
+        finalSent: agentDraft,
+        action: 'approved',
+        conversationContext: buildFeedbackContext(conversation),
+        weekNumber: getISOWeek(new Date())
+      });
+      return res.send(renderHtmlPage(
+        'Messaggio inviato!',
+        'La risposta dell\'agente è stata approvata e inviata al lead.',
+        '#10b981'
+      ));
+    }
+
+    if (action === 'discard') {
+      await discardReply(id);
+      await AgentFeedback.create({
+        conversation: id,
+        contact: conversation.contact,
+        agentDraft: agentDraft || '',
+        action: 'discarded',
+        discardReason: 'email_quick_discard',
+        conversationContext: buildFeedbackContext(conversation),
+        weekNumber: getISOWeek(new Date())
+      });
+      return res.send(renderHtmlPage(
+        'Bozza scartata',
+        'La bozza è stata scartata. La conversazione è in pausa.',
+        '#ef4444'
+      ));
+    }
+
+    return res.status(400).send(renderHtmlPage('Errore', 'Azione non riconosciuta.', '#6b7280'));
+  } catch (error) {
+    console.error('❌ Errore email-action:', error);
+    return res.status(500).send(renderHtmlPage('Errore', 'Si è verificato un errore. Riprova dal CRM.', '#ef4444'));
+  }
+});
+
 // Webhook Twilio per stato chiamate - DEVE essere pubblico
 app.post('/api/calls/status-callback', statusCallback);
 app.get('/api/calls/status-callback', (req, res) => {
@@ -501,7 +572,24 @@ setTimeout(() => {
           conv.status = 'active';
           await conv.save();
           const note = conv.context?.nextAction || 'Follow-up programmato';
-          await runAgentLoop(conv, `[ISTRUZIONE INTERNA] È il momento del follow-up programmato. Nota: "${note}". Ricontatta il lead in modo naturale, come se ti fossi ricordato di loro.`);
+          const painPoints = conv.context?.painPoints?.length > 0
+            ? `\nPain point emersi in precedenza: ${conv.context.painPoints.join(', ')}.`
+            : '';
+          const objections = conv.context?.objections?.length > 0
+            ? `\nObiezioni passate: ${conv.context.objections.join(', ')}.`
+            : '';
+          const summary = conv.context?.conversationSummary
+            ? `\nRiassunto conversazione precedente: ${conv.context.conversationSummary}`
+            : '';
+          await runAgentLoop(conv, `[ISTRUZIONE INTERNA] È il momento del follow-up programmato. Nota: "${note}".${summary}${painPoints}${objections}
+
+REGOLE FOLLOW-UP:
+- Porta VALORE NUOVO: usa "search_similar_clients" per trovare un caso studio diverso da quello già citato, oppure "get_ranking_for_keyword" per dati aggiornati sulla posizione del lead
+- NON ripetere le stesse informazioni del messaggio precedente
+- Se il lead aveva obiezioni, affronta quella principale con un angolo diverso
+- Se il lead era tiepido, condividi un dato concreto (es. risultati di un cliente simile)
+- Chiudi sempre con una domanda o una proposta di sentirvi al telefono
+- Sii breve e naturale, come se ti fossi ricordato di loro`);
         } catch (err) {
           console.error(`❌ Follow-up fallito per conv ${conv._id}:`, err.message);
         }
@@ -510,6 +598,31 @@ setTimeout(() => {
       console.error('❌ Follow-up job error:', err.message);
     }
   }, 15 * 60 * 1000);
+
+  // Auto-close stale conversations job (ogni 6 ore)
+  setInterval(async () => {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const staleConversations = await Conversation.find({
+        status: { $in: ['active', 'paused'] },
+        updatedAt: { $lte: sevenDaysAgo }
+      });
+
+      if (staleConversations.length === 0) return;
+      console.log(`🗑️ Auto-close: ${staleConversations.length} conversazioni stale (>7gg)`);
+
+      const { closeConversation } = await import('./services/agentAnalyticsService.js');
+      for (const conv of staleConversations) {
+        try {
+          await closeConversation(conv._id, 'stale');
+        } catch (err) {
+          console.error(`❌ Auto-close fallito per ${conv._id}:`, err.message);
+        }
+      }
+    } catch (err) {
+      console.error('❌ Auto-close job error:', err.message);
+    }
+  }, 6 * 60 * 60 * 1000);
 
   // Weekly analysis job: ogni lunedì alle 8:00 Rome, analizza le performance dell'agente
   const scheduleWeeklyAnalysis = () => {

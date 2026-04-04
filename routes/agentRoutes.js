@@ -3,7 +3,9 @@ import Conversation from '../models/conversationModel.js';
 import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import AgentMetric from '../models/agentMetricModel.js';
 import AgentLog from '../models/agentLogModel.js';
+import AgentFeedback from '../models/agentFeedbackModel.js';
 import { approveAndSend, discardReply } from '../services/salesAgentService.js';
+import { buildFeedbackContext, getISOWeek } from '../services/signedUrlService.js';
 import { protect } from '../controllers/authController.js';
 
 const router = express.Router();
@@ -61,8 +63,30 @@ router.get('/conversations/:id', async (req, res) => {
 router.post('/conversations/:id/approve', async (req, res) => {
   try {
     const { modifiedContent } = req.body;
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation) return res.status(404).json({ success: false, error: 'Non trovata' });
+
+    const agentDraft = conversation.messages
+      .filter(m => m.role === 'agent' && !m.metadata?.wasAutoSent)
+      .pop()?.content || '';
+
+    const isModified = modifiedContent && modifiedContent !== agentDraft;
+    const action = isModified ? 'modified' : 'approved';
+
     const result = await approveAndSend(req.params.id, modifiedContent || null);
-    res.json(result);
+
+    await AgentFeedback.create({
+      conversation: conversation._id,
+      contact: conversation.contact,
+      agentDraft,
+      finalSent: modifiedContent || agentDraft,
+      action,
+      conversationContext: buildFeedbackContext(conversation),
+      reviewedBy: req.user?._id,
+      weekNumber: getISOWeek(new Date())
+    }).catch(() => {});
+
+    res.json({ ...result, feedbackAction: action });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -74,8 +98,29 @@ router.post('/conversations/:id/approve', async (req, res) => {
  */
 router.post('/conversations/:id/discard', async (req, res) => {
   try {
+    const { discardReason, discardNotes } = req.body;
+    const conversation = await Conversation.findById(req.params.id);
+    if (!conversation) return res.status(404).json({ success: false, error: 'Non trovata' });
+
+    const agentDraft = conversation.messages
+      .filter(m => m.role === 'agent')
+      .pop()?.content || '';
+
     const result = await discardReply(req.params.id);
-    res.json(result);
+
+    await AgentFeedback.create({
+      conversation: conversation._id,
+      contact: conversation.contact,
+      agentDraft,
+      action: 'discarded',
+      discardReason: discardReason || 'other',
+      discardNotes,
+      conversationContext: buildFeedbackContext(conversation),
+      reviewedBy: req.user?._id,
+      weekNumber: getISOWeek(new Date())
+    }).catch(() => {});
+
+    res.json({ ...result, feedbackAction: 'discarded' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -217,6 +262,66 @@ router.get('/logs', async (req, res) => {
 
     const total = await AgentLog.countDocuments(filter);
     res.json({ success: true, data: logs, total });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/agent/feedback-stats
+ * Statistiche feedback umano per monitorare il miglioramento dell'agente
+ */
+router.get('/feedback-stats', async (req, res) => {
+  try {
+    const { weeks = 4 } = req.query;
+    const startDate = new Date(Date.now() - parseInt(weeks) * 7 * 24 * 60 * 60 * 1000);
+
+    const feedbacks = await AgentFeedback.find({ createdAt: { $gte: startDate } })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const total = feedbacks.length;
+    const approved = feedbacks.filter(f => f.action === 'approved').length;
+    const modified = feedbacks.filter(f => f.action === 'modified').length;
+    const discarded = feedbacks.filter(f => f.action === 'discarded').length;
+
+    const byWeek = {};
+    for (const f of feedbacks) {
+      const wk = f.weekNumber || 0;
+      if (!byWeek[wk]) byWeek[wk] = { approved: 0, modified: 0, discarded: 0, total: 0 };
+      byWeek[wk][f.action]++;
+      byWeek[wk].total++;
+    }
+    for (const wk of Object.keys(byWeek)) {
+      byWeek[wk].approvalRate = byWeek[wk].total > 0
+        ? ((byWeek[wk].approved / byWeek[wk].total) * 100).toFixed(1)
+        : '0';
+    }
+
+    const discardReasons = {};
+    for (const f of feedbacks.filter(fb => fb.action === 'discarded')) {
+      const reason = f.discardReason || 'other';
+      discardReasons[reason] = (discardReasons[reason] || 0) + 1;
+    }
+
+    const bySource = {};
+    for (const f of feedbacks) {
+      const src = f.conversationContext?.source || 'unknown';
+      if (!bySource[src]) bySource[src] = { approved: 0, modified: 0, discarded: 0, total: 0 };
+      bySource[src][f.action]++;
+      bySource[src].total++;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        total, approved, modified, discarded,
+        approvalRate: total > 0 ? ((approved / total) * 100).toFixed(1) : '0',
+        byWeek,
+        bySource,
+        discardReasons
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

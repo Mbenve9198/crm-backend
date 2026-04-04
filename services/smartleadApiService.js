@@ -170,8 +170,8 @@ export const replyToEmailThread = async (campaignId, leadId, emailBody, emailSta
     if (!emailStatsId && leadId) {
       const history = await fetchMessageHistory(campaignId, leadId);
       if (history.length > 0) {
-        emailStatsId = history[0].stats_id;
-        console.log(`📋 email_stats_id recuperato dal message-history: ${emailStatsId}`);
+        emailStatsId = history[history.length - 1].stats_id;
+        console.log(`📋 email_stats_id recuperato dal message-history (ultimo): ${emailStatsId}`);
       }
     }
 

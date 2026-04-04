@@ -102,7 +102,7 @@ const conversationSchema = new mongoose.Schema({
 
   outcome: {
     type: String,
-    enum: ['sql', 'call_booked', 'nurture', 'lost', 'dnc', null],
+    enum: ['sql', 'call_booked', 'nurture', 'lost', 'dnc', 'stale', null],
     default: null
   },
 
