@@ -6,6 +6,9 @@ import { handleAgentConversation, routeLeadReply } from '../services/salesAgentS
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
 import agentLogger from '../services/agentLogger.js';
 
+const processedResendIds = new Map();
+const RESEND_DEDUP_TTL_MS = 10 * 60 * 1000;
+
 /**
  * POST /api/inbound/resend-webhook
  * Riceve email in arrivo da Resend Inbound.
@@ -21,6 +24,21 @@ export const handleResendInbound = async (req, res) => {
 
     const eventData = payload.data || payload;
     const emailId = eventData.email_id;
+
+    // Idempotency: skip se già processato
+    if (emailId) {
+      const now = Date.now();
+      if (processedResendIds.size > 300) {
+        for (const [k, ts] of processedResendIds) {
+          if (now - ts > RESEND_DEDUP_TTL_MS) processedResendIds.delete(k);
+        }
+      }
+      if (processedResendIds.has(emailId) && now - processedResendIds.get(emailId) < RESEND_DEDUP_TTL_MS) {
+        agentLogger.info('resend_duplicate_skipped', { data: emailId });
+        return res.status(200).json({ success: true, message: 'duplicate_skipped' });
+      }
+      processedResendIds.set(emailId, now);
+    }
     const from = eventData.from || '';
     const toRaw = eventData.to || [];
     const toAddress = Array.isArray(toRaw) ? toRaw[0] : toRaw;

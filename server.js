@@ -475,7 +475,7 @@ app.use('/api/session-monitor', sessionMonitorRoutes);
 import agentRoutes from './routes/agentRoutes.js';
 app.use('/api/agent', agentRoutes);
 
-// Rank Checker Outreach Job + Follow-up Job (avvia dopo il boot del server)
+// Rank Checker Outreach Job + Follow-up Job + Weekly Analysis (avvia dopo il boot del server)
 import { startRankCheckerOutreachJob } from './services/rankCheckerAgentService.js';
 import Conversation from './models/conversationModel.js';
 
@@ -510,6 +510,40 @@ setTimeout(() => {
       console.error('❌ Follow-up job error:', err.message);
     }
   }, 15 * 60 * 1000);
+
+  // Weekly analysis job: ogni lunedì alle 8:00 Rome, analizza le performance dell'agente
+  const scheduleWeeklyAnalysis = () => {
+    const now = new Date();
+    const romeNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
+    const dayOfWeek = romeNow.getDay();
+    const hour = romeNow.getHours();
+
+    let daysUntilMonday = (1 - dayOfWeek + 7) % 7;
+    if (daysUntilMonday === 0 && hour >= 8) daysUntilMonday = 7;
+
+    const nextRun = new Date(romeNow);
+    nextRun.setDate(nextRun.getDate() + daysUntilMonday);
+    nextRun.setHours(8, 0, 0, 0);
+
+    const msUntilNextRun = nextRun.getTime() - romeNow.getTime();
+
+    console.log(`📊 Weekly analysis schedulata: prossima esecuzione tra ${Math.round(msUntilNextRun / 3600000)}h`);
+
+    setTimeout(async () => {
+      try {
+        const { runWeeklyAnalysis } = await import('./services/agentAnalyticsService.js');
+        const result = await runWeeklyAnalysis();
+        if (result) {
+          console.log(`📊 Weekly analysis completata: ${result.summary?.total || 0} outcome, ${result.dropOffs || 0} drop-off`);
+        }
+      } catch (err) {
+        console.error('❌ Weekly analysis error:', err.message);
+      }
+      scheduleWeeklyAnalysis();
+    }, msUntilNextRun);
+  };
+
+  scheduleWeeklyAnalysis();
 }, 10000);
 
 // Endpoint per la documentazione delle API

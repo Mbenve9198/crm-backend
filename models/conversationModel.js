@@ -63,6 +63,7 @@ const conversationSchema = new mongoose.Schema({
     leadCategory: String,
     leadSource: { type: String, enum: ['smartlead_outbound', 'inbound_rank_checker', 'manual'] },
     objections: [String],
+    painPoints: [String],
     qualificationData: mongoose.Schema.Types.Mixed,
     restaurantData: {
       name: String,
@@ -146,7 +147,7 @@ conversationSchema.statics.findBySmartleadIds = function(campaignId, leadId) {
 
 conversationSchema.statics.findPendingActions = function() {
   return this.find({
-    status: 'active',
+    status: { $in: ['active', 'paused'] },
     'context.nextActionAt': { $lte: new Date() }
   }).populate('contact', 'name email phone properties');
 };

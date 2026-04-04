@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
@@ -6,6 +7,24 @@ import { classifyReply } from '../services/replyClassifierService.js';
 import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
 import { handleAgentConversation, routeLeadReply } from '../services/salesAgentService.js';
+
+const processedWebhooks = new Map();
+const DEDUP_TTL_MS = 10 * 60 * 1000;
+
+const isDuplicate = (key) => {
+  const now = Date.now();
+  // Pulizia periodica delle entry scadute
+  if (processedWebhooks.size > 500) {
+    for (const [k, ts] of processedWebhooks) {
+      if (now - ts > DEDUP_TTL_MS) processedWebhooks.delete(k);
+    }
+  }
+  if (processedWebhooks.has(key) && now - processedWebhooks.get(key) < DEDUP_TTL_MS) {
+    return true;
+  }
+  processedWebhooks.set(key, now);
+  return false;
+};
 
 /**
  * Controller per i webhook Smartlead
@@ -323,6 +342,15 @@ export const handleSmartleadWebhook = async (req, res) => {
   try {
     const webhookData = req.body;
     const eventType = webhookData.event_type;
+
+    // Idempotency: deduplicazione webhook con chiave composita
+    const dedupKey = crypto.createHash('md5').update(
+      `${eventType}:${webhookData.campaign_id}:${webhookData.sl_email_lead_id || webhookData.to_email}:${webhookData.event_timestamp || ''}`
+    ).digest('hex');
+    if (isDuplicate(dedupKey)) {
+      console.log(`⏭️ WEBHOOK DUPLICATO (skip): ${eventType} per ${webhookData.to_email}`);
+      return res.status(200).json({ success: true, message: 'duplicate_skipped' });
+    }
 
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log(`📨 WEBHOOK SMARTLEAD: ${eventType}`);

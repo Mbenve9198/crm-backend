@@ -105,6 +105,20 @@ export const AGENT_TOOLS = [
       },
       required: ['days', 'note']
     }
+  },
+  {
+    name: 'book_callback',
+    description: 'Fissa una chiamata con il lead. Usa SEMPRE questo tool quando il lead accetta di essere contattato telefonicamente. Il tool salva il numero, la fascia oraria, aggiorna lo stato nel CRM a "da richiamare", e invia un messaggio di conferma al lead sullo stesso canale della conversazione. PRIMA di chiamare questo tool, assicurati di avere il numero di telefono e almeno un\'indicazione di fascia oraria.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        phone: { type: 'string', description: 'Numero di telefono confermato del lead (con prefisso +39)' },
+        time_preference: { type: 'string', description: 'Fascia oraria preferita dal lead (es. "mattina", "pomeriggio dopo le 15", "domani alle 11", "qualsiasi orario")' },
+        confirmation_message: { type: 'string', description: 'Messaggio di conferma da inviare al lead. Esempio: "Perfetto! Ti chiamo domani pomeriggio al [numero]. A presto! Marco"' },
+        notes: { type: 'string', description: 'Note per l\'operatore che farà la chiamata (pain points, contesto, cosa interessa al lead)' }
+      },
+      required: ['phone', 'time_preference', 'confirmation_message']
+    }
   }
 ];
 
@@ -133,6 +147,8 @@ export const executeTools = async (toolName, toolInput, conversationContext) => 
       return await toolRequestHumanHelp(toolInput, conversationContext);
     case 'schedule_followup':
       return await toolScheduleFollowup(toolInput, conversationContext);
+    case 'book_callback':
+      return await toolBookCallback(toolInput, conversationContext);
     default:
       return { error: `Tool sconosciuto: ${toolName}` };
   }
@@ -439,6 +455,89 @@ async function toolScheduleFollowup({ days, note }, ctx) {
     days,
     note,
     status: `Follow-up programmato per il ${followupDate.toLocaleDateString('it-IT')}`
+  };
+}
+
+async function toolBookCallback({ phone, time_preference, confirmation_message, notes }, ctx) {
+  const conversation = ctx?.conversation;
+  if (!conversation) return { error: 'Nessuna conversazione attiva' };
+
+  const contact = ctx?.contact || await Contact.findById(conversation.contact);
+  if (!contact) return { error: 'Contatto non trovato' };
+
+  // Aggiorna telefono nel contatto se diverso o mancante
+  const cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
+  if (!contact.phone || contact.phone !== cleanPhone) {
+    await Contact.findByIdAndUpdate(contact._id, { phone: cleanPhone });
+  }
+
+  // Aggiorna status contatto a "da richiamare"
+  await Contact.findByIdAndUpdate(contact._id, {
+    status: 'da richiamare',
+    'properties.preferred_availability': time_preference,
+    'properties.callback_notes': notes || '',
+    'properties.callbackAt': new Date().toISOString()
+  });
+
+  // Aggiorna conversazione
+  conversation.stage = 'handoff';
+  conversation.context.qualificationData = {
+    ...(conversation.context.qualificationData || {}),
+    callbackPhone: cleanPhone,
+    callbackTimePreference: time_preference,
+    callbackNotes: notes,
+    callbackBookedAt: new Date().toISOString()
+  };
+  conversation.markModified('context');
+
+  // Invia messaggio di conferma al lead sullo stesso canale
+  const lastLeadChannel = [...(conversation.messages || [])].reverse().find(m => m.role === 'lead')?.channel || 'email';
+
+  let sendResult = { sent: false };
+  if (lastLeadChannel === 'whatsapp') {
+    sendResult = await toolSendWhatsApp({ message: confirmation_message, phone: cleanPhone }, ctx);
+  } else {
+    sendResult = await toolSendEmail({ message: confirmation_message }, ctx);
+  }
+
+  if (!sendResult.sent) {
+    const altChannel = lastLeadChannel === 'whatsapp' ? 'email' : 'whatsapp';
+    if (altChannel === 'email') {
+      sendResult = await toolSendEmail({ message: confirmation_message }, ctx);
+    } else if (contact.phone) {
+      sendResult = await toolSendWhatsApp({ message: confirmation_message, phone: cleanPhone }, ctx);
+    }
+  }
+
+  await conversation.save();
+
+  agentLogger.info('callback_booked', {
+    conversationId: conversation._id,
+    data: { phone: cleanPhone, timePreference: time_preference, confirmSent: sendResult.sent }
+  });
+
+  // Notifica il team
+  const { sendAgentActivityReport } = await import('./emailNotificationService.js');
+  sendAgentActivityReport({
+    action: 'callback_booked',
+    contactName: contact.name,
+    contactEmail: contact.email,
+    contactPhone: cleanPhone,
+    agentName: conversation.agentIdentity?.name || 'Marco',
+    agentReply: confirmation_message,
+    toolsUsed: ['book_callback'],
+    conversationId: conversation._id,
+    source: contact.source,
+    extra: `Fascia oraria: ${time_preference}. Note: ${notes || 'N/A'}`
+  }).catch(() => {});
+
+  return {
+    booked: true,
+    phone: cleanPhone,
+    time_preference,
+    confirmation_sent: sendResult.sent,
+    contact_status: 'da richiamare',
+    note: `Callback fissata. Contatto aggiornato a "da richiamare". ${sendResult.sent ? 'Conferma inviata al lead.' : 'ATTENZIONE: conferma NON inviata — verificare manualmente.'}`
   };
 }
 
