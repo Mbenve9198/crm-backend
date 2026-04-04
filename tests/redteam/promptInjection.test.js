@@ -29,11 +29,11 @@ describe('Prompt Injection Red Team (multi-agent)', () => {
     expect(source).toContain('NON attribuire al lead');
   });
 
-  it('reviewer prompt controlla prezzo al primo contatto', () => {
+  it('reviewer prompt controlla prezzo numerico al primo contatto ma permette prova gratuita', () => {
     const source = fs.readFileSync(new URL('../../services/agents/prompts/reviewer.js', import.meta.url), 'utf-8');
     expect(source).toContain('isFirstContact');
-    expect(source).toContain('prezzo');
-    expect(source).toContain('NESSUNA forma');
+    expect(source).toContain('PREZZO NUMERICO');
+    expect(source).toContain('prova gratuita');
   });
 
   it('reviewer prompt controlla meccanismo tecnico', () => {
@@ -63,10 +63,11 @@ describe('Prompt Injection Red Team (multi-agent)', () => {
     expect(doNotJoined).toContain('whatsapp');
   });
 
-  it('playbook outbound vieta prezzo e chiamata al primo messaggio', async () => {
+  it('playbook outbound vieta prezzo pieno e meccanismo ma propone chiamata', async () => {
     const playbook = (await import('../../services/agents/playbooks/outbound_initial.js')).default;
     const doNotJoined = playbook.doNot.join(' ').toLowerCase();
-    expect(doNotJoined).toContain('prezzo');
-    expect(doNotJoined).toContain('chiamata al primo');
+    expect(doNotJoined).toContain('1.290');
+    expect(doNotJoined).toContain('qr');
+    expect(playbook.objective.toLowerCase()).toContain('chiamata');
   });
 });

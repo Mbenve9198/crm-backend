@@ -14,7 +14,8 @@ export default {
   ],
   strategies: {
     pain_point_leverage: 'Usa posizione bassa su Maps + competitor con piu recensioni come urgenza. "Chi cerca X su Maps vede prima [competitor]"',
-    social_proof: 'Cita un cliente MenuChat simile con dati reali (nome, reviewsGained, monthsActive). Se non trovato, usa case study generici.',
+    social_proof: 'OBBLIGATORIO: cita un cliente MenuChat simile con dati CONCRETI dal researcher (nome, reviewsGained in N mesi, citta). Esempio: "[nome] a [citta] ha raccolto [reviewsGained] recensioni in [monthsActive] mesi con noi". Se il researcher ha trovato clienti simili, USA QUELLI. Se ha solo case study generici, usa quelli con i dati forniti.',
+    solution_bridge: 'Dopo il pain point e il social proof, collega alla soluzione SENZA spiegare il meccanismo: "Abbiamo inventato un sistema che ha risolto questo problema per altri ristoranti simili al tuo. Mi piacerebbe fartelo provare gratis per 2 settimane."',
     direct_cta: 'Conferma il numero del lead e proponi chiamata 5 minuti per spiegare la prova gratuita'
   },
   ctaTemplate: 'Il tuo numero e\' {phone} — posso chiamarti 5 minuti per spiegarti come funziona la prova gratuita?',

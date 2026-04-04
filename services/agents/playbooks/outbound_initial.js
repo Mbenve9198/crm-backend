@@ -1,21 +1,30 @@
 export default {
   stage: 'initial_reply',
   source: 'smartlead_outbound',
-  objective: 'Costruire rapport e credibilita. NON proporre la chiamata al primo messaggio.',
-  context: 'Il lead ha ricevuto una nostra email fredda e ha risposto. NON ti conosce, probabilmente e\' diffidente. Se ha risposto, non ha ignorato — e\' un buon segnale.',
-  approach: 'Tono morbido e consultivo. Ringrazia per la risposta. Fai UNA domanda mirata sulla sua situazione. Usa social proof (cliente simile) per creare credibilita.',
+  objective: 'Rispondere al lead, creare valore, e proporre una chiamata di 5 minuti. Raccogliere nome e numero se non li abbiamo.',
+  context: 'Il lead ha ricevuto una nostra email fredda e HA RISPOSTO — e\' un lead caldo. Chi risponde a una cold email merita attenzione immediata e una proposta concreta.',
+  approach: `RISPONDI SEMPRE alle domande del lead. Se chiede come funziona, dai una descrizione generica. Se chiede il prezzo, menziona la prova gratuita.
+
+Poi PROPONI SEMPRE la chiamata. L'obiettivo e' SEMPRE fissare una chiamata di 5 minuti. Non aspettare messaggi successivi.
+
+STRUTTURA:
+1. Ringrazia brevemente per la risposta
+2. Se ha fatto domande: rispondi in modo sintetico (descrizione generica del sistema, prova gratuita)
+3. Cita un cliente simile con dati concreti (reviewsGained, monthsActive)
+4. Proponi la chiamata: "Posso chiamarti 5 minuti per spiegarti come funziona la prova?"
+5. Se non hai il nome della persona: chiedi "Con chi parlo?"
+6. Se non hai il numero: chiedi "A che numero posso chiamarti?"`,
   doNot: [
-    'Spiegare come funziona il sistema (QR, WhatsApp, filtro, bot)',
-    'Citare il prezzo in qualsiasi forma al primo messaggio',
-    'Proporre la chiamata al primo messaggio — prima crea valore',
-    'Bombardare di informazioni — una cosa alla volta',
+    'Spiegare il meccanismo tecnico (QR, WhatsApp, filtro, bot) — si spiega nella chiamata',
+    'Citare il prezzo pieno (1.290 euro) — menziona solo la prova gratuita di 2 settimane',
     'Proporre videochiamate, Zoom, Google Meet',
-    'Inventare dati non presenti nel contesto'
+    'Inventare dati non presenti nel contesto',
+    'Ignorare domande dirette del lead'
   ],
   strategies: {
-    social_proof: 'Trova un ristorante simile tra i clienti MenuChat e cita i risultati reali',
-    pain_point_leverage: 'Se hai dati ranking/recensioni, usa quelli come aggancio naturale',
-    ask_question: 'Chiedi quante recensioni raccoglie al mese, o se ha un sistema per raccoglierle'
+    answer_and_propose: 'Rispondi alla domanda + caso studio concreto + proponi chiamata 5 minuti',
+    social_proof: 'Cita un ristorante simile con dati reali (reviewsGained, monthsActive)',
+    collect_info: 'Se manca il nome o il numero: chiedili in modo naturale alla fine del messaggio'
   },
   maxWords: 100
 };

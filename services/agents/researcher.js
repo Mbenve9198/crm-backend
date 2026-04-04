@@ -53,7 +53,19 @@ export async function gather(contact, conversation, leadMessage) {
   try {
     const cuisineType = data.contact.category || data.googleMaps?.type || 'ristorante';
     const city = data.contact.city;
-    const result = await toolSearchSimilarClients({ cuisine_type: cuisineType, city: city || undefined });
+
+    // Ricerca progressiva: citta -> regione -> tipo nazionale
+    let result = null;
+    if (city) {
+      result = await toolSearchSimilarClients({ cuisine_type: cuisineType, city });
+    }
+    if (!result?.clients?.length && city) {
+      result = await toolSearchSimilarClients({ cuisine_type: cuisineType, region: city });
+    }
+    if (!result?.clients?.length) {
+      result = await toolSearchSimilarClients({ cuisine_type: cuisineType });
+    }
+
     if (result?.clients?.length > 0) {
       data.similarClients = result.clients;
     }
@@ -90,12 +102,35 @@ export async function gather(contact, conversation, leadMessage) {
 
 function extractContactData(contact) {
   const p = contact.properties || {};
+
+  let city = p.city || p['Città'] || '';
+  if (!city || city.startsWith('http')) {
+    // Prova a estrarre la citta dal location (se non e' un link)
+    const loc = p.location || '';
+    if (loc && !loc.startsWith('http')) {
+      city = loc;
+    }
+  }
+  if (!city && contact.rankCheckerData?.restaurantData?.address) {
+    const parts = contact.rankCheckerData.restaurantData.address.split(',');
+    if (parts.length >= 2) {
+      city = parts[parts.length - 2].trim().replace(/\d{5}\s*/, '');
+    }
+  }
+  if (!city && contact.name) {
+    const googleData = contact.rankCheckerData?.restaurantData;
+    if (googleData?.address) {
+      const parts = googleData.address.split(',');
+      if (parts.length >= 2) city = parts[parts.length - 2].trim().replace(/\d{5}\s*/, '');
+    }
+  }
+
   return {
     name: contact.name,
     email: contact.email,
     phone: contact.phone,
-    city: p.city || p['Città'] || p.location || '',
-    address: p.full_address || p['Indirizzo'] || '',
+    city,
+    address: p.full_address || p['Indirizzo'] || contact.rankCheckerData?.restaurantData?.address || '',
     rating: p.rating || p.Rating || null,
     reviews: p.reviews_count || p.Recensioni || null,
     googleMapsLink: p.google_maps_link || '',
