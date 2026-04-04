@@ -1,22 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
-import AgentMetric from '../models/agentMetricModel.js';
-import KnowledgeChunk from '../models/knowledgeChunkModel.js';
 import agentLogger from './agentLogger.js';
-import { AGENT_TOOLS, executeTools } from './agentToolsService.js';
+import { executeTools } from './agentToolsService.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
-import { fetchMessageHistory, fetchLeadByEmail, stripHtml } from './smartleadApiService.js';
 import redisManager from '../config/redis.js';
-
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-const AGENT_MODEL = 'claude-sonnet-4-20250514';
-const AGENT_TEMPERATURE = 0.35;
-const MAX_TOOL_ROUNDS = 5;
-
-const AGENT_INPUT_RATE = 3 / 1_000_000;
-const AGENT_OUTPUT_RATE = 15 / 1_000_000;
 
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const conversationLocksInMemory = new Map();
@@ -72,10 +60,10 @@ export const resolveIdentity = (fromEmail) => {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SYSTEM PROMPT: persona, non template
+// LEGACY SYSTEM PROMPT (mantenuto per backward compat con rankCheckerAgentService)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const buildSystemPrompt = (identity, context) => {
+export const buildSystemPrompt = (identity, context) => {
   const isFirstContact = (context || '').includes('RANK_CHECKER_OUTREACH');
   const isOutboundInitial = (context || '').includes('initial_reply') && (context || '').includes('smartlead_outbound');
 
@@ -224,44 +212,6 @@ Dopo ogni risposta del lead, valuta mentalmente:
 Questi insight saranno salvati automaticamente per personalizzare i messaggi futuri.
 
 ${context || ''}`;
-};
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// KNOWLEDGE BASE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-const KEYWORD_MAP = {
-  objection: ['prezzo', 'costo', 'costa', 'budget', 'caro', 'tempo', 'impegnato', 'interessa', 'sistema', 'fornitore', 'già', 'gia'],
-  product: ['come funziona', 'funziona', 'qr', 'whatsapp', 'menu', 'recensioni', 'digitale', 'filtro'],
-  faq: ['false', 'finte', 'gdpr', 'privacy', 'wifi', 'quante', 'negative', 'stima'],
-  pricing: ['prezzo', 'costo', 'costa', 'quanto', 'prova', 'gratis', 'gratuita', 'annuale'],
-  competitor: ['pienissimo', 'tripadvisor', 'thefork', 'competitor', 'concorrente']
-};
-
-const fetchRelevantKnowledge = async (leadMessage) => {
-  try {
-    const lower = (leadMessage || '').toLowerCase();
-    const matchedKeywords = [];
-    let bestCategory = null;
-
-    for (const [category, keywords] of Object.entries(KEYWORD_MAP)) {
-      for (const kw of keywords) {
-        if (lower.includes(kw)) {
-          matchedKeywords.push(kw);
-          if (!bestCategory) bestCategory = category;
-        }
-      }
-    }
-
-    if (matchedKeywords.length === 0) return null;
-
-    const chunks = await KnowledgeChunk.searchByKeywords(matchedKeywords, bestCategory, 2);
-    if (!chunks || chunks.length === 0) return null;
-
-    return chunks.map(c => c.content).join('\n\n---\n\n');
-  } catch {
-    return null;
-  }
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -427,251 +377,70 @@ export const routeLeadReply = (category, confidence, extracted, replyText) => {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// AGENTIC LOOP: pensa → tool → pensa → tool → risposta
+// MULTI-AGENT PIPELINE: researcher → strategist → writer → reviewer
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+import { runMultiAgentPipeline } from './agents/orchestrator.js';
+
 export const runAgentLoop = async (conversation, leadMessage) => {
-  const identity = conversation.agentIdentity || IDENTITIES.marco;
-  const contact = await Contact.findById(conversation.contact).lean();
+  const result = await runMultiAgentPipeline(conversation, leadMessage);
 
-  let contextBlock = '\nCONTESTO LEAD ATTUALE:';
-  if (contact) {
-    const p = contact.properties || {};
-    contextBlock += `\n- Nome ristorante: ${contact.name}`;
-    contextBlock += `\n- Email: ${contact.email}`;
-    if (contact.phone) contextBlock += `\n- Telefono: ${contact.phone}`;
-    const city = p.city || p['Città'] || p.location || '';
-    if (city) contextBlock += `\n- Città/Zona: ${city}`;
-    const address = p.full_address || p['Indirizzo'] || '';
-    if (address) contextBlock += `\n- Indirizzo: ${address}`;
-    const rating = p.rating || p.Rating;
-    if (rating) contextBlock += `\n- Rating Google: ${rating}/5`;
-    const reviews = p.reviews_count || p.Recensioni;
-    if (reviews) contextBlock += `\n- Recensioni Google: ${reviews}`;
-    if (p.google_maps_link) contextBlock += `\n- Google Maps: ${p.google_maps_link}`;
-    if (p.site || p.Website) contextBlock += `\n- Sito web: ${p.site || p.Website}`;
-    if (p.category || p.business_type) contextBlock += `\n- Tipo locale: ${p.category || p.business_type}`;
-    if (p.current_rank) contextBlock += `\n- Posizione Google Maps: ${p.current_rank}° per "${p.keyword || 'N/A'}"`;
-    if (p.estimated_lost_customers) contextBlock += `\n- Clienti persi stimati/settimana: ~${p.estimated_lost_customers}`;
-    if (p.competitor_1_name) {
-      contextBlock += `\n- Competitor principali:`;
-      contextBlock += `\n  - ${p.competitor_1_name}: posizione ${p.competitor_1_rank || '?'}, ${p.competitor_1_reviews || '?'} recensioni, rating ${p.competitor_1_rating || '?'}`;
-      if (p.competitor_2_name) contextBlock += `\n  - ${p.competitor_2_name}: posizione ${p.competitor_2_rank || '?'}, ${p.competitor_2_reviews || '?'} recensioni`;
-      if (p.competitor_3_name) contextBlock += `\n  - ${p.competitor_3_name}`;
-    }
-    if (p.contact_person) contextBlock += `\n- Persona da contattare: ${p.contact_person}`;
-    if (p.preferred_availability) contextBlock += `\n- Disponibilità preferita: ${p.preferred_availability}`;
-    if (contact.source) contextBlock += `\n- Fonte lead: ${contact.source}`;
+  if (result.action === 'schedule_followup') {
+    const { executeTools: exec } = await import('./agentToolsService.js');
+    await exec('schedule_followup', {
+      days: result.days || 14,
+      note: result.note || 'Follow-up programmato dallo strategist'
+    }, { conversation });
+
+    return {
+      response: null,
+      toolsUsed: [{ name: 'schedule_followup', input: { days: result.days }, result: { scheduled: true } }],
+      identity: conversation.agentIdentity || IDENTITIES.marco,
+      rounds: 1
+    };
   }
 
-  const rc = contact?.rankCheckerData;
-  if (rc) {
-    const ranking = rc.ranking || {};
-    contextBlock += `\n\nDATI RANK CHECKER:`;
-    contextBlock += `\n- Keyword: "${rc.keyword}"`;
-    if (ranking.mainRank) contextBlock += `\n- Posizione: ${ranking.mainRank}`;
-    if (ranking.competitorsAhead != null) contextBlock += `\n- Competitor davanti: ${ranking.competitorsAhead}`;
-    if (ranking.estimatedLostCustomers) contextBlock += `\n- Clienti persi stimati/settimana: ~${ranking.estimatedLostCustomers}`;
-    if (rc.dailyCovers) contextBlock += `\n- Coperti/giorno dichiarati: ${rc.dailyCovers}`;
-    if (rc.hasDigitalMenu != null) contextBlock += `\n- Ha menu digitale: ${rc.hasDigitalMenu ? 'sì' : 'no'}`;
-    if (ranking.fullResults?.competitors?.length > 0) {
-      contextBlock += `\n- Competitor principali:`;
-      for (const c of ranking.fullResults.competitors.slice(0, 3)) {
-        contextBlock += `\n  - ${c.name}: posizione ${c.rank}, ${c.reviews || '?'} recensioni`;
-      }
-    }
+  if (result.action === 'awaiting_human' && !result.draft) {
+    const { executeTools: exec } = await import('./agentToolsService.js');
+    await exec('request_human_help', {
+      reason: result.reason || 'Pipeline multi-agente ha deciso di escalare',
+      urgency: 'medium'
+    }, { conversation });
+
+    return {
+      response: null,
+      toolsUsed: [{ name: 'request_human_help', input: { reason: result.reason }, result: {} }],
+      identity: conversation.agentIdentity || IDENTITIES.marco,
+      rounds: 1
+    };
   }
 
-  // Storico email SmartLead: carica le email gia inviate al lead per dare contesto
-  const slData = conversation.context?.smartleadData;
-  if (slData?.campaignId && slData?.leadId) {
-    try {
-      const slHistory = await fetchMessageHistory(slData.campaignId, slData.leadId);
-      if (slHistory && slHistory.length > 0) {
-        contextBlock += `\n\nEMAIL GIA INVIATE AL LEAD (storico SmartLead, ${slHistory.length} messaggi):`;
-        for (const msg of slHistory.slice(-5)) {
-          const type = msg.type === 'SENT' ? 'NOI' : 'LEAD';
-          const body = stripHtml(msg.email_body || '').substring(0, 400);
-          contextBlock += `\n[${type}] Oggetto: ${msg.subject || 'N/A'}\n${body}\n---`;
-        }
-        contextBlock += `\n- Numero sequenza: email #${slHistory.filter(m => m.type === 'SENT').length} inviata`;
-      }
-
-      const slLead = await fetchLeadByEmail(contact?.email);
-      if (slLead?.lead_campaign_data?.[0]?.last_email_sequence_sent) {
-        contextBlock += `\n- Il lead sta rispondendo alla sequenza #${slLead.lead_campaign_data[0].last_email_sequence_sent}`;
-      }
-    } catch {
-      // non bloccante
-    }
-  }
-
-  contextBlock += `\n\nFASE CONVERSAZIONE: ${conversation.stage || 'initial_reply'}`;
-  contextBlock += `\n- Messaggi scambiati: ${conversation.messages?.length || 0}`;
-
-  if (conversation.context?.objections?.length > 0) {
-    contextBlock += `\n\nOBIEZIONI GIÀ EMERSE: ${conversation.context.objections.join(', ')}`;
-  }
-  if (conversation.context?.painPoints?.length > 0) {
-    contextBlock += `\nPAIN POINTS RILEVATI: ${conversation.context.painPoints.join(', ')}`;
-  }
-
-  // Conversation summary per conversazioni lunghe
-  if (conversation.context?.conversationSummary) {
-    contextBlock += `\n\nRIASSUNTO CONVERSAZIONE PRECEDENTE:\n${conversation.context.conversationSummary}`;
-  }
-
-  // Regole apprese dal feedback umano
-  try {
-    const learnedRules = await KnowledgeChunk.find({
-      category: 'learned_rule',
-      isActive: true,
-      effectiveness: { $gte: 0.5 }
-    }).sort({ effectiveness: -1 }).limit(10);
-
-    if (learnedRules.length > 0) {
-      contextBlock += '\n\nREGOLE APPRESE DA FEEDBACK UMANO (segui SEMPRE):';
-      for (const rule of learnedRules) {
-        contextBlock += `\n- ${rule.content}`;
-      }
-    }
-  } catch {
-    // non bloccante
-  }
-
-  // Knowledge base: inietta chunk rilevanti in base al messaggio del lead
-  const knowledgeContext = await fetchRelevantKnowledge(leadMessage);
-  if (knowledgeContext) {
-    contextBlock += `\n\nINFORMAZIONI UTILI DALLA KNOWLEDGE BASE:\n${knowledgeContext}`;
-  }
-
-  const systemPrompt = buildSystemPrompt(identity, contextBlock);
-
-  const messages = conversation.getConversationThread(15);
-  messages.push({ role: 'user', content: leadMessage });
-
-  const toolContext = { conversation, contact };
-  let currentMessages = messages;
-  let finalTextResponse = null;
-  let toolsUsed = [];
-
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const llmStart = Date.now();
-    const response = await client.messages.create({
-      model: AGENT_MODEL,
-      max_tokens: 16000,
-      temperature: 1,
-      thinking: {
-        type: 'enabled',
-        budget_tokens: 8000
-      },
-      system: systemPrompt,
-      tools: AGENT_TOOLS,
-      messages: currentMessages
+  if (result.draft) {
+    const channel = result.channel || 'email';
+    conversation.addMessage('agent', result.draft, channel, {
+      wasAutoSent: false,
+      isDraft: true
     });
-    const llmDuration = Date.now() - llmStart;
+    conversation.status = 'awaiting_human';
+    conversation.markModified('context');
+    await conversation.save();
 
-    const inputTokens = response.usage?.input_tokens || 0;
-    const outputTokens = response.usage?.output_tokens || 0;
-    AgentMetric.create({
-      conversation: conversation._id,
-      event: 'llm_call',
-      data: {
-        model: AGENT_MODEL,
-        inputTokens,
-        outputTokens,
-        costUsd: (inputTokens * AGENT_INPUT_RATE) + (outputTokens * AGENT_OUTPUT_RATE),
-        durationMs: llmDuration
-      }
-    }).catch(() => {});
-
-    const thinkingBlocks = response.content.filter(b => b.type === 'thinking');
-    if (thinkingBlocks.length > 0) {
-      agentLogger.info('agent_thinking', {
-        conversationId: conversation._id,
-        data: thinkingBlocks.map(b => b.thinking).join('\n').substring(0, 2000)
-      });
-    }
-
-    const textBlocks = response.content.filter(b => b.type === 'text');
-    const toolBlocks = response.content.filter(b => b.type === 'tool_use');
-
-    if (toolBlocks.length === 0) {
-      finalTextResponse = textBlocks.map(b => b.text).join('\n').trim();
-      break;
-    }
-
-    const toolResults = [];
-    for (const toolBlock of toolBlocks) {
-      const toolStart = Date.now();
-      const result = await executeTools(toolBlock.name, toolBlock.input, toolContext);
-      const toolDuration = Date.now() - toolStart;
-      toolsUsed.push({ name: toolBlock.name, input: toolBlock.input, result });
-
-      AgentMetric.create({
-        conversation: conversation._id,
-        event: 'tool_call',
-        data: {
-          toolName: toolBlock.name,
-          toolSuccess: !result?.error && result?.sent !== false,
-          durationMs: toolDuration
-        }
-      }).catch(() => {});
-
-      const isSendTool = toolBlock.name === 'send_email_reply' || toolBlock.name === 'send_whatsapp';
-      const isDraftSaved = isSendTool && result?.draft === true;
-      const sendFailed = isSendTool && result && !result.sent && !isDraftSaved;
-
-      let toolResultContent = JSON.stringify(result);
-      if (isDraftSaved) {
-        toolResultContent = JSON.stringify({
-          ...result,
-          _system_note: 'BOZZA SALVATA CON SUCCESSO. Il messaggio è in attesa di approvazione umana. NON provare canali alternativi, NON chiamare request_human_help. Il tuo lavoro è finito per questa conversazione.'
-        });
-        agentLogger.info('draft_saved_tool', { conversationId: conversation._id, data: toolBlock.name });
-      } else if (sendFailed) {
-        const failReason = result.details?.error || result.note || result.error || 'motivo sconosciuto';
-        toolResultContent = JSON.stringify({
-          ...result,
-          _system_note: `INVIO FALLITO: ${failReason}. Prova il canale alternativo (email se WhatsApp ha fallito, o viceversa). Se anche il canale alternativo fallisce, usa request_human_help.`
-        });
-        agentLogger.warn('tool_send_failed', { conversationId: conversation._id, data: { tool: toolBlock.name, reason: failReason } });
-      } else {
-        agentLogger.info('tool_completed', { conversationId: conversation._id, data: toolBlock.name });
-      }
-
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: toolBlock.id,
-        content: toolResultContent
-      });
-    }
-
-    currentMessages = [
-      ...currentMessages,
-      { role: 'assistant', content: response.content },
-      { role: 'user', content: toolResults }
-    ];
-
-    if (response.stop_reason === 'end_turn' && textBlocks.length > 0) {
-      finalTextResponse = textBlocks.map(b => b.text).join('\n').trim();
-      break;
-    }
-  }
-
-  if (!finalTextResponse && toolsUsed.length >= MAX_TOOL_ROUNDS) {
-    agentLogger.warn('max_rounds_reached', { conversationId: conversation._id, data: { rounds: MAX_TOOL_ROUNDS, toolsUsed: toolsUsed.map(t => t.name) } });
-    await executeTools('request_human_help', {
-      reason: `L'agente ha raggiunto il massimo di ${MAX_TOOL_ROUNDS} round senza produrre una risposta. Serve intervento umano.`,
-      urgency: 'high'
-    }, toolContext);
+    const toolName = channel === 'whatsapp' ? 'send_whatsapp' : 'send_email_reply';
+    return {
+      response: result.draft,
+      toolsUsed: [{ name: toolName, input: { message: result.draft }, result: { sent: false, draft: true } }],
+      identity: conversation.agentIdentity || IDENTITIES.marco,
+      rounds: 1,
+      strategy: result.strategy,
+      thinking: result.thinking
+    };
   }
 
   return {
-    response: finalTextResponse,
-    toolsUsed,
-    identity,
-    rounds: toolsUsed.length > 0 ? toolsUsed.length : 0
+    response: null,
+    toolsUsed: [],
+    identity: conversation.agentIdentity || IDENTITIES.marco,
+    rounds: 0
   };
 };
 

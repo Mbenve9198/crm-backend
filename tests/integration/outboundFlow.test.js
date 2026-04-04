@@ -3,31 +3,48 @@ import { connectTestDB, disconnectTestDB, clearTestDB } from '../setup/dbSetup.j
 import { contactInbound, ownerUser } from '../setup/fixtures.js';
 
 vi.mock('@anthropic-ai/sdk', () => {
-  let callIdx = 0;
-  const responses = [
-    // Round 1: agent calls search_similar_clients
-    {
-      content: [{ type: 'tool_use', id: 'tc1', name: 'search_similar_clients', input: { cuisine_type: 'trattoria', city: 'Napoli' } }],
-      stop_reason: 'tool_use',
-      usage: { input_tokens: 5000, output_tokens: 200 }
-    },
-    // Round 2: agent composes message and calls send_email_reply
-    {
-      content: [{ type: 'tool_use', id: 'tc2', name: 'send_email_reply', input: {
-        message: 'Ciao! Grazie per aver provato il Rank Checker.\n\nHo visto che per "trattoria napoli centro" sei in 15° posizione — chi cerca su Maps vede prima Nennella e Da Michele, che hanno migliaia di recensioni in più.\n\nCon i tuoi 80 coperti al giorno, in sole 2 settimane di test potremmo raccogliere circa 67 nuove recensioni. Un locale simile, Pizzeria Simile a Roma, ha raccolto 170 recensioni in 6 mesi con noi.\n\nIl tuo numero è +393339876543 — posso chiamarti 5 minuti per spiegarti come funziona la prova gratuita?\n\nMarco'
-      } }],
-      stop_reason: 'end_turn',
-      usage: { input_tokens: 7000, output_tokens: 400 }
-    }
-  ];
   return {
     default: class {
       constructor() {
         this.messages = {
-          create: vi.fn(async () => {
-            const r = responses[callIdx] || responses[responses.length - 1];
-            callIdx++;
-            return r;
+          create: vi.fn(async (params) => {
+            const system = params.system || '';
+            if (system.includes('strategist')) {
+              return {
+                content: [
+                  { type: 'thinking', thinking: 'Il lead ha posizione 15, competitor forti. Uso pain_point_leverage + social_proof.' },
+                  { type: 'text', text: JSON.stringify({
+                    approach: 'pain_point_leverage',
+                    mainAngle: 'Posizione 15 su Maps, competitor con migliaia di recensioni davanti',
+                    painPointToUse: 'bassa_visibilita',
+                    socialProof: { clientName: 'MOOD', data: 'piu di 100 recensioni/mese', menuUrl: null },
+                    cta: 'confirm_number',
+                    ctaDetails: 'Conferma +393339876543',
+                    tone: 'consultivo',
+                    maxWords: 80,
+                    doNot: ['Spiegare come funziona il sistema', 'Citare il prezzo'],
+                    channelToUse: 'email'
+                  }) }
+                ],
+                stop_reason: 'end_turn',
+                usage: { input_tokens: 2000, output_tokens: 300 }
+              };
+            }
+            if (system.includes('Scrivi messaggi a ristoratori')) {
+              return {
+                content: [{ type: 'text', text: 'Ciao! Ho visto i tuoi dati dal Rank Checker — per "trattoria napoli centro" sei in 15° posizione, con Nennella e Da Michele davanti.\n\nUn locale come MOOD raccoglie piu di 100 recensioni al mese con il nostro sistema.\n\nIl tuo numero e\' +393339876543 — posso chiamarti 5 minuti per spiegarti come funziona la prova gratuita?\n\nMarco' }],
+                stop_reason: 'end_turn',
+                usage: { input_tokens: 1000, output_tokens: 200 }
+              };
+            }
+            if (system.includes('quality reviewer')) {
+              return {
+                content: [{ type: 'text', text: '{"pass":true,"violations":[],"feedback":""}' }],
+                stop_reason: 'end_turn',
+                usage: { input_tokens: 800, output_tokens: 50 }
+              };
+            }
+            return { content: [{ type: 'text', text: '{}' }], stop_reason: 'end_turn', usage: { input_tokens: 500, output_tokens: 50 } };
           })
         };
       }
@@ -64,8 +81,11 @@ vi.mock('../../services/signedUrlService.js', () => ({
 vi.mock('axios', () => ({
   default: {
     get: vi.fn(async (url) => {
+      if (url.includes('serpapi.com')) {
+        return { data: { place_results: { title: 'Trattoria Bella Napoli', rating: 4.1, reviews: 62, address: 'Via Toledo 45, Napoli' } } };
+      }
       if (url.includes('/api/restaurants/similar')) {
-        return { data: { restaurants: [{ name: 'Pizzeria Simile', address: { city: 'Roma' }, currentReviewCount: 250, initialReviewCount: 80, reviewsGained: 170, monthsActive: 6, avgReviewsPerMonth: 28, googleRating: { rating: 4.7, reviewCount: 250 }, menuUrl: 'https://menuchat.it/menu/test', menuItemCount: 45, _id: 'sim1' }] } };
+        return { data: { restaurants: [] } };
       }
       return { data: {} };
     }),
@@ -87,8 +107,8 @@ beforeAll(async () => {
 afterEach(async () => { await clearTestDB(); });
 afterAll(async () => { await disconnectTestDB(); });
 
-describe('Outbound Flow con Rank Checker', () => {
-  it('crea conversazione, usa tool search_similar_clients, invia email con CTA', async () => {
+describe('Outbound Flow con Rank Checker (multi-agent)', () => {
+  it('pipeline: researcher -> strategist -> writer -> reviewer -> bozza salvata', async () => {
     await User.create(ownerUser);
     const contact = await Contact.create(contactInbound);
 
@@ -108,12 +128,16 @@ describe('Outbound Flow con Rank Checker', () => {
 
     const result = await runAgentLoop(conversation, '[ISTRUZIONE INTERNA] Primo contatto rank checker');
 
-    expect(result.toolsUsed.length).toBeGreaterThanOrEqual(1);
-    const toolNames = result.toolsUsed.map(t => t.name);
-    expect(toolNames).toContain('search_similar_clients');
-    expect(toolNames).toContain('send_email_reply');
+    expect(result.response).toBeDefined();
+    expect(result.response.length).toBeGreaterThan(0);
 
-    const sendTool = result.toolsUsed.find(t => t.name === 'send_email_reply');
-    expect(sendTool).toBeDefined();
+    const conv = await Conversation.findById(conversation._id);
+    expect(conv.status).toBe('awaiting_human');
+
+    const agentMsg = conv.messages.find(m => m.role === 'agent');
+    expect(agentMsg).toBeDefined();
+    expect(agentMsg.content).toContain('Marco');
+
+    expect(result.toolsUsed.some(t => t.name === 'send_email_reply' && t.result?.draft === true)).toBe(true);
   });
 });

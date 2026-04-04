@@ -575,4 +575,5 @@ async function toolBookCallback({ phone, time_preference, confirmation_message, 
   };
 }
 
+export { toolSearchSimilarClients, toolResearchBusiness, toolGetRanking, toolSendEmail, toolSendWhatsApp, toolBookCallback, toolScheduleFollowup, toolRequestHumanHelp };
 export default { AGENT_TOOLS, executeTools };
