@@ -1,0 +1,13 @@
+process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'sk-test-fake-key';
+process.env.AGENT_APPROVAL_MODE = process.env.AGENT_APPROVAL_MODE || 'false';
+process.env.SMARTLEAD_API_KEY = process.env.SMARTLEAD_API_KEY || 'test-smartlead-key';
+process.env.SMARTLEAD_WEBHOOK_SECRET = process.env.SMARTLEAD_WEBHOOK_SECRET || '';
+process.env.RESEND_API_KEY = process.env.RESEND_API_KEY || 'test-resend-key';
+process.env.RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'test@menuchat.it';
+process.env.SERPAPI_KEY = process.env.SERPAPI_KEY || 'test-serpapi-key';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-for-signed-urls-32chars!';
+process.env.BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3099';
+process.env.CRM_API_URL = process.env.CRM_API_URL || 'http://localhost:3098';
+process.env.CRM_API_KEY = process.env.CRM_API_KEY || 'test-crm-key';
+process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+process.env.NODE_ENV = 'test';
