@@ -155,13 +155,16 @@ async function toolSearchSimilarClients({ cuisine_type, city, region }) {
         clients: response.data.restaurants.map(r => ({
           name: r.name,
           city: r.address?.city || r.address?.formattedAddress?.split(',').slice(-2, -1)[0]?.trim(),
-          googleReviews: r.googleRating?.reviewCount,
+          currentReviews: r.currentReviewCount || r.googleRating?.reviewCount,
+          initialReviews: r.initialReviewCount || 0,
+          reviewsGained: r.reviewsGained,
+          monthsActive: r.monthsActive,
+          avgReviewsPerMonth: r.avgReviewsPerMonth,
           rating: r.googleRating?.rating,
           menuUrl: r.menuUrl || `https://menuchat.it/menu/${r._id}`,
-          menuItemCount: r.menuItemCount || 0,
-          hasCompletedMenu: r.hasCompletedMenu || false
+          menuItemCount: r.menuItemCount || 0
         })),
-        note: 'Questi sono clienti reali MenuChat attivi con menu digitale completo. Puoi condividere il link al menu (menuUrl) al lead per fargli vedere un esempio concreto di come appare il menu digitale di un ristorante simile al suo.'
+        note: 'Questi sono clienti REALI MenuChat. Usa i dati "reviewsGained" e "monthsActive" per dire cose come: "[nome] ha raccolto [reviewsGained] recensioni in [monthsActive] mesi con MenuChat — erano a [initialReviews], ora sono a [currentReviews]". Puoi anche condividere il link al menu (menuUrl). NON inventare numeri — usa SOLO quelli che vedi qui.'
       };
     }
 

@@ -205,7 +205,7 @@ REGOLE TASSATIVE:
 - INIZIA con "Ciao, sono ${identity.name} di MenuChat!" e ringrazia per aver usato il Rank Checker
 - Firma solo col nome
 
-ESEMPIO (adattalo ai dati sopra, NON copiarlo identico, personalizza):
+ESEMPIO (adattalo ai dati sopra, NON copiarlo identico, personalizza con i dati reali):
 
 "Ciao, sono ${identity.name} di MenuChat!
 
@@ -213,15 +213,18 @@ Grazie per aver provato il nostro Rank Checker — ho dato un'occhiata ai tuoi d
 
 Abbiamo creato l'unico menu digitale al mondo che permette di raccogliere fino a 100 recensioni Google al mese, in automatico. Con i tuoi ${covers || '?'} coperti al giorno, scommettiamo che in sole 2 settimane di prova gratuita ne raccogli almeno ${estimatedIn2Weeks || '?'}.
 
-Ti va di sentirci 5 minuti? ${contact.phone ? `Il tuo numero è ${contact.phone} — ti chiamo io!` : 'A che numero posso chiamarti?'}
+[SE search_similar_clients ha trovato un cliente con reviewsGained]: Per darti un'idea, [nome cliente] ha raccolto [reviewsGained] recensioni in [monthsActive] mesi con noi.
+
+Ti chiamo per spiegarti come funziona la prova? ${contact.phone ? `Il tuo numero è ${contact.phone} — ti chiamo io!` : 'A che numero posso chiamarti?'}
 
 ${identity.name}"
 
 COSA FARE:
-1. PRIMA DI TUTTO usa "search_similar_clients" per trovare un cliente MenuChat simile nella sua zona — se lo trovi citalo nel messaggio con il link al menu
-2. Componi il messaggio ispirandoti all'esempio, personalizzandolo con i dati reali (posizione, competitor, rating, menu digitale si/no, cliente simile se trovato)
-3. Invia via email (send_email_reply)
-4. NON mandare WhatsApp`;
+1. PRIMA DI TUTTO usa "search_similar_clients" per trovare un cliente MenuChat simile — se lo trovi, cita quante recensioni ha raccolto e in quanto tempo (reviewsGained + monthsActive)
+2. Componi il messaggio ispirandoti all'esempio. Personalizza con: posizione, coperti, stima 2 settimane, cliente simile se trovato, conferma telefono
+3. NON dire "ti faccio vedere come funziona" — di' "ti chiamo per spiegarti come funziona la prova"
+4. Invia via email (send_email_reply)
+5. NON mandare WhatsApp`;
 };
 
 const extractCity = (contact) => {
