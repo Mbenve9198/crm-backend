@@ -149,6 +149,10 @@ export const executeTools = async (toolName, toolInput, conversationContext) => 
       return await toolScheduleFollowup(toolInput, conversationContext);
     case 'book_callback':
       return await toolBookCallback(toolInput, conversationContext);
+    case 'update_smartlead_email':
+      return await toolUpdateSmartleadEmail(toolInput, conversationContext);
+    case 'update_contact':
+      return await toolUpdateContact(toolInput, conversationContext);
     default:
       return { error: `Tool sconosciuto: ${toolName}` };
   }
@@ -575,5 +579,66 @@ async function toolBookCallback({ phone, time_preference, confirmation_message, 
   };
 }
 
-export { toolSearchSimilarClients, toolResearchBusiness, toolGetRanking, toolSendEmail, toolSendWhatsApp, toolBookCallback, toolScheduleFollowup, toolRequestHumanHelp };
+async function toolUpdateSmartleadEmail({ new_email }, ctx) {
+  const conversation = ctx?.conversation;
+  if (!conversation) return { error: 'Nessuna conversazione attiva' };
+
+  const slData = conversation.context?.smartleadData;
+  if (!slData?.campaignId || !slData?.leadId) {
+    return { error: 'Dati Smartlead mancanti (campaignId/leadId)' };
+  }
+
+  try {
+    const SMARTLEAD_API_KEY = process.env.SMARTLEAD_API_KEY;
+    if (!SMARTLEAD_API_KEY) return { error: 'SMARTLEAD_API_KEY non configurata' };
+
+    await axios.post(
+      `https://server.smartlead.ai/api/v1/campaigns/${slData.campaignId}/leads/${slData.leadId}`,
+      { email: new_email },
+      { params: { api_key: SMARTLEAD_API_KEY }, timeout: 10000 }
+    );
+
+    const contact = ctx?.contact || await Contact.findById(conversation.contact);
+    if (contact) {
+      contact.email = new_email;
+      await contact.save();
+    }
+
+    agentLogger.info('smartlead_email_updated', {
+      conversationId: conversation._id,
+      data: { newEmail: new_email }
+    });
+
+    return { success: true, new_email, note: 'Email aggiornata su Smartlead e nel CRM.' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function toolUpdateContact(updates, ctx) {
+  const conversation = ctx?.conversation;
+  const contact = ctx?.contact || (conversation ? await Contact.findById(conversation.contact) : null);
+  if (!contact) return { error: 'Contatto non trovato' };
+
+  try {
+    const allowed = ['phone', 'status', 'properties'];
+    for (const [key, value] of Object.entries(updates)) {
+      if (key === 'properties' && typeof value === 'object') {
+        for (const [pk, pv] of Object.entries(value)) {
+          contact.properties = contact.properties || {};
+          contact.properties[pk] = pv;
+        }
+        contact.markModified('properties');
+      } else if (allowed.includes(key)) {
+        contact[key] = value;
+      }
+    }
+    await contact.save();
+    return { success: true, updated: Object.keys(updates) };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export { toolSearchSimilarClients, toolResearchBusiness, toolGetRanking, toolSendEmail, toolSendWhatsApp, toolBookCallback, toolScheduleFollowup, toolRequestHumanHelp, toolUpdateSmartleadEmail, toolUpdateContact };
 export default { AGENT_TOOLS, executeTools };
