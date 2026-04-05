@@ -546,83 +546,28 @@ app.use('/api/session-monitor', sessionMonitorRoutes);
 import agentRoutes from './routes/agentRoutes.js';
 app.use('/api/agent', agentRoutes);
 
-// Rank Checker Outreach Job + Follow-up Job + Weekly Analysis (avvia dopo il boot del server)
-import { startRankCheckerOutreachJob } from './services/rankCheckerAgentService.js';
-import Conversation from './models/conversationModel.js';
+// Routes per Agent Task System
+import agentTaskRoutes from './routes/agentTaskRoutes.js';
+app.use('/api/agent', agentTaskRoutes);
 
-setTimeout(() => {
-  if (process.env.ENABLE_AGENT_OUTREACH === 'true') {
-    startRankCheckerOutreachJob();
+// Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
+import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
+import { checkAgentHealth } from './services/agentServiceClient.js';
+
+setTimeout(async () => {
+  const agentOnline = await checkAgentHealth();
+  if (agentOnline) {
+    console.log('✅ Agent Service raggiungibile');
   } else {
-    console.log('ℹ️ Agent outreach disabilitato (ENABLE_AGENT_OUTREACH != true)');
+    console.warn('⚠️ Agent Service NON raggiungibile — i task verranno accodati ma non processati');
   }
 
-  // Follow-up job: processa conversazioni con nextActionAt scaduto (ogni 15 min, solo 9-20 Rome)
-  setInterval(async () => {
-    try {
-      const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
-      if (romeH < 9 || romeH >= 20) return;
-
-      const pending = await Conversation.findPendingActions();
-      if (pending.length === 0) return;
-      console.log(`🔄 Follow-up job: ${pending.length} conversazioni da ricontattare`);
-      const { runAgentLoop } = await import('./services/salesAgentService.js');
-      for (const conv of pending) {
-        try {
-          conv.status = 'active';
-          await conv.save();
-          const note = conv.context?.nextAction || 'Follow-up programmato';
-          const painPoints = conv.context?.painPoints?.length > 0
-            ? `\nPain point emersi in precedenza: ${conv.context.painPoints.join(', ')}.`
-            : '';
-          const objections = conv.context?.objections?.length > 0
-            ? `\nObiezioni passate: ${conv.context.objections.join(', ')}.`
-            : '';
-          const summary = conv.context?.conversationSummary
-            ? `\nRiassunto conversazione precedente: ${conv.context.conversationSummary}`
-            : '';
-          await runAgentLoop(conv, `[ISTRUZIONE INTERNA] È il momento del follow-up programmato. Nota: "${note}".${summary}${painPoints}${objections}
-
-REGOLE FOLLOW-UP:
-- Porta VALORE NUOVO: usa "search_similar_clients" per trovare un caso studio diverso da quello già citato, oppure "get_ranking_for_keyword" per dati aggiornati sulla posizione del lead
-- NON ripetere le stesse informazioni del messaggio precedente
-- Se il lead aveva obiezioni, affronta quella principale con un angolo diverso
-- Se il lead era tiepido, condividi un dato concreto (es. risultati di un cliente simile)
-- Chiudi sempre con una domanda o una proposta di sentirvi al telefono
-- Sii breve e naturale, come se ti fossi ricordato di loro`);
-        } catch (err) {
-          console.error(`❌ Follow-up fallito per conv ${conv._id}:`, err.message);
-        }
-      }
-    } catch (err) {
-      console.error('❌ Follow-up job error:', err.message);
-    }
-  }, 15 * 60 * 1000);
-
-  // Auto-close stale conversations job (ogni 6 ore)
-  setInterval(async () => {
-    try {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const staleConversations = await Conversation.find({
-        status: { $in: ['active', 'paused'] },
-        updatedAt: { $lte: sevenDaysAgo }
-      });
-
-      if (staleConversations.length === 0) return;
-      console.log(`🗑️ Auto-close: ${staleConversations.length} conversazioni stale (>7gg)`);
-
-      const { closeConversation } = await import('./services/agentAnalyticsService.js');
-      for (const conv of staleConversations) {
-        try {
-          await closeConversation(conv._id, 'stale');
-        } catch (err) {
-          console.error(`❌ Auto-close fallito per ${conv._id}:`, err.message);
-        }
-      }
-    } catch (err) {
-      console.error('❌ Auto-close job error:', err.message);
-    }
-  }, 6 * 60 * 60 * 1000);
+  if (process.env.ENABLE_AGENT_OUTREACH === 'true') {
+    startTaskProcessor();
+    startTaskGenerator();
+  } else {
+    console.log('ℹ️ Agent task system disabilitato (ENABLE_AGENT_OUTREACH != true)');
+  }
 
   // Weekly analysis job: ogni lunedì alle 8:00 Rome, analizza le performance dell'agente
   const scheduleWeeklyAnalysis = () => {

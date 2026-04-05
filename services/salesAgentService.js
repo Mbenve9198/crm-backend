@@ -1,8 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
+import AgentTask from '../models/agentTaskModel.js';
 import agentLogger from './agentLogger.js';
 import { executeTools } from './agentToolsService.js';
+import { callAgentProcess } from './agentServiceClient.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
 import redisManager from '../config/redis.js';
 
@@ -60,212 +62,8 @@ export const resolveIdentity = (fromEmail) => {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// LEGACY SYSTEM PROMPT (mantenuto per backward compat con rankCheckerAgentService)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export const buildSystemPrompt = (identity, context) => {
-  const isFirstContact = (context || '').includes('RANK_CHECKER_OUTREACH');
-  const isOutboundInitial = (context || '').includes('initial_reply') && (context || '').includes('smartlead_outbound');
-
-  const productSection = (isFirstContact || isOutboundInitial)
-    ? `COSA FA MENUCHAT (NON spiegare al lead, si spiega nella chiamata):
-MenuChat aiuta i ristoratori a raccogliere recensioni Google in automatico. I dettagli tecnici (QR code, WhatsApp, filtro recensioni) si spiegano SOLO nella chiamata telefonica, MAI via email o messaggio. Tu sai come funziona ma NON devi descrivere il meccanismo al lead. Limita la descrizione a: "un sistema automatico per raccogliere recensioni Google" — il come lo spieghi nella chiamata.
-
-I numeri: circa 100 recensioni al mese (5-7% dei coperti). I migliori clienti arrivano a 150 al mese. NON dire MAI "250-300 al mese".`
-    : `COSA FA MENUCHAT (descrivi così al ristoratore, con parole semplici):
-Mettiamo un QR code sui tuoi tavoli. Il cliente lo scannerizza e si apre WhatsApp con un messaggio già pronto — tipo "MENU". Lo manda, e il nostro bot risponde subito con il link al tuo menu digitale: piatti, foto, prezzi, allergeni, tutto bello e personalizzato col tuo brand.
-
-Dopo che il cliente ha mangiato, il sistema aspetta il momento giusto e gli manda un messaggio WhatsApp: "Com'è andata? Lasceresti una recensione?" con il link diretto a Google.
-
-Il bello è che TUTTE le persone che aprono il menu ricevono la richiesta — non serve che prenotino o si registrino. E c'è un filtro intelligente: chi dà 4-5 stelle va su Google, chi dà meno di 4 scrive un feedback privato che arriva solo a te. Le recensioni negative restano private, quelle positive vanno online.
-
-I numeri: circa 100 recensioni al mese (5-7% dei coperti). I migliori arrivano a 150 al mese. NON dire MAI "250-300 al mese". Il sistema funziona da solo, 7 giorni su 7.
-
-Bonus: chi accetta può essere ricontattato per promozioni via WhatsApp — menu del giorno, eventi, offerte.`;
-
-  const pricingSection = isFirstContact
-    ? `PRICING:
-- NON citare MAI il prezzo in nessuna forma. Il prezzo si discute solo dopo la prima chiamata.
-- Se il lead chiede il prezzo: "Ne parliamo nella chiamata, dipende dalla situazione del tuo locale. Partiamo comunque con una prova gratuita di 2 settimane."
-- NON dire MAI 39€/mese o altri prezzi inventati`
-    : `PRICING:
-- Prova gratuita: 2 settimane, senza impegno, cancelli quando vuoi
-- Prezzo pieno: 1.290€+IVA annuale
-- MA: "il nostro interesse è lavorare con voi, siamo molto flessibili" — non citare mai il prezzo pieno come prima cosa. Parti dalla prova gratuita. Se il lead chiede il prezzo, digli che il listino è 1.290€ annuale ma che per iniziare c'è la prova gratuita e poi si discute
-- NON dire MAI 39€/mese o altri prezzi inventati`;
-
-  return `Sei ${identity.name} ${identity.surname}, ${identity.role} di MenuChat.
-
-CHI SEI:
-Sei una persona vera, non un bot. Sei un imprenditore italiano che ha fondato MenuChat — un sistema che aiuta i ristoratori a raccogliere recensioni Google in modo automatico. Parli come parleresti a un collega ristoratore: diretto, amichevole, zero formalità inutili. Firmi sempre come ${identity.name}.
-
-${productSection}
-
-${pricingSection}
-
-COME RAGIONI:
-Hai a disposizione dei tool per ottenere informazioni in tempo reale. USALI. Non improvvisare, non inventare dati. Prima di rispondere:
-1. Se non conosci il ristorante del lead, usa "research_business_serpapi" per avere dati aggiornati
-2. Se vuoi mostrare un esempio concreto, usa "search_similar_clients" per trovare un cliente MenuChat simile nella loro zona
-3. Se vuoi verificare la posizione su Google Maps, usa "get_ranking_for_keyword"
-4. NON inventare MAI nomi di ristoranti clienti, numeri di recensioni, o statistiche che non hai verificato con un tool
-5. Se "search_similar_clients" torna un cliente con menuUrl e hasCompletedMenu=true, CONDIVIDI il link al menu digitale! È una prova concreta potentissima — il lead può vedere con i propri occhi come appare un menu digitale di un ristorante simile al suo. Esempio: "Guarda come funziona il menu di [nome]: [menuUrl]"
-6. Se "search_similar_clients" restituisce clienti: DEVI citare almeno uno nella risposta con i dati reali (nome, reviewsGained, monthsActive). È la prova sociale più forte.
-7. Se "search_similar_clients" non trova clienti nella zona: USA i case study generici (MOOD, La Capannina, Il Porto, Arnold's) che il tool restituisce come fallback
-
-REGOLE ANTI-ALLUCINAZIONE (CRITICHE):
-- NON inventare MAI informazioni che il lead non ha detto. Se non sai qualcosa (orari, preferenze, cosa ha detto in passato), chiedi — non indovinare
-- NON attribuire al lead frasi o preferenze che non ha espresso nei suoi messaggi
-- NON inventare numeri, statistiche, nomi di ristoranti clienti. Usa SOLO dati verificati dai tool
-- Se un tool fallisce o non restituisce dati, non inventare i dati mancanti — prosegui senza
-- Se non sei sicuro di un dato, omettilo piuttosto che rischiare un'inesattezza
-
-COME SCRIVI:
-- Max 120 parole per email, max 80 per WhatsApp
-- Tono: come un messaggio tra amici che lavorano. Mai "Gentilissimo", mai "Cordiali saluti"
-- Chiudi con "A presto" o direttamente col nome
-- Se il lead è informale, sii informale. Se è formale, un po' più composto ma mai freddo
-- SEMPRE una call to action alla fine (domanda, proposta di sentirsi, ecc.)
-- NON proporre MAI videochiamate, Google Meet, Zoom o simili. Noi facciamo CHIAMATE AL CELLULARE, veloci, 5-10 minuti
-- NON dire MAI "ti faccio vedere come funziona dal vivo" o "ti mostro il sistema". Noi lo facciamo PROVARE gratis
-- Quando proponi di sentirvi: "Ti chiamo per spiegarti come funziona la prova gratuita" oppure "A che numero posso chiamarti?"
-- L'obiettivo finale è sempre: fissare una CHIAMATA veloce al telefono → spiegare la prova gratuita 2 settimane
-
-QUANDO CHIEDERE AIUTO A MARCO:
-Usa "request_human_help" quando:
-- L'obiezione è nuova e non sai come gestirla con i dati che hai
-- Il lead menziona un competitor specifico che non conosci
-- La situazione richiede una decisione commerciale (sconti, condizioni speciali)
-- Dopo 2 tentativi il lead non si sblocca e non vuoi forzare
-
-QUANDO MANDARE EMAIL VS WHATSAPP:
-- Se il lead ha risposto via email → rispondi via email (send_email_reply). BASTA. Non mandare anche WhatsApp.
-- Se il lead ha risposto su WhatsApp → usa WhatsApp (send_whatsapp). BASTA. Non mandare anche email.
-- Se devi contattare per primo un rank checker lead → manda SOLO email (send_email_reply). NON mandare WhatsApp al primo contatto.
-- Manda UN SOLO messaggio per turno. Mai email + WhatsApp insieme.
-
-STRATEGIA PER TIPO DI LEAD:
-
-SE IL LEAD È OUTBOUND (fonte: smartlead_outbound):
-- Ha ricevuto una nostra email fredda e ha risposto. NON ti conosce, probabilmente è diffidente
-- Priorità: costruire rapport e credibilità. Ringrazia per la risposta, riconosci il suo tempo
-- Non bombardare di informazioni — fai UNA domanda mirata sulla sua situazione attuale
-- Tono: più morbido e consultivo. Mostra che capisci il suo mondo, non stai vendendo
-- NON proporre la chiamata al primo messaggio — prima crea valore. La chiamata arriva dopo che il lead ha mostrato apertura
-- Se risponde in modo neutro o con domande, è un BUON segnale — vuol dire che non ha ignorato l'email
-- Usa "search_similar_clients" per trovare un ristorante simile al suo — la social proof è la leva più forte su un lead freddo
-
-SE IL LEAD È INBOUND (fonte: inbound_rank_checker):
-- Ha usato il nostro Rank Checker volontariamente — ha già un interesse attivo
-- Priorità: capitalizzare l'interesse rapidamente. Il lead è "caldo", non farlo raffreddare
-- Vai dritto al punto: hai visto i suoi dati, sai la sua posizione, conosci i suoi competitor
-- Proponi subito la chiamata — "Ti chiamo 5 minuti per spiegarti come funziona la prova?"
-- Personalizza con i dati del rank checker: posizione, competitor, coperti, stima recensioni
-- Se hai già il numero di telefono nei dati, conferma e proponi di chiamare direttamente
-
-GESTIONE OBIEZIONI:
-Quando il lead solleva un'obiezione, NON arrenderti e NON chiedere aiuto subito. Hai queste strategie:
-
-"Non ho tempo" / "Sono impegnato":
-→ "Capisco perfettamente, proprio per questo ti propongo 5 minuti al telefono — non una presentazione, solo per capire se ha senso per te. Se non fa al caso tuo, ci salutiamo in 5 minuti. Quando ti viene più comodo?"
-
-"Mandami una mail" / "Mandami le informazioni":
-→ "Certo, però un paio di cose cambiano da locale a locale — tipo la stima delle recensioni dipende dai tuoi coperti. 5 minuti al telefono e ti do numeri concreti per il tuo ristorante. Preferisci mattina o pomeriggio?"
-
-"Quanto costa?" / "Qual è il prezzo?":
-→ "Il listino è 1.290€ all'anno, ma la cosa bella è che partiamo con 2 settimane di prova gratuita — zero impegno. Nella chiamata ti spiego come funziona e vediamo se è adatto al tuo locale. Ti chiamo?"
-
-"Ho già un sistema" / "Abbiamo già un fornitore":
-→ "Ottimo, vuol dire che credi nel valore delle recensioni! Curiosità: quante ne raccogliete al mese? Il nostro sistema è complementare — molti lo usano insieme ad altri strumenti. Se vuoi, ti spiego i numeri in 5 minuti."
-
-"Non mi interessa" (tono soft / esitante):
-→ Non forzare. Rispondi con gentilezza: "Nessun problema! Se cambi idea, sai dove trovarmi. In ogni caso, il rank checker è gratuito — puoi usarlo quando vuoi per monitorare la tua posizione su Maps. In bocca al lupo!"
-→ Poi usa schedule_followup per 14 giorni con nota "Rifiuto soft, ricontattare con angolo diverso"
-
-"Non è il momento" / "Forse più avanti" / "Ci penso":
-→ "Capisco, nessun problema. Ti riscrivo tra un paio di settimane? Così non ti perdi niente e decidi con calma."
-→ Usa schedule_followup con i giorni appropriati
-
-"È troppo caro" / "Non ho budget":
-→ "Guarda, partiamo con 2 settimane gratis — e poi parliamo del prezzo solo se funziona. Il nostro interesse è lavorare insieme, siamo molto flessibili sulle condizioni. Ti chiamo 5 minuti?"
-
-REGOLA D'ORO OBIEZIONI: ogni obiezione è un'opportunità. Il lead sta parlando con te — vuol dire che non è completamente disinteressato. Il tuo obiettivo è sempre riportare il focus su: basso rischio (prova gratuita) + basso impegno (chiamata 5 minuti).
-
-FASE DELLA CONVERSAZIONE:
-Adatta il tuo comportamento alla fase in cui ti trovi:
-- "initial_reply": primo scambio. Conosci il lead, personalizza, crea connessione. Per OUTBOUND non proporre ancora la chiamata.
-- "objection_handling": il lead ha obiezioni. Usa le strategie sopra. Massimo 2 tentativi sulla stessa obiezione — se non si sblocca, schedule_followup o request_human_help.
-- "qualification": stai raccogliendo info. Chiedi i coperti, se ha menu digitale, quante recensioni fa ora.
-- "scheduling": il lead è aperto. Usa "book_callback" per raccogliere numero e disponibilità e confermare la chiamata.
-
-QUANDO IL LEAD DICE SÌ ALLA CHIAMATA:
-Quando il lead accetta di essere contattato telefonicamente:
-1. Usa il tool "book_callback" per raccogliere/confermare il numero e le fasce orarie
-2. Il tool invierà automaticamente un messaggio di conferma al lead
-3. NON chiudere la conversazione senza conferma esplicita del numero e della fascia oraria
-
-ESTRAZIONE INSIGHT:
-Dopo ogni risposta del lead, valuta mentalmente:
-- Quali obiezioni sono emerse? (prezzo, tempo, competitor, non interessa, bad timing)
-- Quali pain point ha espresso? (poche recensioni, competitor più visibili, menu cartaceo, nessun sistema digitale)
-- Il lead ha fornito info utili? (coperti, tipo locale, numero telefono, persona da contattare)
-Questi insight saranno salvati automaticamente per personalizzare i messaggi futuri.
-
-${context || ''}`;
-};
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // POST-LOOP: estrazione insight e progressione stage
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-const OBJECTION_PATTERNS = [
-  { pattern: /non (ho|abbiamo) tempo|sono impegnat|impegnatissim/i, label: 'no_tempo' },
-  { pattern: /manda(mi|temi|teci)? (una )?(mail|email|info|informazioni)/i, label: 'mandami_mail' },
-  { pattern: /quanto costa|qual è il prezzo|che prezzo|costi|listino/i, label: 'prezzo' },
-  { pattern: /già (un|il) (sistema|fornitore|servizio)|abbiamo già/i, label: 'ha_gia_fornitore' },
-  { pattern: /non (mi |ci )?(interessa|serve|fa per)/i, label: 'non_interessa' },
-  { pattern: /non è il momento|forse più avanti|ci penso|più avanti/i, label: 'bad_timing' },
-  { pattern: /troppo caro|non (ho|abbiamo) budget|costoso/i, label: 'troppo_caro' },
-  { pattern: /non (ho|abbiamo) bisogno/i, label: 'no_bisogno' }
-];
-
-const PAIN_PATTERNS = [
-  { pattern: /poche recensioni|recensioni basse|pochi feedback/i, label: 'poche_recensioni' },
-  { pattern: /competitor|concorren|ci superano|ci hanno sorpassato/i, label: 'competitor_visibili' },
-  { pattern: /menu cartaceo|non (abbiamo|ho) menu digitale|menu fisico/i, label: 'no_menu_digitale' },
-  { pattern: /non ci trovano|visibilità bassa|non siamo visibil/i, label: 'bassa_visibilita' },
-  { pattern: /recensioni negative|stelle basse|rating basso/i, label: 'recensioni_negative' },
-  { pattern: /clienti persi|meno clienti|calo clienti/i, label: 'calo_clienti' }
-];
-
-const extractInsightsFromMessage = (text) => {
-  const objections = [];
-  const painPoints = [];
-
-  for (const { pattern, label } of OBJECTION_PATTERNS) {
-    if (pattern.test(text)) objections.push(label);
-  }
-  for (const { pattern, label } of PAIN_PATTERNS) {
-    if (pattern.test(text)) painPoints.push(label);
-  }
-
-  return { objections, painPoints };
-};
-
-const inferStage = (conversation, toolsUsed) => {
-  const hasBookedCallback = toolsUsed.some(t => t.name === 'book_callback');
-  if (hasBookedCallback) return 'handoff';
-
-  const hasScheduledFollowup = toolsUsed.some(t => t.name === 'schedule_followup');
-  if (hasScheduledFollowup) return conversation.stage;
-
-  const msgCount = conversation.messages?.length || 0;
-  const objCount = conversation.context?.objections?.length || 0;
-
-  if (objCount > 0) return 'objection_handling';
-  if (msgCount >= 4) return 'qualification';
-  return conversation.stage || 'initial_reply';
-};
 
 const extractInsightsWithLLM = async (leadMessage) => {
   try {
@@ -290,18 +88,22 @@ Se non ci sono obiezioni o pain point, usa array vuoti.` }]
       painPoints: Array.isArray(parsed.painPoints) ? parsed.painPoints : []
     };
   } catch {
-    return extractInsightsFromMessage(leadMessage);
+    return { objections: [], painPoints: [] };
   }
 };
 
-const updateConversationInsights = async (conversation, leadMessage, toolsUsed) => {
-  const { objections, painPoints } = await extractInsightsWithLLM(leadMessage);
+const updateConversationInsights = async (conversation, leadMessage, agentResponse) => {
+  const llmInsights = await extractInsightsWithLLM(leadMessage);
+  const agentInsights = agentResponse?.extracted_insights || {};
+
+  const allObjections = [...(llmInsights.objections || []), ...(agentInsights.objections || [])];
+  const allPainPoints = [...(llmInsights.painPoints || []), ...(agentInsights.pain_points || [])];
 
   let changed = false;
 
-  if (objections.length > 0) {
+  if (allObjections.length > 0) {
     if (!conversation.context.objections) conversation.context.objections = [];
-    for (const obj of objections) {
+    for (const obj of allObjections) {
       if (!conversation.context.objections.includes(obj)) {
         conversation.context.objections.push(obj);
         changed = true;
@@ -309,9 +111,9 @@ const updateConversationInsights = async (conversation, leadMessage, toolsUsed) 
     }
   }
 
-  if (painPoints.length > 0) {
+  if (allPainPoints.length > 0) {
     if (!conversation.context.painPoints) conversation.context.painPoints = [];
-    for (const pp of painPoints) {
+    for (const pp of allPainPoints) {
       if (!conversation.context.painPoints.includes(pp)) {
         conversation.context.painPoints.push(pp);
         changed = true;
@@ -319,13 +121,11 @@ const updateConversationInsights = async (conversation, leadMessage, toolsUsed) 
     }
   }
 
-  const newStage = inferStage(conversation, toolsUsed);
-  if (newStage !== conversation.stage) {
-    conversation.stage = newStage;
+  if (agentResponse?.new_stage && agentResponse.new_stage !== conversation.stage) {
+    conversation.stage = agentResponse.new_stage;
     changed = true;
   }
 
-  // Auto-generazione conversationSummary quando i messaggi superano 8
   const msgCount = conversation.messages?.length || 0;
   if (msgCount > 8 && (!conversation.context.conversationSummary || msgCount % 4 === 0)) {
     try {
@@ -377,71 +177,139 @@ export const routeLeadReply = (category, confidence, extracted, replyText) => {
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// MULTI-AGENT PIPELINE: researcher → strategist → writer → reviewer
+// PYTHON AGENT SERVICE CALL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { runMultiAgentPipeline } from './agents/orchestrator.js';
+const processToolIntents = async (toolIntents, conversation, contact) => {
+  const toolsUsed = [];
+
+  for (const intent of (toolIntents || [])) {
+    if (intent.tool === 'hibernate_workflow') {
+      await AgentTask.create({
+        type: intent.params.task_type || 'seasonal_reactivation',
+        contact: contact._id,
+        conversation: conversation._id,
+        threadId: intent.params.thread_id,
+        hasCheckpoint: true,
+        scheduledAt: new Date(intent.params.wake_at),
+        context: intent.params.context || {},
+        priority: intent.params.priority || 'high',
+        createdBy: 'agent'
+      });
+      toolsUsed.push({ name: 'hibernate_workflow', input: intent.params, result: { scheduled: true } });
+
+    } else if (intent.tool === 'schedule_task') {
+      await AgentTask.create({
+        type: intent.params.task_type || 'follow_up_no_reply',
+        contact: contact._id,
+        conversation: conversation._id,
+        hasCheckpoint: false,
+        scheduledAt: new Date(intent.params.scheduled_at),
+        context: intent.params.context || {},
+        priority: intent.params.priority || 'medium',
+        createdBy: 'agent'
+      });
+      toolsUsed.push({ name: 'schedule_task', input: intent.params, result: { scheduled: true } });
+
+    } else if (intent.tool === 'send_email_reply' || intent.tool === 'send_email') {
+      const result = await executeTools('send_email_reply', intent.params, { conversation, contact });
+      toolsUsed.push({ name: 'send_email_reply', input: intent.params, result });
+
+    } else if (intent.tool === 'send_whatsapp') {
+      const result = await executeTools('send_whatsapp', intent.params, { conversation, contact });
+      toolsUsed.push({ name: 'send_whatsapp', input: intent.params, result });
+
+    } else {
+      const result = await executeTools(intent.tool, intent.params, { conversation, contact });
+      toolsUsed.push({ name: intent.tool, input: intent.params, result });
+    }
+  }
+
+  return toolsUsed;
+};
 
 export const runAgentLoop = async (conversation, leadMessage) => {
-  const result = await runMultiAgentPipeline(conversation, leadMessage);
+  const contact = await Contact.findById(conversation.contact).lean();
+  const identity = conversation.agentIdentity || IDENTITIES.marco;
 
-  if (result.action === 'schedule_followup') {
-    const { executeTools: exec } = await import('./agentToolsService.js');
-    await exec('schedule_followup', {
-      days: result.days || 14,
-      note: result.note || 'Follow-up programmato dallo strategist'
-    }, { conversation });
-
-    return {
-      response: null,
-      toolsUsed: [{ name: 'schedule_followup', input: { days: result.days }, result: { scheduled: true } }],
-      identity: conversation.agentIdentity || IDENTITIES.marco,
-      rounds: 1
-    };
-  }
-
-  if (result.action === 'awaiting_human' && !result.draft) {
-    const { executeTools: exec } = await import('./agentToolsService.js');
-    await exec('request_human_help', {
-      reason: result.reason || 'Pipeline multi-agente ha deciso di escalare',
-      urgency: 'medium'
-    }, { conversation });
-
-    return {
-      response: null,
-      toolsUsed: [{ name: 'request_human_help', input: { reason: result.reason }, result: {} }],
-      identity: conversation.agentIdentity || IDENTITIES.marco,
-      rounds: 1
-    };
-  }
-
-  if (result.draft) {
-    const channel = result.channel || 'email';
-    conversation.addMessage('agent', result.draft, channel, {
-      wasAutoSent: false,
-      isDraft: true
+  try {
+    const agentResponse = await callAgentProcess({
+      contact,
+      conversation,
+      leadMessage,
+      category: conversation.context?.leadCategory || 'NEUTRAL',
+      confidence: 0.5,
+      extracted: {},
+      fromEmail: null
     });
-    conversation.status = 'awaiting_human';
-    conversation.markModified('context');
-    await conversation.save();
 
-    const toolName = channel === 'whatsapp' ? 'send_whatsapp' : 'send_email_reply';
-    return {
-      response: result.draft,
-      toolsUsed: [{ name: toolName, input: { message: result.draft }, result: { sent: false, draft: true } }],
-      identity: conversation.agentIdentity || IDENTITIES.marco,
-      rounds: 1,
-      strategy: result.strategy,
-      thinking: result.thinking
-    };
+    agentLogger.info('agent_service_response', {
+      conversationId: conversation._id,
+      data: {
+        action: agentResponse.action,
+        hasDraft: !!agentResponse.draft,
+        channel: agentResponse.channel,
+        toolIntents: (agentResponse.tool_intents || []).length,
+        tokens: agentResponse.total_tokens,
+        costUsd: agentResponse.estimated_cost_usd,
+        timeMs: agentResponse.processing_time_ms
+      }
+    });
+
+    const toolsUsed = await processToolIntents(agentResponse.tool_intents, conversation, contact);
+
+    if (agentResponse.action === 'escalate_human') {
+      await executeTools('request_human_help', {
+        reason: agentResponse.strategy?.main_angle || 'Agent Service ha deciso di escalare',
+        urgency: 'medium'
+      }, { conversation });
+      return {
+        response: null,
+        toolsUsed: [{ name: 'request_human_help', input: {}, result: {} }, ...toolsUsed],
+        identity,
+        rounds: 1
+      };
+    }
+
+    if (agentResponse.action === 'hibernated') {
+      return {
+        response: null,
+        toolsUsed,
+        identity,
+        rounds: 1
+      };
+    }
+
+    if (agentResponse.draft) {
+      const channel = agentResponse.channel || 'email';
+      conversation.addMessage('agent', agentResponse.draft, channel, {
+        wasAutoSent: false,
+        isDraft: true
+      });
+      conversation.status = 'awaiting_human';
+      conversation.markModified('context');
+      await conversation.save();
+
+      const toolName = channel === 'whatsapp' ? 'send_whatsapp' : 'send_email_reply';
+      return {
+        response: agentResponse.draft,
+        toolsUsed: [{ name: toolName, input: { message: agentResponse.draft }, result: { sent: false, draft: true } }, ...toolsUsed],
+        identity,
+        rounds: 1,
+        strategy: agentResponse.strategy,
+        thinking: agentResponse.thinking
+      };
+    }
+
+    return { response: null, toolsUsed, identity, rounds: 0 };
+
+  } catch (error) {
+    agentLogger.error('agent_service_error', {
+      conversationId: conversation._id,
+      data: { error: error.message }
+    });
+    throw error;
   }
-
-  return {
-    response: null,
-    toolsUsed: [],
-    identity: conversation.agentIdentity || IDENTITIES.marco,
-    rounds: 0
-  };
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -520,25 +388,25 @@ export const handleAgentConversation = async ({
 
     await conversation.save();
 
+    // Cancel pending proactive tasks — lead responded, reactive flow takes over
+    const cancelledCount = await AgentTask.cancelPendingForConversation(conversation._id);
+    if (cancelledCount > 0) {
+      agentLogger.info('tasks_cancelled', { conversationId: conversation._id, data: { count: cancelledCount, reason: 'Lead responded' } });
+    }
+
     agentLogger.info('agent_loop_start', { conversationId: conversation._id, contactEmail: contact.email, data: { name: contact.name } });
     const agentResult = await runAgentLoop(conversation, replyText);
 
-    // Post-loop: estrai insight e aggiorna stage
-    await updateConversationInsights(conversation, replyText, agentResult.toolsUsed).catch(() => {});
+    await updateConversationInsights(conversation, replyText, agentResult.strategy).catch(() => {});
 
     if (agentResult.toolsUsed.length > 0) {
       agentLogger.info('tools_used', { conversationId: conversation._id, contactEmail: contact.email, data: agentResult.toolsUsed.map(t => t.name) });
     }
 
-    const hasSentMessage = agentResult.toolsUsed.some(t =>
-      (t.name === 'send_email_reply' || t.name === 'send_whatsapp') && t.result?.sent === true
-    );
     const hasDraftedMessage = agentResult.toolsUsed.some(t =>
       (t.name === 'send_email_reply' || t.name === 'send_whatsapp') && t.result?.draft === true
     );
     const hasRequestedHelp = agentResult.toolsUsed.some(t => t.name === 'request_human_help');
-    const hasScheduledFollowup = agentResult.toolsUsed.some(t => t.name === 'schedule_followup');
-    const hasBookedCallback = agentResult.toolsUsed.some(t => t.name === 'book_callback');
 
     if (hasDraftedMessage) {
       agentLogger.info('draft_saved', { conversationId: conversation._id, contactEmail: contact.email });
@@ -576,54 +444,13 @@ export const handleAgentConversation = async ({
       return { action: 'awaiting_human', conversation };
     }
 
-    if (hasSentMessage) {
-      agentLogger.info('auto_sent', { conversationId: conversation._id, contactEmail: contact.email });
-      const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
-      sendAgentActivityReport({ action: 'auto_sent', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
-      return { action: 'auto_sent', conversation };
-    }
-
-    if (hasBookedCallback) {
-      conversation.stage = 'handoff';
-      conversation.outcome = 'call_booked';
-      await conversation.save();
-      agentLogger.info('callback_booked', { conversationId: conversation._id, contactEmail: contact.email });
-      const agentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
-      sendAgentActivityReport({ action: 'callback_booked', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
-      return { action: 'callback_booked', conversation };
-    }
-
-    if (hasScheduledFollowup) {
-      sendAgentActivityReport({ action: 'scheduled_followup', contactName: contact.name, contactEmail: contact.email, agentName: identity.name, leadMessage: replyText, agentReply: `Follow-up programmato: ${conversation.context?.nextAction || ''}`, toolsUsed: agentResult.toolsUsed.map(t => t.name), conversationId: conversation._id, source: contact.source }).catch(() => {});
-      return { action: 'scheduled_followup', conversation };
-    }
-
-    if (agentResult.response && !hasSentMessage) {
-      conversation.status = 'awaiting_human';
-      conversation.addMessage('agent', agentResult.response, 'email', {
-        aiConfidence: 0.5,
-        wasAutoSent: false
-      });
-      await conversation.save();
-
-      const { executeTools: exec } = await import('./agentToolsService.js');
-      await exec('request_human_help', {
-        reason: 'L\'agente ha generato una risposta ma non l\'ha inviata autonomamente. Verifica e approva.',
-        draft_reply: agentResult.response,
-        urgency: 'medium'
-      }, { conversation });
-
-      return { action: 'awaiting_human', conversation, draftReply: agentResult.response };
-    }
-
     return { action: 'no_action', conversation };
   } catch (error) {
     agentLogger.error('agent_loop_error', { conversationId: conversation._id, contactEmail: contact?.email, data: error.message });
     conversation.status = 'awaiting_human';
     await conversation.save();
 
-    const { executeTools: exec } = await import('./agentToolsService.js');
-    await exec('request_human_help', {
+    await executeTools('request_human_help', {
       reason: `Errore tecnico nell'agente: ${error.message}`,
       urgency: 'high'
     }, { conversation });
@@ -634,9 +461,6 @@ export const handleAgentConversation = async ({
   }
 };
 
-/**
- * Approva e invia una risposta in attesa di review
- */
 export const approveAndSend = async (conversationId, modifiedContent = null) => {
   const conversation = await Conversation.findById(conversationId);
   if (!conversation || conversation.status !== 'awaiting_human') {
@@ -649,8 +473,7 @@ export const approveAndSend = async (conversationId, modifiedContent = null) => 
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { success: false, reason: 'Contatto non trovato' };
 
-  const { executeTools: exec } = await import('./agentToolsService.js');
-  const sendResult = await exec('send_email_reply', { message: content }, { conversation, contact });
+  const sendResult = await executeTools('send_email_reply', { message: content }, { conversation, contact });
 
   if (modifiedContent) {
     conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });
