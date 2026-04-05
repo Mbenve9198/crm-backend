@@ -1,6 +1,6 @@
 import express from 'express';
 import AgentTask from '../models/agentTaskModel.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { protect } from '../controllers/authController.js';
 
 const router = express.Router();
 
