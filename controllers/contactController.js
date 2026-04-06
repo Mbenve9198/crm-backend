@@ -2298,7 +2298,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
  */
 export const getOwnerPerformanceAnalytics = async (req, res) => {
   try {
-    const { from, to, source, closeDateFrom, closeDateTo } = req.query;
+    const { from, to, source, closeDateFrom, closeDateTo, wonFrom, wonTo } = req.query;
 
     let dateFrom, dateTo;
     if (from) {
@@ -2680,6 +2680,50 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         lostBFTContacts: cur.lostBFTContacts,
         lostAFTContacts: cur.lostAFTContacts
       });
+    }
+
+    // Override won data if wonFrom/wonTo are provided (filter by close date, not cohort date)
+    if (wonFrom || wonTo) {
+      let wFrom = dateFrom, wTo = dateTo;
+      if (wonFrom) { const p = new Date(wonFrom); if (!isNaN(p.getTime())) wFrom = p; }
+      if (wonTo) { const p = new Date(wonTo); if (!isNaN(p.getTime())) { p.setHours(23, 59, 59, 999); wTo = p; } }
+
+      const wonEvents = await Activity.find({
+        type: 'status_change',
+        'data.statusChange.newStatus': 'won',
+        createdAt: { $gte: wFrom, $lte: wTo }
+      }).select('contact createdAt').lean();
+
+      const wonContactIds = [...new Set(wonEvents.map(e => String(e.contact)))];
+      const wonContacts = wonContactIds.length > 0
+        ? await Contact.find({ _id: { $in: wonContactIds.map(id => new mongoose.Types.ObjectId(id)) }, ...(sourcesOfInterest.length < 4 ? { source: { $in: sourcesOfInterest } } : {}) })
+            .select('_id name email mrr owner source').lean()
+        : [];
+
+      const wonByOwner = new Map();
+      for (const c of wonContacts) {
+        const oid = c.owner ? String(c.owner) : 'unassigned';
+        if (!wonByOwner.has(oid)) wonByOwner.set(oid, { count: 0, mrr: 0, contacts: [] });
+        const entry = wonByOwner.get(oid);
+        const mrr = typeof c.mrr === 'number' ? c.mrr : 0;
+        entry.count++;
+        entry.mrr += mrr;
+        entry.contacts.push({ id: String(c._id), name: c.name, email: c.email, source: c.source, mrr });
+      }
+
+      for (const o of owners) {
+        const w = wonByOwner.get(o.ownerId);
+        if (w) {
+          o.won = w.count;
+          o.mrrWon = w.mrr;
+          o.wonContacts = w.contacts;
+        } else {
+          o.won = 0;
+          o.mrrWon = 0;
+          o.wonContacts = [];
+        }
+        o.convFTtoWon = o.freeTrialStarted > 0 ? Math.round((o.won / o.freeTrialStarted) * 100) : 0;
+      }
     }
 
     owners.sort((a, b) => b.cohort - a.cohort);
