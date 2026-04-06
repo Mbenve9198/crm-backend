@@ -461,13 +461,20 @@ export const handleAgentConversation = async ({
         discardLink: generateSignedActionUrl(conversation._id, 'discard')
       }).catch(() => {});
 
+      const researchSummary = agentResult.research_summary || agentResult.strategy?.main_angle || '';
       logAgentActivity(contact._id, {
         type: 'ai_agent',
         title: '🤖 AI Agent — Bozza generata',
-        description: `L'agente ha analizzato il messaggio del lead e generato una bozza di risposta.\n\nMessaggio lead: "${replyText?.substring(0, 200)}"\n\nBozza: "${agentMsg?.content?.substring(0, 500)}"`,
-        data: { action: 'draft_ready', conversationId: conversation._id, channel: agentResult.strategy?.channel },
+        description: `L'agente ha analizzato il messaggio del lead e generato una bozza di risposta.\n\nMessaggio lead: "${replyText?.substring(0, 200)}"\n\nBozza: "${agentMsg?.content?.substring(0, 500)}"\n\n📊 Ricerca:\n${researchSummary?.substring(0, 1000)}`,
+        data: { action: 'draft_ready', conversationId: conversation._id, channel: agentResult.strategy?.channel, researchSummary },
         createdBy: contact.owner,
       });
+
+      if (researchSummary && conversation.context) {
+        conversation.context.lastResearchSummary = researchSummary;
+        conversation.markModified('context');
+        await conversation.save();
+      }
 
       return { action: 'awaiting_human', conversation, draftReply: agentMsg?.content };
     }
