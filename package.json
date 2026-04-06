@@ -12,6 +12,7 @@
     "create-production-users": "node scripts/createProductionUsers.js",
     "fix-email-index": "node scripts/fixEmailIndex.js",
     "inspect-db": "node scripts/inspectDatabase.js",
+    "trigger-outreach-test": "node scripts/triggerOutreachTest.js",
     "test-twilio": "node scripts/testTwilioVerified.js",
     "test-whatsapp": "node scripts/testWhatsApp.js",
     "clean-calls": "node scripts/cleanStuckCalls.js",

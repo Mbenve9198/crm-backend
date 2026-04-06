@@ -1,24 +1,31 @@
 /**
  * Policy layer deterministico per orchestrazione multicanale.
- * L'AI può suggerire un canale, ma qui imponiamo vincoli hard:
- * - Dopo inbound, il canale corrente è quello della risposta
- * - Non eseguire azioni (tool) su canali diversi dal currentChannel
+ * - reactive (default): dopo inbound, il canale corrente è quello della risposta;
+ *   non eseguire tool cross-canale.
+ * - proactive: outreach pianificato (task) — consenti email + WhatsApp nello stesso giro
+ *   (es. email subito + job template in coda).
  */
 
 export function getCurrentChannel(conversation) {
   return conversation?.channelState?.currentChannel || conversation?.channel || 'email';
 }
 
-export function applyChannelPolicyToAgentResponse(agentResponse, conversation) {
+export function applyChannelPolicyToAgentResponse(agentResponse, conversation, options = {}) {
   if (!agentResponse) return agentResponse;
 
+  const flow = options.flow || 'reactive';
   const forcedChannel = getCurrentChannel(conversation);
   const out = { ...agentResponse };
 
-  // Forza il canale della bozza/risposta
+  if (flow === 'proactive') {
+    // Non sovrascrivere il canale della bozza (l’agente può aver scelto email come primario).
+    // Non filtrare tool_intents: esecuzione con channelGuardrail "outreach" in taskProcessor.
+    return out;
+  }
+
+  // reactive: forza il canale della bozza/risposta al thread corrente
   out.channel = forcedChannel;
 
-  // Filtra tool intents incoerenti col canale corrente
   if (Array.isArray(out.tool_intents)) {
     out.tool_intents = out.tool_intents.filter((intent) => {
       const tool = intent?.tool;

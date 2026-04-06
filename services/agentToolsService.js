@@ -319,13 +319,17 @@ async function toolGetRanking({ restaurant_name, place_id, keyword, latitude, lo
   }
 }
 
+function isOutreachBypass(ctx) {
+  return ctx?.channelGuardrail === 'outreach';
+}
+
 async function toolSendEmail({ message, subject }, ctx) {
   const conversation = ctx?.conversation;
   if (!conversation) return { error: 'Nessuna conversazione attiva' };
 
-  // Guardrail canale: non inviare su email se il canale corrente è WhatsApp
+  // Guardrail canale: non inviare su email se il canale corrente è WhatsApp (tranne outreach proattivo)
   const currentChannel = conversation.channelState?.currentChannel || conversation.channel || 'email';
-  if (currentChannel !== 'email') {
+  if (!isOutreachBypass(ctx) && currentChannel !== 'email') {
     agentLogger.warn('channel_guardrail_block', {
       conversationId: conversation._id,
       data: { attempted: 'email', currentChannel }
@@ -397,10 +401,10 @@ async function toolSendEmail({ message, subject }, ctx) {
 async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
   const conversation = ctx?.conversation;
 
-  // Guardrail canale: non inviare su WhatsApp se il canale corrente è email
+  // Guardrail canale: non inviare su WhatsApp se il canale corrente è email (tranne outreach proattivo)
   if (conversation) {
     const currentChannel = conversation.channelState?.currentChannel || conversation.channel || 'email';
-    if (currentChannel !== 'whatsapp') {
+    if (!isOutreachBypass(ctx) && currentChannel !== 'whatsapp') {
       agentLogger.warn('channel_guardrail_block', {
         conversationId: conversation._id,
         data: { attempted: 'whatsapp', currentChannel }

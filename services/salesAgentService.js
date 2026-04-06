@@ -244,7 +244,7 @@ export const runAgentLoop = async (conversation, leadMessage) => {
       fromEmail: null
     });
 
-    agentResponse = applyChannelPolicyToAgentResponse(agentResponse, conversation);
+    agentResponse = applyChannelPolicyToAgentResponse(agentResponse, conversation, { flow: 'reactive' });
 
     agentLogger.info('agent_service_response', {
       conversationId: conversation._id,

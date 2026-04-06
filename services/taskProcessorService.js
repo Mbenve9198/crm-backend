@@ -48,7 +48,8 @@ async function processAgentTasks() {
       } else {
         let response;
 
-        if (task.hasCheckpoint && task.threadId) {
+        const isResume = !!(task.hasCheckpoint && task.threadId);
+        if (isResume) {
           response = await callAgentResume({
             threadId: task.threadId,
             updatedContext: {
@@ -62,12 +63,24 @@ async function processAgentTasks() {
 
           response = await callAgentProactive({ task, contact, conversation });
           if (conversation) {
-            response = applyChannelPolicyToAgentResponse(response, conversation);
+            response = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
           }
         }
 
         await processToolIntents(response.tool_intents || [], task);
-        await handleAgentResponse(response, task);
+
+        const approvalMode = process.env.AGENT_APPROVAL_MODE === 'true';
+        const shouldAutoSendProactive =
+          !isResume &&
+          response.action === 'draft_ready' &&
+          response.draft &&
+          !approvalMode;
+
+        if (shouldAutoSendProactive) {
+          await deliverProactiveOutreach(response, task);
+        } else {
+          await handleAgentResponse(response, task);
+        }
 
         task.status = 'completed';
         task.result = { action: response.action, hasDraft: !!response.draft };
@@ -115,9 +128,71 @@ async function processToolIntents(toolIntents, task) {
         ? task.contact
         : await Contact.findById(task.contact).lean();
 
-      await executeTools(intent.tool, intent.params, { conversation, contact });
+      await executeTools(intent.tool, intent.params, {
+        conversation,
+        contact,
+        channelGuardrail: 'outreach'
+      });
     }
   }
+}
+
+/** Invio reale dopo task proattivo (email + opzionale WhatsApp in coda template), senza bozza in approvazione umana. */
+async function deliverProactiveOutreach(response, task) {
+  const contact = task.contact && typeof task.contact === 'object'
+    ? task.contact
+    : await Contact.findById(task.contact).lean();
+  if (!contact) return;
+
+  let conversation = task.conversation && typeof task.conversation === 'object'
+    ? task.conversation
+    : (task.conversation ? await Conversation.findById(task.conversation) : null);
+
+  if (!conversation) {
+    conversation = new Conversation({
+      contact: contact._id || task.contact,
+      channel: response.channel || 'email',
+      status: 'active',
+      stage: 'initial_reply',
+      agentIdentity: { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' },
+      context: {
+        leadCategory: 'PROACTIVE_OUTREACH',
+        leadSource: contact?.source || 'inbound_rank_checker',
+        restaurantData: {
+          name: contact?.name,
+          city: contact?.properties?.city || contact?.properties?.location,
+        },
+      },
+      assignedTo: contact?.owner,
+    });
+    await conversation.save();
+    task.conversation = conversation._id;
+    await task.save();
+  }
+
+  const raw = response.strategy?.raw || {};
+  const subject = typeof raw.email_subject === 'string' ? raw.email_subject : undefined;
+
+  await executeTools('send_email_reply', {
+    message: response.draft,
+    subject
+  }, { conversation, contact, channelGuardrail: 'outreach' });
+
+  const dualWa = process.env.PROACTIVE_DUAL_CHANNEL_WHATSAPP === 'true';
+  const phone = contact.phone;
+  if (dualWa && phone) {
+    conversation = await Conversation.findById(conversation._id || conversation);
+    await executeTools('send_whatsapp', {
+      message: response.draft.slice(0, 900),
+      phone,
+      is_first_contact: true
+    }, { conversation, contact, channelGuardrail: 'outreach' });
+  }
+
+  agentLogger.info('proactive_outreach_sent', {
+    conversationId: conversation?._id,
+    data: { taskType: task.type, dualWhatsapp: !!(dualWa && phone) }
+  });
 }
 
 async function handleAgentResponse(response, task) {
