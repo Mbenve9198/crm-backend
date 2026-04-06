@@ -3,6 +3,7 @@ import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import { callAgentProactive, callAgentResume } from './agentServiceClient.js';
 import { executeTools } from './agentToolsService.js';
+import { sendProactiveWhatsApp } from './agentWhatsAppService.js';
 import { sendAgentActivityReport, sendAgentHumanReviewEmail } from './emailNotificationService.js';
 import { generateSignedActionUrl } from './signedUrlService.js';
 import { runDailyReactivationScan } from './contactScannerService.js';
@@ -191,15 +192,29 @@ async function deliverProactiveOutreach(response, task) {
     subject
   }, { conversation, contact, channelGuardrail: 'outreach' });
 
-  const dualWa = shouldSendDualWhatsappForTask(task);
   const phone = contact.phone;
-  if (dualWa && phone) {
-    conversation = await Conversation.findById(conversation._id || conversation);
-    await executeTools('send_whatsapp', {
-      message: response.draft.slice(0, 900),
+  if (phone) {
+    const waMessage = response.draft.length > 900 ? response.draft.slice(0, 897) + '...' : response.draft;
+    sendProactiveWhatsApp({
       phone,
-      is_first_contact: true
-    }, { conversation, contact, channelGuardrail: 'outreach' });
+      message: waMessage,
+      contactName: contact.name,
+      conversationId: conversation._id?.toString(),
+    }).then(result => {
+      if (result.success) {
+        Conversation.findById(conversation._id || conversation).then(conv => {
+          if (conv) {
+            conv.addMessage('agent', waMessage, 'whatsapp', {
+              wasAutoSent: true,
+              twilioMessageSid: result.messageSid,
+            });
+            conv.save().catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    }).catch(err => {
+      agentLogger.warn('whatsapp_dual_channel_failed', { data: { error: err.message, phone } });
+    });
   }
 
   agentLogger.info('proactive_outreach_sent', {

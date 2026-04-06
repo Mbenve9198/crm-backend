@@ -112,3 +112,6 @@ out/
 **.node-persist**
 **_IGNORE_**
 # end managed by open-wa
+scripts/test_whisper_transcription.js
+scripts/test_*
+scripts/probe_*
