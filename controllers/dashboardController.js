@@ -198,6 +198,12 @@ export const getDashboard = async (req, res) => {
             { $match: { status: 'qr code inviato' } },
             { $limit: parsedLimit },
             { $project: projectListFields }
+          ],
+          won: [
+            { $match: { status: 'won' } },
+            { $sort: { updatedAt: -1 } },
+            { $limit: parsedLimit },
+            { $project: projectListFields }
           ]
         }
       }
@@ -219,7 +225,8 @@ export const getDashboard = async (req, res) => {
       notTouched: [],
       callback: [],
       freeTrial: [],
-      qrFollowUp: []
+      qrFollowUp: [],
+      won: []
     };
 
     return res.json({
