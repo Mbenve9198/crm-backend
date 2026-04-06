@@ -275,9 +275,33 @@ const quickClassify = (text) => {
   }
 
   // --- INTERESTED: segnale positivo esplicito ---
-  const posPatterns = [
-    'chiamami', 'chiamatemi', 'chiamateci', 'mi chiami', 'ci chiami',
+  const phoneInBodyPatterns = [
     'il mio numero', 'ecco il numero', 'contattatemi al',
+    'chiamami', 'chiamatemi', 'chiamateci', 'mi chiami', 'ci chiami',
+    'dammi il tuo numero', 'lascio il numero', 'ti lascio il numero',
+    'ti lascio il mio numero',
+  ];
+  for (const p of phoneInBodyPatterns) {
+    if (normalized.includes(p)) {
+      const phones = detectPhonesInBody(text);
+      const phone = phones.length > 0 ? (phones[0].startsWith('+') ? phones[0] : '+39' + phones[0]) : null;
+      return { category: 'INTERESTED', confidence: 0.95, reason: 'Lead fornisce numero di telefono', shouldStopSequence: true, extracted: { phone, preferredChannel: 'phone' } };
+    }
+  }
+
+  const whatsappPatterns = [
+    'scrivimi su wa', 'scrivimi su whatsapp', 'mandami un whatsapp',
+    'scrivi su whatsapp', 'contattami su whatsapp',
+  ];
+  for (const p of whatsappPatterns) {
+    if (normalized.includes(p)) {
+      const phones = detectPhonesInBody(text);
+      const phone = phones.length > 0 ? (phones[0].startsWith('+') ? phones[0] : '+39' + phones[0]) : null;
+      return { category: 'INTERESTED', confidence: 0.95, reason: 'Lead chiede WhatsApp', shouldStopSequence: true, extracted: { phone, preferredChannel: 'whatsapp' } };
+    }
+  }
+
+  const posPatterns = [
     'quanto costa', 'qual è il prezzo', 'che prezzo', 'quali sono i costi',
     'come funziona il vostro', 'vorrei sapere di più', 'mi interessa',
     'sono interessato', 'sono interessata', 'siamo interessati',
@@ -292,9 +316,6 @@ const quickClassify = (text) => {
     'fammi sapere come', 'fatemi sapere come',
     'che tipo di proposta', 'maggiori informazioni',
     'illustrarci la proposta',
-    'dammi il tuo numero', 'lascio il numero', 'ti lascio il numero',
-    'ti lascio il mio numero',
-    'scrivimi su wa', 'scrivimi su whatsapp', 'mandami un whatsapp',
     'contatta il nostro responsabile'
   ];
   for (const p of posPatterns) {
