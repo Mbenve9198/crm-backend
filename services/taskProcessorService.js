@@ -118,11 +118,34 @@ async function processToolIntents(toolIntents, task) {
 async function handleAgentResponse(response, task) {
   if (!response.draft) return;
 
-  const conversation = task.conversation && typeof task.conversation === 'object'
+  const contact = task.contact && typeof task.contact === 'object'
+    ? task.contact
+    : await Contact.findById(task.contact).lean();
+
+  let conversation = task.conversation && typeof task.conversation === 'object'
     ? task.conversation
     : (task.conversation ? await Conversation.findById(task.conversation) : null);
 
-  if (!conversation) return;
+  if (!conversation) {
+    conversation = new Conversation({
+      contact: contact._id || task.contact,
+      channel: response.channel || 'email',
+      status: 'active',
+      stage: 'initial_reply',
+      agentIdentity: { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' },
+      context: {
+        leadCategory: 'PROACTIVE_OUTREACH',
+        leadSource: contact?.source || 'inbound_rank_checker',
+        restaurantData: {
+          name: contact?.name,
+          city: contact?.properties?.city || contact?.properties?.location,
+        },
+      },
+      assignedTo: contact?.owner,
+    });
+    task.conversation = conversation._id;
+    await task.save();
+  }
 
   const channel = response.channel || 'email';
   conversation.addMessage('agent', response.draft, channel, {
@@ -132,10 +155,6 @@ async function handleAgentResponse(response, task) {
   conversation.status = 'awaiting_human';
   conversation.markModified('context');
   await conversation.save();
-
-  const contact = task.contact && typeof task.contact === 'object'
-    ? task.contact
-    : await Contact.findById(conversation.contact).lean();
 
   const frontendUrl = process.env.FRONTEND_URL || 'https://crm-frontend-pied-sigma.vercel.app';
   await sendAgentHumanReviewEmail({
