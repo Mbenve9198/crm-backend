@@ -434,7 +434,6 @@ export const handleAgentConversation = async ({
         discardLink: generateSignedActionUrl(conversation._id, 'discard')
       }).catch(() => {});
 
-      sendAgentActivityReport({ action: 'awaiting_human', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone, agentName: identity.name, leadMessage: replyText, agentReply: agentMsg?.content, toolsUsed: agentResult.toolsUsed.map(t => t.name), category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
       return { action: 'awaiting_human', conversation, draftReply: agentMsg?.content };
     }
 
