@@ -2,12 +2,28 @@ import Anthropic from '@anthropic-ai/sdk';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import AgentTask from '../models/agentTaskModel.js';
+import Activity from '../models/activityModel.js';
 import agentLogger from './agentLogger.js';
 import { executeTools } from './agentToolsService.js';
 import { callAgentProcess } from './agentServiceClient.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
 import redisManager from '../config/redis.js';
 import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
+
+async function logAgentActivity(contactId, { type, title, description, data, createdBy }) {
+  try {
+    await Activity.create({
+      contact: contactId,
+      type: type || 'ai_agent',
+      title,
+      description: (description || '').substring(0, 2000),
+      data,
+      createdBy
+    });
+  } catch {
+    // non bloccante
+  }
+}
 
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const conversationLocksInMemory = new Map();
@@ -375,6 +391,13 @@ export const handleAgentConversation = async ({
       await conversation.save();
       agentLogger.info('direct_handoff', { conversationId: conversation._id, contactEmail: contact.email, data: 'Lead caldo → team vendite' });
       sendAgentActivityReport({ action: 'direct_handoff', contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone || extracted?.phone, agentName: identity.name, leadMessage: replyText, category, confidence, conversationId: conversation._id, source: contact.source }).catch(() => {});
+      logAgentActivity(contact._id, {
+        type: 'ai_agent',
+        title: '🎯 Direct Handoff — Lead caldo',
+        description: `Lead ha fornito il telefono o chiesto una chiamata. Passato direttamente al team vendite.\n\nMessaggio: "${replyText?.substring(0, 300)}"`,
+        data: { action: 'direct_handoff', phone: extracted?.phone, category, confidence },
+        createdBy: contact.owner,
+      });
       return { action: 'direct_handoff', conversation };
     }
 
@@ -437,6 +460,14 @@ export const handleAgentConversation = async ({
         modifyLink: `${frontendUrl}/agent/review?id=${conversation._id}`,
         discardLink: generateSignedActionUrl(conversation._id, 'discard')
       }).catch(() => {});
+
+      logAgentActivity(contact._id, {
+        type: 'ai_agent',
+        title: '🤖 AI Agent — Bozza generata',
+        description: `L'agente ha analizzato il messaggio del lead e generato una bozza di risposta.\n\nMessaggio lead: "${replyText?.substring(0, 200)}"\n\nBozza: "${agentMsg?.content?.substring(0, 500)}"`,
+        data: { action: 'draft_ready', conversationId: conversation._id, channel: agentResult.strategy?.channel },
+        createdBy: contact.owner,
+      });
 
       return { action: 'awaiting_human', conversation, draftReply: agentMsg?.content };
     }

@@ -221,10 +221,28 @@ async function deliverProactiveOutreach(response, task) {
     conversationId: conversation?._id,
     data: {
       taskType: task.type,
-      dualWhatsapp: !!(dualWa && phone),
-      reactivationDualOverride: REACTIVATION_DUAL_CHANNEL_TASK_TYPES.has(task.type)
+      dualWhatsapp: !!phone,
     }
   });
+
+  try {
+    const Activity = (await import('../models/activityModel.js')).default;
+    const taskLabels = {
+      rank_checker_outreach: '📨 AI Agent — Primo contatto rank checker',
+      follow_up_no_reply: '🔄 AI Agent — Follow-up (no reply)',
+      break_up_email: '👋 AI Agent — Break-up email',
+      reactivation: '🔁 AI Agent — Riattivazione lead dormiente',
+      seasonal_reactivation: '🌱 AI Agent — Riattivazione stagionale',
+    };
+    await Activity.create({
+      contact: contact._id,
+      type: 'ai_agent',
+      title: taskLabels[task.type] || `🤖 AI Agent — ${task.type}`,
+      description: `Azione proattiva dell'agente.\n\nDraft: "${response.draft?.substring(0, 500)}"`,
+      data: { action: task.type, conversationId: conversation?._id, channel: response.channel, dualWhatsapp: !!phone },
+      createdBy: contact.owner,
+    });
+  } catch {}
 }
 
 async function handleAgentResponse(response, task) {
