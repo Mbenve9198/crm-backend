@@ -17,7 +17,8 @@ import Activity from '../models/activityModel.js';
 const AGENT_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8100';
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyA3k3Gc5yNPtq4dT8vtf6YWVJZwMCnBtcE';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) { console.error('GEMINI_API_KEY env var required'); process.exit(1); }
 
 async function transcribeRecording(recordingSid) {
   const audioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Recordings/${recordingSid}.wav`;
