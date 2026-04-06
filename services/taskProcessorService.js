@@ -5,6 +5,7 @@ import { callAgentProactive, callAgentResume } from './agentServiceClient.js';
 import { executeTools } from './agentToolsService.js';
 import { sendAgentActivityReport, sendAgentHumanReviewEmail } from './emailNotificationService.js';
 import { generateSignedActionUrl } from './signedUrlService.js';
+import { runDailyReactivationScan } from './contactScannerService.js';
 import agentLogger from './agentLogger.js';
 
 const TASK_PROCESS_INTERVAL_MS = 10 * 60 * 1000;
@@ -192,7 +193,8 @@ async function generateReactivationTasks() {
   console.log('📋 Generazione task di riattivazione...');
   let created = 0;
 
-  const twoDaysAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  // ── 1. Rank Checker Outreach (primo contatto inbound) ──
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   const rcLeads = await Contact.find({
@@ -221,6 +223,7 @@ async function generateReactivationTasks() {
     }
   }
 
+  // ── 2. Conversation-based tasks (follow-up, break-up, dormant) ──
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const staleActive = await Conversation.find({
     status: 'active',
@@ -295,8 +298,16 @@ async function generateReactivationTasks() {
     }
   }
 
+  // ── 3. Contact-based reactivation scan (the new smart scanner) ──
+  try {
+    const reactivated = await runDailyReactivationScan();
+    created += reactivated;
+  } catch (err) {
+    console.error('❌ Contact scanner error:', err.message);
+  }
+
   if (created > 0) {
-    console.log(`📋 Task Generator: ${created} task creati`);
+    console.log(`📋 Task Generator: ${created} task creati totali`);
   }
 }
 

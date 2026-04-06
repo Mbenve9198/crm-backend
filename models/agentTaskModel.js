@@ -10,6 +10,8 @@ const agentTaskSchema = new mongoose.Schema({
       'break_up_email',
       'seasonal_reactivation',
       'reactivation',
+      'reactivation_warm',
+      'reactivation_cold',
       'human_task'
     ],
     required: true
@@ -49,7 +51,9 @@ const agentTaskSchema = new mongoose.Schema({
     enum: ['agent', 'human', 'system'],
     default: 'agent'
   },
-  cancelledReason: String
+  cancelledReason: String,
+  score: { type: Number, default: 0 },
+  scanBatch: { type: String, default: null },
 }, { timestamps: true });
 
 agentTaskSchema.index({ status: 1, scheduledAt: 1 });
@@ -61,9 +65,9 @@ agentTaskSchema.statics.findDueTasks = function(limit = 10) {
     status: 'pending',
     scheduledAt: { $lte: new Date() }
   })
-    .populate('contact', 'name email phone properties source rankCheckerData')
+    .populate('contact', 'name email phone properties source rankCheckerData status')
     .populate('conversation')
-    .sort({ priority: -1, scheduledAt: 1 })
+    .sort({ score: -1, priority: -1, scheduledAt: 1 })
     .limit(limit);
 };
 
