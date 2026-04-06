@@ -12,6 +12,19 @@ import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
 const TASK_PROCESS_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_GENERATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+/** Riattivazione: non affidarsi al solo canale corrente — email + WhatsApp (se c’è telefono), senza dipendere da PROACTIVE_DUAL_CHANNEL_WHATSAPP. */
+const REACTIVATION_DUAL_CHANNEL_TASK_TYPES = new Set([
+  'reactivation',
+  'reactivation_warm',
+  'reactivation_cold',
+  'seasonal_reactivation',
+]);
+
+function shouldSendDualWhatsappForTask(task) {
+  if (process.env.PROACTIVE_DUAL_CHANNEL_WHATSAPP === 'true') return true;
+  return REACTIVATION_DUAL_CHANNEL_TASK_TYPES.has(task.type);
+}
+
 export function startTaskProcessor() {
   console.log('🤖 Task Processor avviato (ogni 10 min)');
   processAgentTasks().catch(err => console.error('❌ Primo ciclo task processor:', err.message));
@@ -178,7 +191,7 @@ async function deliverProactiveOutreach(response, task) {
     subject
   }, { conversation, contact, channelGuardrail: 'outreach' });
 
-  const dualWa = process.env.PROACTIVE_DUAL_CHANNEL_WHATSAPP === 'true';
+  const dualWa = shouldSendDualWhatsappForTask(task);
   const phone = contact.phone;
   if (dualWa && phone) {
     conversation = await Conversation.findById(conversation._id || conversation);
@@ -191,7 +204,11 @@ async function deliverProactiveOutreach(response, task) {
 
   agentLogger.info('proactive_outreach_sent', {
     conversationId: conversation?._id,
-    data: { taskType: task.type, dualWhatsapp: !!(dualWa && phone) }
+    data: {
+      taskType: task.type,
+      dualWhatsapp: !!(dualWa && phone),
+      reactivationDualOverride: REACTIVATION_DUAL_CHANNEL_TASK_TYPES.has(task.type)
+    }
   });
 }
 
