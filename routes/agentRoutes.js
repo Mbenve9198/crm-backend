@@ -6,6 +6,8 @@ import AgentLog from '../models/agentLogModel.js';
 import AgentFeedback from '../models/agentFeedbackModel.js';
 import { approveAndSend, discardReply } from '../services/salesAgentService.js';
 import { buildFeedbackContext, getISOWeek } from '../services/signedUrlService.js';
+import { sendFeedbackToAgent } from '../services/agentServiceClient.js';
+import Contact from '../models/contactModel.js';
 import { protect } from '../controllers/authController.js';
 
 const router = express.Router();
@@ -86,6 +88,16 @@ router.post('/conversations/:id/approve', async (req, res) => {
       weekNumber: getISOWeek(new Date())
     }).catch(() => {});
 
+    const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
+    sendFeedbackToAgent({
+      conversation,
+      contact: contactDoc,
+      agentDraft,
+      finalSent: modifiedContent || agentDraft,
+      action,
+      modifications: isModified ? { addedContent: modifiedContent } : null,
+    }).catch(() => {});
+
     res.json({ ...result, feedbackAction: action });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -118,6 +130,16 @@ router.post('/conversations/:id/discard', async (req, res) => {
       conversationContext: buildFeedbackContext(conversation),
       reviewedBy: req.user?._id,
       weekNumber: getISOWeek(new Date())
+    }).catch(() => {});
+
+    const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
+    sendFeedbackToAgent({
+      conversation,
+      contact: contactDoc,
+      agentDraft,
+      action: 'discarded',
+      discardReason: discardReason || 'other',
+      discardNotes,
     }).catch(() => {});
 
     res.json({ ...result, feedbackAction: 'discarded' });

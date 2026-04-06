@@ -321,6 +321,8 @@ app.use('/api/inbound', inboundLeadRoutes);
 import { verifySignedUrl, renderHtmlPage, buildFeedbackContext, getISOWeek } from './services/signedUrlService.js';
 import AgentFeedback from './models/agentFeedbackModel.js';
 import { approveAndSend, discardReply } from './services/salesAgentService.js';
+import { sendFeedbackToAgent } from './services/agentServiceClient.js';
+import Contact from './models/contactModel.js';
 
 app.get('/api/agent/email-action', async (req, res) => {
   try {
@@ -356,6 +358,13 @@ app.get('/api/agent/email-action', async (req, res) => {
         conversationContext: buildFeedbackContext(conversation),
         weekNumber: getISOWeek(new Date())
       });
+
+      const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
+      sendFeedbackToAgent({
+        conversation, contact: contactDoc,
+        agentDraft: agentDraft || '', action: 'approved',
+      }).catch(() => {});
+
       return res.send(renderHtmlPage(
         'Messaggio inviato!',
         'La risposta dell\'agente è stata approvata e inviata al lead.',
@@ -374,6 +383,14 @@ app.get('/api/agent/email-action', async (req, res) => {
         conversationContext: buildFeedbackContext(conversation),
         weekNumber: getISOWeek(new Date())
       });
+
+      const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
+      sendFeedbackToAgent({
+        conversation, contact: contactDoc,
+        agentDraft: agentDraft || '', action: 'discarded',
+        discardReason: 'email_quick_discard',
+      }).catch(() => {});
+
       return res.send(renderHtmlPage(
         'Bozza scartata',
         'La bozza è stata scartata. La conversazione è in pausa.',

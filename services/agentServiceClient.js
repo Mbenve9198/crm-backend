@@ -263,6 +263,42 @@ export async function callAgentResume({ threadId, updatedContext }) {
   return response.data;
 }
 
+export async function sendFeedbackToAgent({ conversation, contact, agentDraft, finalSent, action, modifications, discardReason, discardNotes }) {
+  const contactObj = typeof contact === 'object' ? contact : null;
+  const payload = {
+    conversation_id: conversation?._id?.toString() || conversation?.toString() || '',
+    contact_email: contactObj?.email || '',
+    agent_draft: agentDraft || '',
+    final_sent: finalSent || null,
+    action,
+    lead_profile: contactObj ? {
+      category: contactObj.properties?.category || contactObj.properties?.business_type || null,
+      city: contactObj.properties?.city || contactObj.properties?.location || null,
+      source: contactObj.source || null,
+      status: contactObj.status || null,
+      rating: contactObj.properties?.rating || contactObj.rankCheckerData?.restaurantData?.rating || null,
+      reviews: contactObj.properties?.reviews_count || contactObj.rankCheckerData?.restaurantData?.reviewCount || null,
+    } : {},
+    conversation_context: {},
+    modifications: modifications || null,
+    discard_reason: discardReason || null,
+    discard_notes: discardNotes || null,
+  };
+
+  try {
+    const response = await client.post('/memory/feedback', payload, { timeout: 15000 });
+    agentLogger.info('agent_memory_feedback_sent', {
+      data: { action, conversationId: payload.conversation_id, contact: payload.contact_email }
+    });
+    return response.data;
+  } catch (err) {
+    agentLogger.warn('agent_memory_feedback_failed', {
+      data: { action, error: err.message }
+    });
+    return null;
+  }
+}
+
 export async function checkAgentHealth() {
   try {
     const response = await client.get('/health', { timeout: 5000 });
@@ -272,4 +308,4 @@ export async function checkAgentHealth() {
   }
 }
 
-export default { callAgentProcess, callAgentProactive, callAgentResume, checkAgentHealth };
+export default { callAgentProcess, callAgentProactive, callAgentResume, sendFeedbackToAgent, checkAgentHealth };
