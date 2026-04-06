@@ -114,6 +114,16 @@ const callSchema = new mongoose.Schema({
     type: String,
     maxLength: [1000, 'Le note non possono superare 1000 caratteri']
   },
+
+  // Trascrizione automatica della registrazione
+  transcript: {
+    type: String,
+    maxLength: [10000, 'La trascrizione non può superare 10000 caratteri']
+  },
+
+  transcriptGeneratedAt: {
+    type: Date
+  },
   
   // Outcome della chiamata (per tracking vendite)
   outcome: {

@@ -390,6 +390,16 @@ export const recordingStatusCallback = async (req, res) => {
           await activity.save();
           console.log(`✅ Registrazione aggiunta all'activity: ${activity._id}`);
         }
+
+        // Trascrizione asincrona (non blocca la risposta al webhook)
+        const duration = RecordingDuration ? parseInt(RecordingDuration) : 0;
+        if (duration >= 20) {
+          import('../services/callTranscriptionService.js').then(({ transcribeCall }) => {
+            transcribeCall(call._id)
+              .then(() => console.log(`📝 Trascrizione completata per ${CallSid}`))
+              .catch(err => console.error(`❌ Trascrizione fallita per ${CallSid}:`, err.message));
+          });
+        }
       }
     }
 

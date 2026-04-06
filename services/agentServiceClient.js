@@ -1,5 +1,7 @@
 import axios from 'axios';
 import agentLogger from './agentLogger.js';
+import Call from '../models/callModel.js';
+import Activity from '../models/activityModel.js';
 
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8100';
 const TIMEOUT_MS = parseInt(process.env.AGENT_SERVICE_TIMEOUT_MS || '120000');
@@ -32,7 +34,78 @@ function serializeContact(contact) {
     coordinates: rcRestaurant.coordinates || null,
     call_requested: p.callRequested || false,
     call_preference: p.callPreference || null,
+    status: contact.status || null,
+    notes: p.notes || null,
+    callback_at: p.callbackAt || null,
+    callback_note: p.callbackNote || null,
   };
+}
+
+async function buildCrmEnrichment(contactId, conversation) {
+  const enrichment = {};
+
+  try {
+    const calls = await Call.find({ contact: contactId })
+      .populate('initiatedBy', 'firstName lastName')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    if (calls.length > 0) {
+      enrichment.call_history = calls.map(c => ({
+        date: c.createdAt?.toISOString?.() || c.startTime?.toISOString?.() || null,
+        duration_seconds: c.duration || 0,
+        outcome: c.outcome || null,
+        notes: c.notes || null,
+        transcript: c.transcript || null,
+        initiated_by: c.initiatedBy
+          ? `${c.initiatedBy.firstName || ''} ${c.initiatedBy.lastName || ''}`.trim()
+          : null,
+      }));
+    }
+
+    const activities = await Activity.find({ contact: contactId })
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
+
+    if (activities.length > 0) {
+      const callActs = activities.filter(a => a.type === 'call');
+      const statusChanges = activities
+        .filter(a => a.type === 'status_change' && a.data?.statusChange)
+        .map(a => `${a.data.statusChange.oldStatus} → ${a.data.statusChange.newStatus}`);
+
+      enrichment.activity_summary = {
+        total_activities: activities.length,
+        calls_made: callActs.length,
+        calls_answered: callActs.filter(a =>
+          a.data?.callOutcome && !['no-answer', 'busy'].includes(a.data.callOutcome)
+        ).length,
+        last_call_date: callActs[0]?.createdAt?.toISOString?.() || null,
+        last_call_outcome: callActs[0]?.data?.callOutcome || null,
+        notes_count: activities.filter(a => a.type === 'note').length,
+        emails_count: activities.filter(a => a.type === 'email').length,
+        whatsapp_count: activities.filter(a => a.type === 'whatsapp').length,
+        status_changes: statusChanges.length > 0 ? statusChanges : undefined,
+      };
+    }
+  } catch (err) {
+    agentLogger.warn('crm_enrichment_error', { data: { contactId, error: err.message } });
+  }
+
+  if (conversation?.context) {
+    if (conversation.context.humanNotes?.length > 0) {
+      enrichment.human_notes = conversation.context.humanNotes.map(n => ({
+        note: n.note,
+        date: n.at?.toISOString?.() || null,
+      }));
+    }
+    if (conversation.context.conversationSummary) {
+      enrichment.conversation_summary = conversation.context.conversationSummary;
+    }
+  }
+
+  return Object.keys(enrichment).length > 0 ? enrichment : null;
 }
 
 function serializeRankCheckerData(contact) {
@@ -100,6 +173,9 @@ export async function callAgentProcess({
   contact, conversation, leadMessage, category, confidence, extracted, fromEmail
 }) {
   const identity = conversation.agentIdentity || { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' };
+  const contactId = contact._id || conversation.contact;
+
+  const crmEnrichment = await buildCrmEnrichment(contactId, conversation);
 
   const payload = {
     contact: serializeContact(contact),
@@ -123,7 +199,8 @@ export async function callAgentProcess({
     existing_pain_points: conversation.context?.painPoints || [],
     conversation_summary: conversation.context?.conversationSummary || null,
     is_first_contact: false,
-    agent_identity: { name: identity.name, surname: identity.surname, role: identity.role }
+    agent_identity: { name: identity.name, surname: identity.surname, role: identity.role },
+    crm_enrichment: crmEnrichment,
   };
 
   agentLogger.info('agent_service_call', {
@@ -137,6 +214,9 @@ export async function callAgentProcess({
 
 export async function callAgentProactive({ task, contact, conversation }) {
   const identity = conversation?.agentIdentity || { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' };
+  const contactId = contact._id || task.contact;
+
+  const crmEnrichment = await buildCrmEnrichment(contactId, conversation);
 
   const payload = {
     task_type: task.type,
@@ -158,7 +238,8 @@ export async function callAgentProactive({ task, contact, conversation }) {
     days_since_last_contact: conversation?.updatedAt
       ? Math.floor((Date.now() - new Date(conversation.updatedAt).getTime()) / (24 * 60 * 60 * 1000))
       : null,
-    last_outcome: conversation?.outcome || null
+    last_outcome: conversation?.outcome || null,
+    crm_enrichment: crmEnrichment,
   };
 
   agentLogger.info('agent_service_call', {
