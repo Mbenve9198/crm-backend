@@ -323,6 +323,7 @@ import AgentFeedback from './models/agentFeedbackModel.js';
 import { approveAndSend, discardReply } from './services/salesAgentService.js';
 import { sendFeedbackToAgent } from './services/agentServiceClient.js';
 import Contact from './models/contactModel.js';
+import Conversation from './models/conversationModel.js';
 
 app.get('/api/agent/email-action', async (req, res) => {
   try {
