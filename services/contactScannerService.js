@@ -9,8 +9,7 @@ const MIN_DAYS = parseInt(process.env.REACTIVATION_MIN_DAYS || '14');
 const MAX_DAYS = parseInt(process.env.REACTIVATION_MAX_DAYS || '180');
 
 const EXCLUDED_STATUSES = [
-  'won', 'lost before free trial', 'lost after free trial',
-  'bad_data', 'non_qualificato', 'free trial iniziato', 'qr code inviato'
+  'won', 'bad_data', 'non_qualificato', 'free trial iniziato', 'qr code inviato'
 ];
 
 const STATUS_SCORES = {
@@ -18,6 +17,8 @@ const STATUS_SCORES = {
   'interessato': 35,
   'contattato': 20,
   'ghosted/bad timing': 15,
+  'lost before free trial': 5,
+  'lost after free trial': 5,
   'da contattare': 0,
 };
 
