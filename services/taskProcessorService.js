@@ -285,10 +285,20 @@ function nextBusinessHour() {
   const now = new Date();
   const romeH = parseInt(now.toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
   if (romeH >= 9 && romeH < 19) return now;
-  const tomorrow9 = new Date(now);
-  tomorrow9.setDate(tomorrow9.getDate() + (romeH >= 19 ? 1 : 0));
-  tomorrow9.setHours(9, 0, 0, 0);
-  return tomorrow9;
+
+  const romeOffset = _getRomeUtcOffsetHours();
+  const target = new Date(now);
+  target.setDate(target.getDate() + (romeH >= 19 ? 1 : 0));
+  target.setUTCHours(9 - romeOffset, 0, 0, 0);
+  return target;
+}
+
+function _getRomeUtcOffsetHours() {
+  const jan = new Date(2026, 0, 1).toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false, hourCycle: 'h23' });
+  const jul = new Date(2026, 6, 1).toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false, hourCycle: 'h23' });
+  const now = new Date();
+  const month = now.getMonth();
+  return (month >= 2 && month <= 9) ? 2 : 1;
 }
 
 function scheduleDaily8AM(fn) {
