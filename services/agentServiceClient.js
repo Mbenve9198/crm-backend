@@ -12,19 +12,67 @@ const client = axios.create({
 
 function serializeContact(contact) {
   const p = contact.properties || {};
+  const rc = contact.rankCheckerData || {};
+  const rcRestaurant = rc.restaurantData || {};
+
   return {
     name: contact.name,
     email: contact.email,
     phone: contact.phone || null,
-    city: p.city || p['Città'] || p.location || null,
-    address: p.full_address || p['Indirizzo'] || null,
-    rating: p.rating || p.Rating || null,
-    reviews: p.reviews_count || p.Recensioni || null,
+    city: p.city || p['Città'] || p.location || _extractCityFromAddress(rcRestaurant.address) || null,
+    address: p.full_address || p['Indirizzo'] || rcRestaurant.address || null,
+    rating: p.rating || p.Rating || rcRestaurant.rating || null,
+    reviews: p.reviews_count || p.Recensioni || rcRestaurant.reviewCount || null,
     source: contact.source,
     category: p.category || p.business_type || null,
     website: p.site || p.Website || null,
-    google_maps_link: p.google_maps_link || null,
-    contact_person: p.contact_person || null
+    google_maps_link: p.google_maps_link || p.googleMapsUrl || null,
+    contact_person: p.contact_person || p.contactName || null,
+    place_id: rc.placeId || null,
+    coordinates: rcRestaurant.coordinates || null,
+    call_requested: p.callRequested || false,
+    call_preference: p.callPreference || null,
+  };
+}
+
+function serializeRankCheckerData(contact) {
+  const rc = contact.rankCheckerData;
+  if (!rc) return null;
+
+  const ranking = rc.ranking || {};
+  const fullResults = ranking.fullResults || {};
+
+  return {
+    keyword: rc.keyword,
+    dailyCovers: rc.dailyCovers,
+    hasDigitalMenu: rc.hasDigitalMenu,
+    estimatedMonthlyReviews: rc.estimatedMonthlyReviews,
+    placeId: rc.placeId,
+    ranking: {
+      mainRank: ranking.mainRank,
+      competitorsAhead: ranking.competitorsAhead,
+      estimatedLostCustomers: ranking.estimatedLostCustomers,
+      fullResults: {
+        userRestaurant: fullResults.userRestaurant || null,
+        competitors: (fullResults.competitors || fullResults.mainResult?.competitors || []).slice(0, 5).map(c => ({
+          name: c.name,
+          rank: c.rank,
+          rating: c.rating,
+          reviews: c.reviews,
+          place_id: c.place_id,
+        })),
+        mainResult: fullResults.mainResult ? {
+          rank: fullResults.mainResult.rank,
+          coordinates: fullResults.mainResult.coordinates,
+        } : null,
+      },
+    },
+    restaurantData: {
+      address: rc.restaurantData?.address || null,
+      rating: rc.restaurantData?.rating || null,
+      reviewCount: rc.restaurantData?.reviewCount || null,
+      coordinates: rc.restaurantData?.coordinates || null,
+    },
   };
 }
 
@@ -37,6 +85,17 @@ function serializeMessages(messages) {
   }));
 }
 
+function _extractCityFromAddress(address) {
+  if (!address || typeof address !== 'string') return null;
+  const parts = address.split(',');
+  if (parts.length >= 2) {
+    const cityPart = parts[parts.length - 2].trim();
+    const tokens = cityPart.split(' ').filter(t => t.length > 2 && !/^\d+$/.test(t));
+    return tokens.join(' ') || null;
+  }
+  return null;
+}
+
 export async function callAgentProcess({
   contact, conversation, leadMessage, category, confidence, extracted, fromEmail
 }) {
@@ -44,7 +103,7 @@ export async function callAgentProcess({
 
   const payload = {
     contact: serializeContact(contact),
-    rank_checker_data: contact.rankCheckerData || null,
+    rank_checker_data: serializeRankCheckerData(contact),
     conversation_id: conversation._id.toString(),
     messages: serializeMessages(conversation.messages),
     stage: conversation.stage || 'initial_reply',
@@ -85,7 +144,7 @@ export async function callAgentProactive({ task, contact, conversation }) {
     conversation_id: conversation?._id?.toString() || null,
     messages: serializeMessages(conversation?.messages || []),
     lead_source: contact.source || 'smartlead_outbound',
-    rank_checker_data: contact.rankCheckerData || null,
+    rank_checker_data: serializeRankCheckerData(contact),
     smartlead_data: conversation?.context?.smartleadData ? {
       campaign_id: String(conversation.context.smartleadData.campaignId || ''),
       lead_id: String(conversation.context.smartleadData.leadId || '')
