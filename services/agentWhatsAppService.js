@@ -1,13 +1,15 @@
 /**
- * Agent WhatsApp Service — dynamic template creation for proactive outreach.
- * Creates a unique Twilio Content template for each message, requests approval,
- * polls for status, and sends when approved.
+ * Agent WhatsApp Service — smart WhatsApp sending for the autonomous agent.
+ * Checks if a 24h session window is open:
+ *   - If yes → sends free text (instant, no template needed)
+ *   - If no  → creates dynamic Twilio Content template, polls for approval, sends
  *
  * Pattern from soapOperaWhatsAppService.js in menuchat-backend-master.
  */
 
 import twilio from 'twilio';
 import axios from 'axios';
+import Conversation from '../models/conversationModel.js';
 import agentLogger from './agentLogger.js';
 
 const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -17,6 +19,7 @@ const WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 const TWILIO_CONTENT_API = 'https://content.twilio.com/v1/Content';
 const MAX_POLL_ATTEMPTS = 20;
 const POLL_INTERVAL_MS = 15_000;
+const SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 let twilioClient = null;
 
@@ -32,8 +35,7 @@ function twilioAuth() {
 }
 
 /**
- * Full flow: create template → request approval → poll → send.
- * Returns immediately with a job object; actual send happens async.
+ * Smart WhatsApp send: checks session window, uses free text or dynamic template.
  */
 export async function sendProactiveWhatsApp({ phone, message, contactName, conversationId }) {
   if (!getClient()) {
@@ -48,38 +50,21 @@ export async function sendProactiveWhatsApp({ phone, message, contactName, conve
   const waPhone = cleanPhone.startsWith('whatsapp:') ? cleanPhone : `whatsapp:${cleanPhone}`;
 
   try {
-    const templateResult = await createDynamicTemplate(message, contactName);
-    if (!templateResult.success) {
-      return { success: false, error: `Template creation failed: ${templateResult.error}` };
-    }
+    const hasWindow = await checkSessionWindow(conversationId);
 
-    agentLogger.info('whatsapp_template_created', {
-      conversationId,
-      data: { templateId: templateResult.templateId, name: templateResult.templateName }
-    });
-
-    const approved = await pollForApproval(templateResult.templateId);
-    if (!approved.success) {
-      agentLogger.warn('whatsapp_template_not_approved', {
+    if (hasWindow) {
+      agentLogger.info('whatsapp_session_active', {
         conversationId,
-        data: { templateId: templateResult.templateId, status: approved.status, reason: approved.rejectionReason }
+        data: { method: 'free_text' }
       });
-      return { success: false, error: `Template ${approved.status}: ${approved.rejectionReason || 'not approved'}` };
+      return await sendFreeText(waPhone, message, conversationId);
     }
 
-    agentLogger.info('whatsapp_template_approved', {
+    agentLogger.info('whatsapp_session_expired', {
       conversationId,
-      data: { templateId: templateResult.templateId }
+      data: { method: 'dynamic_template' }
     });
-
-    const sendResult = await sendWithTemplate(waPhone, templateResult.templateId);
-
-    agentLogger.info('whatsapp_sent', {
-      conversationId,
-      data: { messageSid: sendResult.messageSid, status: sendResult.status }
-    });
-
-    return sendResult;
+    return await sendViaDynamicTemplate(waPhone, message, contactName, conversationId);
 
   } catch (error) {
     agentLogger.error('whatsapp_send_error', {
@@ -88,6 +73,89 @@ export async function sendProactiveWhatsApp({ phone, message, contactName, conve
     });
     return { success: false, error: error.message };
   }
+}
+
+async function checkSessionWindow(conversationId) {
+  if (!conversationId) return false;
+
+  try {
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation) return false;
+
+    const windowUntil = conversation.channelState?.whatsappWindowOpenUntil;
+    if (windowUntil && new Date(windowUntil).getTime() > Date.now()) {
+      return true;
+    }
+
+    const lastLeadWa = conversation.messages
+      ?.filter(m => m.channel === 'whatsapp' && m.role === 'lead')
+      ?.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))?.[0];
+
+    if (lastLeadWa?.createdAt) {
+      return (Date.now() - new Date(lastLeadWa.createdAt).getTime()) < SESSION_WINDOW_MS;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function sendFreeText(waPhone, message, conversationId) {
+  const client = getClient();
+
+  const msg = await client.messages.create({
+    body: message,
+    from: `whatsapp:${WHATSAPP_NUMBER}`,
+    to: waPhone,
+  });
+
+  agentLogger.info('whatsapp_sent', {
+    conversationId,
+    data: { messageSid: msg.sid, method: 'free_text' }
+  });
+
+  return {
+    success: true,
+    messageSid: msg.sid,
+    status: msg.status,
+    channel: 'whatsapp_session',
+  };
+}
+
+async function sendViaDynamicTemplate(waPhone, message, contactName, conversationId) {
+  const templateResult = await createDynamicTemplate(message, contactName);
+  if (!templateResult.success) {
+    return { success: false, error: `Template creation failed: ${templateResult.error}` };
+  }
+
+  agentLogger.info('whatsapp_template_created', {
+    conversationId,
+    data: { templateId: templateResult.templateId, name: templateResult.templateName }
+  });
+
+  const approved = await pollForApproval(templateResult.templateId, conversationId);
+  if (!approved.success) {
+    agentLogger.warn('whatsapp_template_not_approved', {
+      conversationId,
+      data: { templateId: templateResult.templateId, status: approved.status, reason: approved.rejectionReason }
+    });
+    return { success: false, error: `Template ${approved.status}: ${approved.rejectionReason || 'not approved'}` };
+  }
+
+  agentLogger.info('whatsapp_template_approved', {
+    conversationId,
+    data: { templateId: templateResult.templateId }
+  });
+
+  const sendResult = await sendWithTemplate(waPhone, templateResult.templateId);
+
+  agentLogger.info('whatsapp_sent', {
+    conversationId,
+    data: { messageSid: sendResult.messageSid, method: 'dynamic_template' }
+  });
+
+  return sendResult;
 }
 
 async function createDynamicTemplate(message, contactName) {
@@ -133,20 +201,13 @@ async function createDynamicTemplate(message, contactName) {
       }
     });
 
-    return {
-      success: true,
-      templateId,
-      templateName,
-    };
+    return { success: true, templateId, templateName };
   } catch (error) {
-    return {
-      success: false,
-      error: error.response?.data?.message || error.message,
-    };
+    return { success: false, error: error.response?.data?.message || error.message };
   }
 }
 
-async function pollForApproval(templateId) {
+async function pollForApproval(templateId, conversationId) {
   for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
     await sleep(POLL_INTERVAL_MS);
 
@@ -160,12 +221,8 @@ async function pollForApproval(templateId) {
       const status = response.data.whatsapp?.status || 'unknown';
       const rejectionReason = response.data.whatsapp?.rejection_reason || '';
 
-      if (status === 'approved') {
-        return { success: true, status };
-      }
-      if (status === 'rejected') {
-        return { success: false, status, rejectionReason };
-      }
+      if (status === 'approved') return { success: true, status };
+      if (status === 'rejected') return { success: false, status, rejectionReason };
     } catch (error) {
       agentLogger.warn('whatsapp_poll_error', { data: { templateId, attempt: i + 1, error: error.message } });
     }
