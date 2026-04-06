@@ -323,13 +323,30 @@ async function generateReactivationTasks() {
 
   for (const lead of rcLeads) {
     if (!existingConvContacts.has(lead._id.toString()) && !existingTaskContacts.has(lead._id.toString())) {
-      await AgentTask.create({
-        type: 'rank_checker_outreach',
-        contact: lead._id,
-        scheduledAt: nextBusinessHour(),
-        context: { source: 'rank_checker' },
-        createdBy: 'system'
-      });
+      const callRequested = lead.properties?.callRequested === true;
+
+      if (callRequested) {
+        await AgentTask.create({
+          type: 'human_task',
+          contact: lead._id,
+          scheduledAt: nextBusinessHour(),
+          context: {
+            reason: `Lead rank checker ha richiesto una chiamata (preferenza: ${lead.properties?.callPreference || 'non specificata'}). Telefono: ${lead.phone || 'N/A'}. Nome contatto: ${lead.properties?.contactName || lead.name}.`,
+            source: 'rank_checker',
+            callPreference: lead.properties?.callPreference,
+          },
+          priority: 'high',
+          createdBy: 'system'
+        });
+      } else {
+        await AgentTask.create({
+          type: 'rank_checker_outreach',
+          contact: lead._id,
+          scheduledAt: nextBusinessHour(),
+          context: { source: 'rank_checker' },
+          createdBy: 'system'
+        });
+      }
       created++;
     }
   }
