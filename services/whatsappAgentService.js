@@ -88,10 +88,27 @@ export const handleIncomingWhatsApp = async (from, body) => {
 
   let conversation = await Conversation.findActiveByContact(contact._id);
 
-  if (conversation) {
-    conversation.addMessage('lead', body, 'whatsapp');
-    await conversation.save();
+  if (!conversation) {
+    conversation = new Conversation({
+      contact: contact._id,
+      channel: 'whatsapp',
+      status: 'active',
+      stage: 'initial_reply',
+      agentIdentity: { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' },
+      context: {
+        leadCategory: 'NEUTRAL',
+        leadSource: contact.source || 'manual',
+        restaurantData: {
+          name: contact.name,
+          city: contact.properties?.city || contact.properties?.location,
+        },
+      },
+      assignedTo: contact.owner
+    });
   }
+
+  conversation.addMessage('lead', body, 'whatsapp');
+  await conversation.save();
 
   const { handleAgentConversation } = await import('./salesAgentService.js');
   const { classifyReply } = await import('./replyClassifierService.js');
@@ -105,7 +122,8 @@ export const handleIncomingWhatsApp = async (from, body) => {
     confidence: aiResult.confidence,
     extracted: aiResult.extracted || {},
     fromEmail: null,
-    webhookBasic: {}
+    webhookBasic: {},
+    inboundChannel: 'whatsapp'
   });
 
   agentLogger.info('whatsapp_agent_result', { contactEmail: contact.email, data: result.action });

@@ -39,6 +39,25 @@ const conversationSchema = new mongoose.Schema({
     enum: ['email', 'whatsapp'],
     required: true
   },
+  /**
+   * Stato canale “live” per orchestrazione multicanale.
+   * - currentChannel: canale da usare per la prossima azione
+   * - lastInboundAt/lastOutboundAt: per decidere follow-up e deduplica
+   * - whatsappWindowOpenUntil: regola 24h (freeform vs template)
+   */
+  channelState: {
+    currentChannel: { type: String, enum: ['email', 'whatsapp'], default: 'email', index: true },
+    lastInboundChannel: { type: String, enum: ['email', 'whatsapp'], default: 'email' },
+    lastInboundAt: {
+      email: { type: Date, default: null },
+      whatsapp: { type: Date, default: null }
+    },
+    lastOutboundAt: {
+      email: { type: Date, default: null },
+      whatsapp: { type: Date, default: null }
+    },
+    whatsappWindowOpenUntil: { type: Date, default: null }
+  },
   status: {
     type: String,
     enum: ['active', 'paused', 'awaiting_human', 'escalated', 'converted', 'dead'],
@@ -117,10 +136,31 @@ conversationSchema.index({ contact: 1, channel: 1 });
 conversationSchema.index({ 'context.smartleadData.campaignId': 1, 'context.smartleadData.leadId': 1 });
 
 conversationSchema.methods.addMessage = function(role, content, channel, metadata = {}) {
-  this.messages.push({ role, content, channel, metadata, createdAt: new Date() });
+  const now = new Date();
+  this.messages.push({ role, content, channel, metadata, createdAt: now });
   this.metrics.messagesCount = this.messages.length;
   if (role === 'agent') this.metrics.agentMessagesCount = (this.metrics.agentMessagesCount || 0) + 1;
   if (role === 'human') this.metrics.humanInterventions = (this.metrics.humanInterventions || 0) + 1;
+
+  // ── Channel state updates (deterministici) ──
+  if (!this.channelState) this.channelState = {};
+  const cs = this.channelState;
+
+  const isInbound = role === 'lead';
+  if (isInbound) {
+    cs.lastInboundChannel = channel;
+    cs.currentChannel = channel;
+    cs.lastInboundAt = cs.lastInboundAt || {};
+    cs.lastInboundAt[channel] = now;
+
+    if (channel === 'whatsapp') {
+      cs.whatsappWindowOpenUntil = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    }
+  } else {
+    cs.lastOutboundAt = cs.lastOutboundAt || {};
+    cs.lastOutboundAt[channel] = now;
+  }
+
   return this;
 };
 

@@ -7,6 +7,7 @@ import { sendAgentActivityReport, sendAgentHumanReviewEmail } from './emailNotif
 import { generateSignedActionUrl } from './signedUrlService.js';
 import { runDailyReactivationScan } from './contactScannerService.js';
 import agentLogger from './agentLogger.js';
+import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
 
 const TASK_PROCESS_INTERVAL_MS = 10 * 60 * 1000;
 const TASK_GENERATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -60,6 +61,9 @@ async function processAgentTasks() {
           const conversation = task.conversation || (task.conversation ? await Conversation.findById(task.conversation) : null);
 
           response = await callAgentProactive({ task, contact, conversation });
+          if (conversation) {
+            response = applyChannelPolicyToAgentResponse(response, conversation);
+          }
         }
 
         await processToolIntents(response.tool_intents || [], task);

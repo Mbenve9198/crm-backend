@@ -5,6 +5,7 @@ import { sendWhatsAppTemplate, sendWhatsAppMessage } from './whatsappAgentServic
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import agentLogger from './agentLogger.js';
+import OutboundMessageJob from '../models/outboundMessageJobModel.js';
 
 const SERPAPI_KEY = process.env.SERPAPI_KEY || process.env.SERPER_API_KEY;
 const MENUCHAT_BACKEND_URL = process.env.CRM_API_URL || process.env.MENUCHAT_BACKEND_URL;
@@ -322,6 +323,16 @@ async function toolSendEmail({ message, subject }, ctx) {
   const conversation = ctx?.conversation;
   if (!conversation) return { error: 'Nessuna conversazione attiva' };
 
+  // Guardrail canale: non inviare su email se il canale corrente è WhatsApp
+  const currentChannel = conversation.channelState?.currentChannel || conversation.channel || 'email';
+  if (currentChannel !== 'email') {
+    agentLogger.warn('channel_guardrail_block', {
+      conversationId: conversation._id,
+      data: { attempted: 'email', currentChannel }
+    });
+    return { sent: false, skipped: true, reason: `Channel guardrail: current_channel=${currentChannel}` };
+  }
+
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { error: 'Contatto non trovato' };
 
@@ -386,6 +397,18 @@ async function toolSendEmail({ message, subject }, ctx) {
 async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
   const conversation = ctx?.conversation;
 
+  // Guardrail canale: non inviare su WhatsApp se il canale corrente è email
+  if (conversation) {
+    const currentChannel = conversation.channelState?.currentChannel || conversation.channel || 'email';
+    if (currentChannel !== 'whatsapp') {
+      agentLogger.warn('channel_guardrail_block', {
+        conversationId: conversation._id,
+        data: { attempted: 'whatsapp', currentChannel }
+      });
+      return { sent: false, skipped: true, reason: `Channel guardrail: current_channel=${currentChannel}` };
+    }
+  }
+
   if (process.env.AGENT_APPROVAL_MODE === 'true' && conversation) {
     conversation.addMessage('agent', message, 'whatsapp', {
       wasAutoSent: false,
@@ -403,26 +426,53 @@ async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
     };
   }
 
-  const hasActiveSession = conversation?.messages?.some(m =>
+  const windowUntil = conversation?.channelState?.whatsappWindowOpenUntil
+    ? new Date(conversation.channelState.whatsappWindowOpenUntil).getTime()
+    : null;
+  const hasActiveSession = windowUntil ? Date.now() <= windowUntil : conversation?.messages?.some(m =>
     m.channel === 'whatsapp' && m.role === 'lead' &&
     m.createdAt && (Date.now() - new Date(m.createdAt).getTime()) < 24 * 60 * 60 * 1000
   );
 
   if (!hasActiveSession) {
-    // Primo contatto o session scaduta: SERVE un template approvato
+    // Primo contatto o session scaduta: serve template.
+    // Se esiste un template "statico" configurato, usalo. Altrimenti crea un job dinamico (Content API + approval).
     const contentSid = process.env.TWILIO_AGENT_TEMPLATE_SID;
-    if (!contentSid || contentSid.startsWith('(')) {
-      return {
-        sent: false,
-        note: 'Non posso mandare WhatsApp: il lead non ha ancora scritto su WhatsApp (nessuna session window attiva) e il template non è configurato (TWILIO_AGENT_TEMPLATE_SID). Usa email come canale alternativo.'
-      };
+
+    if (contentSid && !contentSid.startsWith('(')) {
+      const result = await sendWhatsAppTemplate(phone, contentSid, { '1': message.substring(0, 500) });
+      if (result.success && conversation) {
+        conversation.addMessage('agent', message, 'whatsapp', { twilioMessageSid: result.messageSid });
+        await conversation.save();
+      }
+      return { sent: result.success, channel: 'whatsapp_template', messageSid: result.messageSid };
     }
-    const result = await sendWhatsAppTemplate(phone, contentSid, { '1': message.substring(0, 500) });
-    if (result.success && conversation) {
-      conversation.addMessage('agent', message, 'whatsapp', { twilioMessageSid: result.messageSid });
-      await conversation.save();
+
+    if (!conversation) {
+      return { sent: false, error: 'Nessuna conversazione — impossibile enqueue job WhatsApp' };
     }
-    return { sent: result.success, channel: 'whatsapp_template', messageSid: result.messageSid };
+
+    const job = await OutboundMessageJob.create({
+      contact: conversation.contact,
+      conversation: conversation._id,
+      attemptType: is_first_contact ? 'first_touch' : 'other',
+      messageText: message,
+      sendMode: 'template',
+      sendStatus: 'queued',
+      approvalStatus: 'not_requested',
+      cancelIfInboundAfter: new Date(), // se il lead risponde su qualunque canale, skip
+      nextRetryAt: new Date()
+    });
+
+    agentLogger.info('whatsapp_job_enqueued', { conversationId: conversation._id, data: { jobId: job._id.toString() } });
+
+    return {
+      sent: false,
+      queued: true,
+      jobId: job._id.toString(),
+      channel: 'whatsapp_dynamic_template',
+      note: 'WhatsApp fuori finestra: creato job dinamico (template + approvazione). Verrà inviato appena approvato, se il lead non risponde prima.'
+    };
   }
 
   // Session window attiva: messaggio libero

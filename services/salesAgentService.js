@@ -7,6 +7,7 @@ import { executeTools } from './agentToolsService.js';
 import { callAgentProcess } from './agentServiceClient.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
 import redisManager from '../config/redis.js';
+import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
 
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
 const conversationLocksInMemory = new Map();
@@ -233,7 +234,7 @@ export const runAgentLoop = async (conversation, leadMessage) => {
   const identity = conversation.agentIdentity || IDENTITIES.marco;
 
   try {
-    const agentResponse = await callAgentProcess({
+    let agentResponse = await callAgentProcess({
       contact,
       conversation,
       leadMessage,
@@ -242,6 +243,8 @@ export const runAgentLoop = async (conversation, leadMessage) => {
       extracted: {},
       fromEmail: null
     });
+
+    agentResponse = applyChannelPolicyToAgentResponse(agentResponse, conversation);
 
     agentLogger.info('agent_service_response', {
       conversationId: conversation._id,
@@ -323,7 +326,8 @@ export const handleAgentConversation = async ({
   confidence,
   extracted,
   fromEmail,
-  webhookBasic
+  webhookBasic,
+  inboundChannel = 'email'
 }) => {
   if (!(await acquireLock(contact._id))) {
     agentLogger.warn('conversation_locked', { contactEmail: contact.email, data: 'Agente già in esecuzione per questo contatto, skip' });
@@ -359,7 +363,7 @@ export const handleAgentConversation = async ({
     });
   }
 
-  conversation.addMessage('lead', replyText, 'email', { extractedEntities: extracted });
+  conversation.addMessage('lead', replyText, inboundChannel, { extractedEntities: extracted });
 
   const routing = routeLeadReply(category, confidence, extracted, replyText);
 

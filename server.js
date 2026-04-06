@@ -317,6 +317,10 @@ app.get('/health', async (req, res) => {
 // Webhook per lead inbound da MenuChat - PUBBLICO
 app.use('/api/inbound', inboundLeadRoutes);
 
+// Webhook inbound WhatsApp da Twilio (PUBBLICO)
+import { twilioWhatsAppInbound } from './controllers/twilioWhatsAppWebhookController.js';
+app.post('/api/webhooks/twilio-whatsapp', twilioWhatsAppInbound);
+
 // Endpoint pubblico per approvazione bozze agente via email (URL firmati HMAC)
 import { verifySignedUrl, renderHtmlPage, buildFeedbackContext, getISOWeek } from './services/signedUrlService.js';
 import AgentFeedback from './models/agentFeedbackModel.js';
@@ -571,6 +575,7 @@ app.use('/api/agent', agentTaskRoutes);
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
 import { checkAgentHealth } from './services/agentServiceClient.js';
+import { startOutboundMessageWorker } from './services/outboundMessageWorkerService.js';
 
 setTimeout(async () => {
   const agentOnline = await checkAgentHealth();
@@ -583,6 +588,7 @@ setTimeout(async () => {
   if (process.env.ENABLE_AGENT_OUTREACH === 'true') {
     startTaskProcessor();
     startTaskGenerator();
+    startOutboundMessageWorker();
   } else {
     console.log('ℹ️ Agent task system disabilitato (ENABLE_AGENT_OUTREACH != true)');
   }
