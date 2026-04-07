@@ -483,8 +483,14 @@ export const handleAgentConversation = async ({
         createdBy: contact.owner,
       });
 
-      if (researchSummary && conversation.context) {
-        conversation.context.lastResearchSummary = researchSummary;
+      if (conversation.context) {
+        conversation.context.lastResearchSummary = researchSummary || '';
+        conversation.context.aiProcess = {
+          researchSummary: researchSummary || '',
+          strategy: agentResult.strategy?.approach || agentResult.strategy?.raw?.strategy || '',
+          reasoning: (agentResult.thinking || agentResult.strategy?.reasoning || '').substring(0, 500),
+          generatedAt: new Date(),
+        };
         conversation.markModified('context');
         await conversation.save();
       }
@@ -524,7 +530,14 @@ export const approveAndSend = async (conversationId, options = {}) => {
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { success: false, reason: 'Contatto non trovato' };
 
-  const lastAgentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
+  const draftIdx = conversation.messages.map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role === 'agent' && m.metadata?.isDraft)
+    .pop()?.i;
+  const lastAgentIdx = conversation.messages.map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role === 'agent')
+    .pop()?.i;
+  const targetIdx = draftIdx ?? lastAgentIdx;
+  const lastAgentMsg = targetIdx != null ? conversation.messages[targetIdx] : null;
   const originalDraft = lastAgentMsg?.content;
   const originalWaDraft = lastAgentMsg?.metadata?.whatsappDraft || conversation.context?.whatsappDraft;
 
@@ -542,6 +555,25 @@ export const approveAndSend = async (conversationId, options = {}) => {
 
   const subject = emailSubject || lastAgentMsg?.metadata?.draftSubject || conversation.context?.emailSubject || undefined;
   const sendResult = await executeTools('send_email_reply', { message: emailToSend, subject }, { conversation, contact, approvedByHuman: true });
+
+  const emailModified = !!(emailContent && emailContent !== originalDraft) || !!(modifiedContent && modifiedContent !== originalDraft);
+  const waModified = !!(whatsappContent && whatsappContent !== originalWaDraft);
+
+  if (targetIdx != null) {
+    if (emailModified) {
+      const sentMsg = conversation.messages[targetIdx];
+      sentMsg.metadata.supersededBy = 'modified';
+      sentMsg.metadata.isDraft = true;
+      conversation.addMessage('agent', emailToSend, 'email', {
+        wasAutoSent: true,
+        humanEdited: true,
+      });
+    } else {
+      conversation.messages[targetIdx].metadata.wasAutoSent = true;
+      conversation.messages[targetIdx].metadata.isDraft = false;
+    }
+    conversation.markModified('messages');
+  }
 
   const phone = contact.phone;
   const waToSend = whatsappContent ?? originalWaDraft;
@@ -570,14 +602,6 @@ export const approveAndSend = async (conversationId, options = {}) => {
     });
   }
 
-  const emailModified = emailContent && emailContent !== originalDraft;
-  const waModified = whatsappContent && whatsappContent !== originalWaDraft;
-  if (emailModified) {
-    conversation.addMessage('human', emailContent, 'email', { humanEdited: true });
-  }
-  if (modifiedContent && !emailContent) {
-    conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });
-  }
   conversation.status = 'active';
   await conversation.save();
 

@@ -320,6 +320,12 @@ async function handleAgentResponse(response, task) {
   if (response.whatsapp_draft) {
     conversation.context.whatsappDraft = response.whatsapp_draft;
   }
+  conversation.context.aiProcess = {
+    researchSummary: response.research_summary || '',
+    strategy: response.strategy?.approach || response.strategy?.raw?.strategy || '',
+    reasoning: (response.thinking || response.strategy?.reasoning || '').substring(0, 500),
+    generatedAt: new Date(),
+  };
   conversation.status = 'awaiting_human';
   conversation.markModified('context');
   await conversation.save();

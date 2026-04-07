@@ -20,6 +20,10 @@ const messageSchema = new mongoose.Schema({
     aiConfidence: Number,
     wasAutoSent: Boolean,
     humanEdited: Boolean,
+    isDraft: Boolean,
+    draftSubject: String,
+    whatsappDraft: String,
+    supersededBy: String,
     smartleadMessageId: String,
     twilioMessageSid: String,
     extractedEntities: mongoose.Schema.Types.Mixed
