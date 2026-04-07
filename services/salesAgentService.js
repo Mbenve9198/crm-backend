@@ -303,8 +303,12 @@ export const runAgentLoop = async (conversation, leadMessage) => {
       const channel = agentResponse.channel || 'email';
       conversation.addMessage('agent', agentResponse.draft, channel, {
         wasAutoSent: false,
-        isDraft: true
+        isDraft: true,
+        draftSubject: agentResponse.email_subject || null
       });
+      if (agentResponse.email_subject) {
+        conversation.context.emailSubject = agentResponse.email_subject;
+      }
       conversation.status = 'awaiting_human';
       conversation.markModified('context');
       await conversation.save();
@@ -514,7 +518,9 @@ export const approveAndSend = async (conversationId, modifiedContent = null) => 
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { success: false, reason: 'Contatto non trovato' };
 
-  const sendResult = await executeTools('send_email_reply', { message: content }, { conversation, contact, approvedByHuman: true });
+  const lastAgentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
+  const subject = lastAgentMsg?.metadata?.draftSubject || conversation.context?.emailSubject || undefined;
+  const sendResult = await executeTools('send_email_reply', { message: content, subject }, { conversation, contact, approvedByHuman: true });
 
   if (modifiedContent) {
     conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });

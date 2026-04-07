@@ -184,8 +184,7 @@ async function deliverProactiveOutreach(response, task) {
     await task.save();
   }
 
-  const raw = response.strategy?.raw || {};
-  const subject = typeof raw.email_subject === 'string' ? raw.email_subject : undefined;
+  const subject = response.email_subject || response.strategy?.raw?.email_subject || undefined;
 
   await executeTools('send_email_reply', {
     message: response.draft,
