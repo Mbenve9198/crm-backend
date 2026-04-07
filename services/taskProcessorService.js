@@ -261,12 +261,18 @@ async function deliverProactiveOutreach(response, task) {
     await Activity.create({
       contact: contact._id,
       type: 'ai_agent',
-      title: taskLabels[task.type] || `🤖 AI Agent — ${task.type}`,
+      title: (taskLabels[task.type] || `🤖 AI Agent — ${task.type}`).substring(0, 200),
       description: `Azione proattiva dell'agente.\n\nDraft: "${response.draft?.substring(0, 500)}"`,
-      data: { action: task.type, conversationId: conversation?._id, channel: response.channel, dualWhatsapp: !!phone },
+      data: {
+        kind: 'ai_agent',
+        origin: 'system',
+        meta: { action: task.type, conversationId: conversation?._id, channel: response.channel, dualWhatsapp: !!phone }
+      },
       createdBy: contact.owner,
     });
-  } catch {}
+  } catch (err) {
+    console.error('⚠️ Activity create failed in deliverProactiveOutreach:', err.message);
+  }
 }
 
 async function handleAgentResponse(response, task) {

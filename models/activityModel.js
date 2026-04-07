@@ -15,7 +15,7 @@ const activitySchema = new mongoose.Schema({
   // Tipo di activity
   type: {
     type: String,
-    enum: ['email', 'call', 'whatsapp', 'instagram_dm', 'status_change', 'note'],
+    enum: ['email', 'call', 'whatsapp', 'instagram_dm', 'status_change', 'note', 'ai_agent'],
     required: [true, 'Il tipo di activity è obbligatorio']
   },
   
@@ -154,7 +154,8 @@ activitySchema.virtual('typeDisplay').get(function() {
     'whatsapp': 'WhatsApp',
     'instagram_dm': 'DM Instagram',
     'status_change': 'Cambio Stato',
-    'note': 'Nota'
+    'note': 'Nota',
+    'ai_agent': 'AI Agent'
   };
   return typeMap[this.type] || this.type;
 });
@@ -167,7 +168,8 @@ activitySchema.virtual('typeIcon').get(function() {
     'whatsapp': 'message-circle',
     'instagram_dm': 'instagram',
     'status_change': 'arrow-right',
-    'note': 'sticky-note'
+    'note': 'sticky-note',
+    'ai_agent': 'bot'
   };
   return iconMap[this.type] || 'activity';
 });
@@ -211,6 +213,8 @@ activitySchema.methods.generateTitle = function() {
         return `Stato cambiato: ${oldStatus} → ${newStatus}`;
       }
       return 'Cambio stato';
+    case 'ai_agent':
+      return this.title || 'Azione AI Agent';
     default:
       return typeMap[this.type] || 'Activity';
   }

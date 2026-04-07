@@ -15,13 +15,17 @@ async function logAgentActivity(contactId, { type, title, description, data, cre
     await Activity.create({
       contact: contactId,
       type: type || 'ai_agent',
-      title,
+      title: (title || '').substring(0, 200),
       description: (description || '').substring(0, 2000),
-      data,
+      data: {
+        kind: 'ai_agent',
+        origin: 'system',
+        meta: data || {}
+      },
       createdBy
     });
-  } catch {
-    // non bloccante
+  } catch (err) {
+    console.error('⚠️ logAgentActivity failed:', err.message, { contactId, type, title });
   }
 }
 
