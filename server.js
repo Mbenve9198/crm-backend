@@ -575,7 +575,7 @@ app.use('/api/agent', agentTaskRoutes);
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
 import { checkAgentHealth } from './services/agentServiceClient.js';
-import { startOutboundMessageWorker } from './services/outboundMessageWorkerService.js';
+// outboundMessageWorkerService rimosso — WhatsApp gestito da agentWhatsAppService.js
 
 setTimeout(async () => {
   const agentOnline = await checkAgentHealth();
@@ -588,7 +588,6 @@ setTimeout(async () => {
   if (process.env.ENABLE_AGENT_OUTREACH === 'true') {
     startTaskProcessor();
     startTaskGenerator();
-    startOutboundMessageWorker();
   } else {
     console.log('ℹ️ Agent task system disabilitato (ENABLE_AGENT_OUTREACH != true)');
   }
