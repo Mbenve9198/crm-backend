@@ -7,6 +7,7 @@ import agentLogger from './agentLogger.js';
 import { executeTools } from './agentToolsService.js';
 import { callAgentProcess } from './agentServiceClient.js';
 import { sendAgentActivityReport } from './emailNotificationService.js';
+import { sendProactiveWhatsApp } from './agentWhatsAppService.js';
 import redisManager from '../config/redis.js';
 import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
 
@@ -525,6 +526,33 @@ export const approveAndSend = async (conversationId, modifiedContent = null) => 
   const lastAgentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
   const subject = lastAgentMsg?.metadata?.draftSubject || conversation.context?.emailSubject || undefined;
   const sendResult = await executeTools('send_email_reply', { message: content, subject }, { conversation, contact, approvedByHuman: true });
+
+  const phone = contact.phone;
+  const isProactive = conversation.context?.leadCategory === 'PROACTIVE_OUTREACH';
+  if (phone && isProactive) {
+    const waMessage = content.length > 900 ? content.slice(0, 897) + '...' : content;
+    sendProactiveWhatsApp({
+      phone,
+      message: waMessage,
+      contactName: contact.name,
+      conversationId: conversation._id?.toString(),
+    }).then(result => {
+      if (result.success) {
+        Conversation.findById(conversationId).then(conv => {
+          if (conv) {
+            conv.addMessage('agent', waMessage, 'whatsapp', {
+              wasAutoSent: true,
+              twilioMessageSid: result.messageSid,
+            });
+            conv.save().catch(() => {});
+          }
+        }).catch(() => {});
+      }
+      agentLogger.info('approve_whatsapp_sent', { conversationId, data: { success: result.success, method: result.channel, error: result.error } });
+    }).catch(err => {
+      agentLogger.warn('approve_whatsapp_failed', { conversationId, data: { error: err.message, phone } });
+    });
+  }
 
   if (modifiedContent) {
     conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });
