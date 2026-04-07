@@ -2329,9 +2329,10 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       if (!isNaN(p.getTime())) { p.setHours(23, 59, 59, 999); closeDateToD = p; }
     }
 
+    const allSources = ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
     const sourcesOfInterest = source && source !== 'all'
-      ? [source]
-      : ['smartlead_outbound', 'inbound_rank_checker', 'manual', 'csv_import'];
+      ? source.split(',').filter(s => allSources.includes(s))
+      : allSources;
 
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
