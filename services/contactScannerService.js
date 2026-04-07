@@ -4,7 +4,7 @@ import Activity from '../models/activityModel.js';
 import Call from '../models/callModel.js';
 import AgentTask from '../models/agentTaskModel.js';
 
-const DAILY_LIMIT = parseInt(process.env.REACTIVATION_DAILY_LIMIT || '10');
+const DAILY_LIMIT = parseInt(process.env.REACTIVATION_DAILY_LIMIT || '30');
 const MIN_DAYS = parseInt(process.env.REACTIVATION_MIN_DAYS || '14');
 const MAX_DAYS = parseInt(process.env.REACTIVATION_MAX_DAYS || '180');
 
@@ -219,31 +219,49 @@ export function createReactivationTasks(candidates, dailyLimit = DAILY_LIMIT) {
 
   const limited = candidates.slice(0, dailyLimit);
 
+  const HUMAN_STATUSES = new Set(['da richiamare']);
+
   for (let i = 0; i < limited.length; i++) {
     const c = limited[i];
+    const needsHuman = HUMAN_STATUSES.has(c.status) || c.properties?.callRequested === true;
     const isWarm = c.score >= 50;
 
-    // Distribute between 9:00 and 18:00 Rome time
     const slotMinutes = Math.floor((9 * 60) + (i * (9 * 60 / Math.max(limited.length, 1))));
     const hour = Math.floor(slotMinutes / 60);
     const minute = slotMinutes % 60;
     const scheduledAt = _buildRomeDate(hour, minute);
 
-    tasks.push({
-      type: isWarm ? 'reactivation_warm' : 'reactivation_cold',
-      contact: c._id,
-      scheduledAt,
-      context: {
-        reason: isWarm
-          ? `Warm lead: ${c.status}, last call ${c.lastCallOutcome || 'N/A'}, ${c.callCount} calls`
-          : `Cold reactivation: ${c.status}, ${c.activityCount} activities, last ${_daysAgo(c.lastActivityAt)}d ago`,
+    if (needsHuman) {
+      tasks.push({
+        type: 'human_task',
+        contact: c._id,
+        scheduledAt,
+        context: {
+          reason: `Lead ${c.status} (score ${c.score}). Telefono: ${c.phone || 'N/A'}. Last call: ${c.lastCallOutcome || 'N/A'}, ${c.callCount} calls.`,
+          score: c.score,
+        },
         score: c.score,
-      },
-      score: c.score,
-      scanBatch: today,
-      priority: isWarm ? 'high' : 'medium',
-      createdBy: 'system'
-    });
+        scanBatch: today,
+        priority: 'high',
+        createdBy: 'system'
+      });
+    } else {
+      tasks.push({
+        type: isWarm ? 'reactivation_warm' : 'reactivation_cold',
+        contact: c._id,
+        scheduledAt,
+        context: {
+          reason: isWarm
+            ? `Warm lead: ${c.status}, last call ${c.lastCallOutcome || 'N/A'}, ${c.callCount} calls`
+            : `Cold reactivation: ${c.status}, ${c.activityCount} activities, last ${_daysAgo(c.lastActivityAt)}d ago`,
+          score: c.score,
+        },
+        score: c.score,
+        scanBatch: today,
+        priority: isWarm ? 'high' : 'medium',
+        createdBy: 'system'
+      });
+    }
   }
 
   return tasks;

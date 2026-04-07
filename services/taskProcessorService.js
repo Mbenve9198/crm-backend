@@ -10,8 +10,9 @@ import { runDailyReactivationScan } from './contactScannerService.js';
 import agentLogger from './agentLogger.js';
 import { applyChannelPolicyToAgentResponse } from './channelPolicyService.js';
 
-const TASK_PROCESS_INTERVAL_MS = 10 * 60 * 1000;
-const TASK_GENERATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const TASK_PROCESS_INTERVAL_MS = 5 * 60 * 1000;
+const BATCH_CONCURRENCY = parseInt(process.env.TASK_BATCH_CONCURRENCY || '3');
+let _processingLock = false;
 
 /** Riattivazione: non affidarsi al solo canale corrente — email + WhatsApp (se c’è telefono), senza dipendere da PROACTIVE_DUAL_CHANNEL_WHATSAPP. */
 const REACTIVATION_DUAL_CHANNEL_TASK_TYPES = new Set([
@@ -27,7 +28,7 @@ function shouldSendDualWhatsappForTask(task) {
 }
 
 export function startTaskProcessor() {
-  console.log('🤖 Task Processor avviato (ogni 10 min)');
+  console.log(`🤖 Task Processor avviato (ogni ${TASK_PROCESS_INTERVAL_MS / 1000}s, concurrency=${BATCH_CONCURRENCY})`);
   processAgentTasks().catch(err => console.error('❌ Primo ciclo task processor:', err.message));
   setInterval(() => {
     processAgentTasks().catch(err => console.error('❌ Task processor error:', err.message));
@@ -45,68 +46,92 @@ async function processAgentTasks() {
   const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
   if (romeH < 9 || romeH >= 20) return;
 
-  const dueTasks = await AgentTask.findDueTasks(10);
-  if (dueTasks.length === 0) return;
-
-  console.log(`🤖 Task Processor: ${dueTasks.length} task da eseguire`);
-
-  for (const task of dueTasks) {
-    task.status = 'executing';
-    task.attempts += 1;
-    await task.save();
-
-    try {
-      if (task.type === 'human_task') {
-        await handleHumanTask(task);
-        task.status = 'completed';
-      } else {
-        let response;
-
-        const isResume = !!(task.hasCheckpoint && task.threadId);
-        if (isResume) {
-          response = await callAgentResume({
-            threadId: task.threadId,
-            updatedContext: {
-              current_date: new Date().toISOString(),
-              days_since_hibernate: Math.floor((Date.now() - task.createdAt.getTime()) / (24 * 60 * 60 * 1000))
-            }
-          });
-        } else {
-          const contact = task.contact || await Contact.findById(task.contact).lean();
-          const conversation = task.conversation || (task.conversation ? await Conversation.findById(task.conversation) : null);
-
-          response = await callAgentProactive({ task, contact, conversation });
-          if (conversation) {
-            response = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
-          }
-        }
-
-        await processToolIntents(response.tool_intents || [], task);
-
-        const approvalMode = process.env.AGENT_APPROVAL_MODE === 'true';
-        const shouldAutoSendProactive =
-          !isResume &&
-          response.action === 'draft_ready' &&
-          response.draft &&
-          !approvalMode;
-
-        if (shouldAutoSendProactive) {
-          await deliverProactiveOutreach(response, task);
-        } else {
-          await handleAgentResponse(response, task);
-        }
-
-        task.status = 'completed';
-        task.result = { action: response.action, hasDraft: !!response.draft };
-      }
-    } catch (error) {
-      agentLogger.error('task_processor_error', { data: { taskId: task._id, type: task.type, error: error.message } });
-      task.status = task.attempts >= task.maxAttempts ? 'failed' : 'pending';
-      task.result = { error: error.message };
-    }
-
-    await task.save();
+  if (_processingLock) {
+    console.log('🔒 Task Processor: ciclo precedente ancora in corso, skip');
+    return;
   }
+  _processingLock = true;
+
+  try {
+    const dueTasks = await AgentTask.findDueTasks(BATCH_CONCURRENCY * 3);
+    if (dueTasks.length === 0) return;
+
+    console.log(`🤖 Task Processor: ${dueTasks.length} task da eseguire (batch=${BATCH_CONCURRENCY})`);
+
+    for (let i = 0; i < dueTasks.length; i += BATCH_CONCURRENCY) {
+      const batch = dueTasks.slice(i, i + BATCH_CONCURRENCY);
+
+      for (const task of batch) {
+        task.status = 'executing';
+        task.attempts += 1;
+        await task.save();
+      }
+
+      const results = await Promise.allSettled(batch.map(task => _executeSingleTask(task)));
+
+      for (let j = 0; j < batch.length; j++) {
+        const task = batch[j];
+        const result = results[j];
+
+        if (result.status === 'fulfilled') {
+          task.status = 'completed';
+          task.result = result.value;
+        } else {
+          agentLogger.error('task_processor_error', { data: { taskId: task._id, type: task.type, error: result.reason?.message } });
+          task.status = task.attempts >= task.maxAttempts ? 'failed' : 'pending';
+          task.result = { error: result.reason?.message };
+        }
+        await task.save();
+      }
+    }
+  } finally {
+    _processingLock = false;
+  }
+}
+
+async function _executeSingleTask(task) {
+  if (task.type === 'human_task') {
+    await handleHumanTask(task);
+    return { action: 'human_task' };
+  }
+
+  let response;
+  const isResume = !!(task.hasCheckpoint && task.threadId);
+
+  if (isResume) {
+    response = await callAgentResume({
+      threadId: task.threadId,
+      updatedContext: {
+        current_date: new Date().toISOString(),
+        days_since_hibernate: Math.floor((Date.now() - task.createdAt.getTime()) / (24 * 60 * 60 * 1000))
+      }
+    });
+  } else {
+    const contact = task.contact || await Contact.findById(task.contact).lean();
+    const conversation = task.conversation || (task.conversation ? await Conversation.findById(task.conversation) : null);
+
+    response = await callAgentProactive({ task, contact, conversation });
+    if (conversation) {
+      response = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
+    }
+  }
+
+  await processToolIntents(response.tool_intents || [], task);
+
+  const approvalMode = process.env.AGENT_APPROVAL_MODE === 'true';
+  const shouldAutoSendProactive =
+    !isResume &&
+    response.action === 'draft_ready' &&
+    response.draft &&
+    !approvalMode;
+
+  if (shouldAutoSendProactive) {
+    await deliverProactiveOutreach(response, task);
+  } else {
+    await handleAgentResponse(response, task);
+  }
+
+  return { action: response.action, hasDraft: !!response.draft };
 }
 
 async function processToolIntents(toolIntents, task) {
