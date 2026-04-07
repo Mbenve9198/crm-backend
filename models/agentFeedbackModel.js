@@ -23,6 +23,12 @@ const agentFeedbackSchema = new mongoose.Schema({
     index: true
   },
 
+  channel: {
+    type: String,
+    enum: ['email', 'whatsapp'],
+    default: 'email'
+  },
+
   modifications: {
     addedContent: String,
     removedContent: String,

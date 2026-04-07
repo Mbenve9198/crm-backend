@@ -310,8 +310,16 @@ async function handleAgentResponse(response, task) {
   const channel = response.channel || 'email';
   conversation.addMessage('agent', response.draft, channel, {
     wasAutoSent: false,
-    isDraft: true
+    isDraft: true,
+    draftSubject: response.email_subject || null,
+    whatsappDraft: response.whatsapp_draft || null
   });
+  if (response.email_subject) {
+    conversation.context.emailSubject = response.email_subject;
+  }
+  if (response.whatsapp_draft) {
+    conversation.context.whatsappDraft = response.whatsapp_draft;
+  }
   conversation.status = 'awaiting_human';
   conversation.markModified('context');
   await conversation.save();

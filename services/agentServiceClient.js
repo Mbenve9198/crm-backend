@@ -263,7 +263,7 @@ export async function callAgentResume({ threadId, updatedContext }) {
   return response.data;
 }
 
-export async function sendFeedbackToAgent({ conversation, contact, agentDraft, finalSent, action, modifications, discardReason, discardNotes }) {
+export async function sendFeedbackToAgent({ conversation, contact, agentDraft, finalSent, action, channel, modifications, discardReason, discardNotes }) {
   const contactObj = typeof contact === 'object' ? contact : null;
   const payload = {
     conversation_id: conversation?._id?.toString() || conversation?.toString() || '',
@@ -271,6 +271,7 @@ export async function sendFeedbackToAgent({ conversation, contact, agentDraft, f
     agent_draft: agentDraft || '',
     final_sent: finalSent || null,
     action,
+    channel: channel || 'email',
     lead_profile: contactObj ? {
       category: contactObj.properties?.category || contactObj.properties?.business_type || null,
       city: contactObj.properties?.city || contactObj.properties?.location || null,

@@ -20,15 +20,34 @@ router.use(protect);
  */
 router.get('/conversations', async (req, res) => {
   try {
-    const { status = 'active', limit = 50, offset = 0, contactId } = req.query;
+    const { status = 'active', limit = 50, offset = 0, contactId, channel, search, sort = 'updatedAt' } = req.query;
     const filter = {};
     if (status !== 'all') filter.status = status;
     if (contactId) filter.contact = contactId;
+    if (channel && channel !== 'all') filter.channel = channel;
 
-    const conversations = await Conversation.find(filter)
+    let query = Conversation.find(filter)
       .populate('contact', 'name email phone status source properties')
-      .populate('assignedTo', 'firstName lastName email')
-      .sort({ updatedAt: -1 })
+      .populate('assignedTo', 'firstName lastName email');
+
+    const sortField = sort === 'createdAt' ? { createdAt: -1 } : { updatedAt: -1 };
+    query = query.sort(sortField);
+
+    if (search) {
+      const contactIds = await Contact.find({
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+        ]
+      }).distinct('_id');
+      filter.contact = { $in: contactIds };
+      query = Conversation.find(filter)
+        .populate('contact', 'name email phone status source properties')
+        .populate('assignedTo', 'firstName lastName email')
+        .sort(sortField);
+    }
+
+    const conversations = await query
       .skip(parseInt(offset))
       .limit(parseInt(limit))
       .lean();
@@ -64,41 +83,71 @@ router.get('/conversations/:id', async (req, res) => {
  */
 router.post('/conversations/:id/approve', async (req, res) => {
   try {
-    const { modifiedContent } = req.body;
+    const { modifiedContent, emailContent, whatsappContent, emailSubject } = req.body;
     const conversation = await Conversation.findById(req.params.id);
     if (!conversation) return res.status(404).json({ success: false, error: 'Non trovata' });
 
-    const agentDraft = conversation.messages
+    const lastAgent = conversation.messages
       .filter(m => m.role === 'agent' && !m.metadata?.wasAutoSent)
-      .pop()?.content || '';
+      .pop();
+    const agentDraft = lastAgent?.content || '';
+    const agentWaDraft = lastAgent?.metadata?.whatsappDraft || conversation.context?.whatsappDraft || '';
 
-    const isModified = modifiedContent && modifiedContent !== agentDraft;
-    const action = isModified ? 'modified' : 'approved';
+    const result = await approveAndSend(req.params.id, { emailContent, whatsappContent, emailSubject, modifiedContent });
 
-    const result = await approveAndSend(req.params.id, modifiedContent || null);
+    const emailAction = result.emailModified ? 'modified' : 'approved';
+    const waAction = result.waModified ? 'modified' : (whatsappContent ? 'approved' : null);
 
     await AgentFeedback.create({
       conversation: conversation._id,
       contact: conversation.contact,
       agentDraft,
-      finalSent: modifiedContent || agentDraft,
-      action,
+      finalSent: result.finalEmail || agentDraft,
+      action: emailAction,
+      channel: 'email',
       conversationContext: buildFeedbackContext(conversation),
       reviewedBy: req.user?._id,
       weekNumber: getISOWeek(new Date())
     }).catch(() => {});
+
+    if (waAction && agentWaDraft) {
+      await AgentFeedback.create({
+        conversation: conversation._id,
+        contact: conversation.contact,
+        agentDraft: agentWaDraft,
+        finalSent: result.finalWhatsapp || agentWaDraft,
+        action: waAction,
+        channel: 'whatsapp',
+        conversationContext: buildFeedbackContext(conversation),
+        reviewedBy: req.user?._id,
+        weekNumber: getISOWeek(new Date())
+      }).catch(() => {});
+    }
 
     const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
     sendFeedbackToAgent({
       conversation,
       contact: contactDoc,
       agentDraft,
-      finalSent: modifiedContent || agentDraft,
-      action,
-      modifications: isModified ? { addedContent: modifiedContent } : null,
+      finalSent: result.finalEmail || agentDraft,
+      action: emailAction,
+      channel: 'email',
+      modifications: result.emailModified ? { addedContent: emailContent } : null,
     }).catch(() => {});
 
-    res.json({ ...result, feedbackAction: action });
+    if (waAction && agentWaDraft) {
+      sendFeedbackToAgent({
+        conversation,
+        contact: contactDoc,
+        agentDraft: agentWaDraft,
+        finalSent: result.finalWhatsapp || agentWaDraft,
+        action: waAction,
+        channel: 'whatsapp',
+        modifications: result.waModified ? { addedContent: whatsappContent } : null,
+      }).catch(() => {});
+    }
+
+    res.json({ ...result, feedbackAction: emailAction, waFeedbackAction: waAction });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -214,11 +263,14 @@ router.post('/conversations/:id/note', async (req, res) => {
  */
 router.get('/stats', async (req, res) => {
   try {
-    const [active, awaitingHuman, converted, lost] = await Promise.all([
+    const [active, awaitingHuman, converted, lost, paused, dead, totalConvs] = await Promise.all([
       Conversation.countDocuments({ status: 'active' }),
       Conversation.countDocuments({ status: 'awaiting_human' }),
       Conversation.countDocuments({ outcome: { $in: ['sql', 'call_booked'] } }),
-      Conversation.countDocuments({ outcome: 'lost' })
+      Conversation.countDocuments({ outcome: 'lost' }),
+      Conversation.countDocuments({ status: 'paused' }),
+      Conversation.countDocuments({ status: 'dead' }),
+      Conversation.countDocuments({}),
     ]);
 
     const recentOutcomes = await ConversationOutcome.find()
@@ -229,7 +281,7 @@ router.get('/stats', async (req, res) => {
 
     res.json({
       success: true,
-      data: { active, awaitingHuman, converted, lost, recentOutcomes }
+      data: { active, awaitingHuman, converted, lost, paused, dead, totalConvs, recentOutcomes }
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });

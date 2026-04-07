@@ -309,10 +309,14 @@ export const runAgentLoop = async (conversation, leadMessage) => {
       conversation.addMessage('agent', agentResponse.draft, channel, {
         wasAutoSent: false,
         isDraft: true,
-        draftSubject: agentResponse.email_subject || null
+        draftSubject: agentResponse.email_subject || null,
+        whatsappDraft: agentResponse.whatsapp_draft || null
       });
       if (agentResponse.email_subject) {
         conversation.context.emailSubject = agentResponse.email_subject;
+      }
+      if (agentResponse.whatsapp_draft) {
+        conversation.context.whatsappDraft = agentResponse.whatsapp_draft;
       }
       conversation.status = 'awaiting_human';
       conversation.markModified('context');
@@ -511,26 +515,38 @@ export const handleAgentConversation = async ({
   }
 };
 
-export const approveAndSend = async (conversationId, modifiedContent = null) => {
+export const approveAndSend = async (conversationId, options = {}) => {
   const conversation = await Conversation.findById(conversationId);
   if (!conversation || conversation.status !== 'awaiting_human') {
     return { success: false, reason: 'Conversazione non in attesa di review' };
   }
 
-  const content = modifiedContent || conversation.messages.filter(m => m.role === 'agent').pop()?.content;
-  if (!content) return { success: false, reason: 'Nessun contenuto da inviare' };
-
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { success: false, reason: 'Contatto non trovato' };
 
   const lastAgentMsg = conversation.messages.filter(m => m.role === 'agent').pop();
-  const subject = lastAgentMsg?.metadata?.draftSubject || conversation.context?.emailSubject || undefined;
-  const sendResult = await executeTools('send_email_reply', { message: content, subject }, { conversation, contact, approvedByHuman: true });
+  const originalDraft = lastAgentMsg?.content;
+  const originalWaDraft = lastAgentMsg?.metadata?.whatsappDraft || conversation.context?.whatsappDraft;
+
+  const {
+    emailContent,
+    whatsappContent,
+    emailSubject,
+    modifiedContent,
+  } = typeof options === 'string'
+    ? { modifiedContent: options, emailContent: null, whatsappContent: null, emailSubject: null }
+    : (options || {});
+
+  const emailToSend = emailContent ?? modifiedContent ?? originalDraft;
+  if (!emailToSend) return { success: false, reason: 'Nessun contenuto da inviare' };
+
+  const subject = emailSubject || lastAgentMsg?.metadata?.draftSubject || conversation.context?.emailSubject || undefined;
+  const sendResult = await executeTools('send_email_reply', { message: emailToSend, subject }, { conversation, contact, approvedByHuman: true });
 
   const phone = contact.phone;
-  const isProactive = conversation.context?.leadCategory === 'PROACTIVE_OUTREACH';
-  if (phone && isProactive) {
-    const waMessage = content.length > 900 ? content.slice(0, 897) + '...' : content;
+  const waToSend = whatsappContent ?? originalWaDraft;
+  if (phone && waToSend) {
+    const waMessage = waToSend.length > 900 ? waToSend.slice(0, 897) + '...' : waToSend;
     sendProactiveWhatsApp({
       phone,
       message: waMessage,
@@ -554,13 +570,27 @@ export const approveAndSend = async (conversationId, modifiedContent = null) => 
     });
   }
 
-  if (modifiedContent) {
+  const emailModified = emailContent && emailContent !== originalDraft;
+  const waModified = whatsappContent && whatsappContent !== originalWaDraft;
+  if (emailModified) {
+    conversation.addMessage('human', emailContent, 'email', { humanEdited: true });
+  }
+  if (modifiedContent && !emailContent) {
     conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });
   }
   conversation.status = 'active';
   await conversation.save();
 
-  return { success: true, sendResult };
+  return {
+    success: true,
+    sendResult,
+    emailModified,
+    waModified,
+    originalDraft,
+    originalWaDraft,
+    finalEmail: emailToSend,
+    finalWhatsapp: waToSend,
+  };
 };
 
 export const discardReply = async (conversationId) => {
