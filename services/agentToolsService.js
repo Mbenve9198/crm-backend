@@ -340,7 +340,7 @@ async function toolSendEmail({ message, subject }, ctx) {
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { error: 'Contatto non trovato' };
 
-  if (process.env.AGENT_APPROVAL_MODE === 'true') {
+  if (process.env.AGENT_APPROVAL_MODE === 'true' && !ctx?.approvedByHuman) {
     conversation.addMessage('agent', message, 'email', {
       wasAutoSent: false,
       isDraft: true,

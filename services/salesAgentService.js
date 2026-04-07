@@ -514,7 +514,7 @@ export const approveAndSend = async (conversationId, modifiedContent = null) => 
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { success: false, reason: 'Contatto non trovato' };
 
-  const sendResult = await executeTools('send_email_reply', { message: content }, { conversation, contact });
+  const sendResult = await executeTools('send_email_reply', { message: content }, { conversation, contact, approvedByHuman: true });
 
   if (modifiedContent) {
     conversation.addMessage('human', modifiedContent, 'email', { humanEdited: true });
