@@ -119,6 +119,32 @@ const contactSchema = new mongoose.Schema({
     leadCapturedAt: Date
   },
   
+  // Dati Stripe
+  stripeCustomerId: {
+    type: String,
+    index: true,
+    sparse: true
+  },
+  stripeData: {
+    subscriptionId: String,
+    subscriptionStatus: {
+      type: String,
+      enum: ['active', 'past_due', 'canceled', 'incomplete', 'trialing', 'unpaid', 'paused', null],
+      default: null
+    },
+    planName: String,
+    planInterval: String,
+    mrrFromStripe: Number,
+    subscriptionStartDate: Date,
+    currentPeriodEnd: Date,
+    canceledAt: Date,
+    lastPaymentDate: Date,
+    lastPaymentAmount: Number,
+    paymentMethodBrand: String,
+    paymentMethodLast4: String,
+    syncedAt: Date
+  },
+
   // Proprietà dinamiche (oggetto chiave/valore per dati personalizzati)
   properties: {
     type: mongoose.Schema.Types.Mixed,

@@ -62,6 +62,7 @@
     "mongoose": "^8.0.3",
     "multer": "^1.4.5-lts.1",
     "resend": "^6.9.3",
+    "stripe": "^22.0.0",
     "twilio": "^5.4.0",
     "validator": "^13.11.0"
   },
