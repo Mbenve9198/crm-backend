@@ -316,28 +316,67 @@ async function getCustomerInvoices(customerId, limit = 10) {
 async function searchCustomers(query, limit = 10) {
   const stripe = getStripe();
   const results = [];
+  const q = query.trim();
 
-  // Search by email
-  const byEmail = await stripe.customers.list({ email: query.toLowerCase(), limit });
+  // Search by email (exact prefix match)
+  const byEmail = await stripe.customers.list({ email: q.toLowerCase(), limit });
   results.push(...byEmail.data);
 
-  // Also search by name if we didn't fill the limit
+  // Search by name / business name
   if (results.length < limit) {
-    const all = await stripe.customers.search({
-      query: `name~"${query}"`,
-      limit: limit - results.length,
-    });
-    for (const c of all.data) {
-      if (!results.find(r => r.id === c.id)) results.push(c);
-    }
+    try {
+      const byName = await stripe.customers.search({
+        query: `name~"${q}"`,
+        limit: limit - results.length,
+      });
+      for (const c of byName.data) {
+        if (!results.find(r => r.id === c.id)) results.push(c);
+      }
+    } catch { /* search API might fail on special chars */ }
   }
 
-  return results.slice(0, limit).map(c => ({
-    id: c.id,
-    email: c.email,
-    name: c.name,
-    created: new Date(c.created * 1000),
+  // Also search in metadata/description if still few results
+  if (results.length < limit && q.length >= 3) {
+    try {
+      const byMeta = await stripe.customers.search({
+        query: `metadata["ragione_sociale"]~"${q}" OR description~"${q}"`,
+        limit: limit - results.length,
+      });
+      for (const c of byMeta.data) {
+        if (!results.find(r => r.id === c.id)) results.push(c);
+      }
+    } catch { /* ignore */ }
+  }
+
+  const unique = results.slice(0, limit);
+
+  // Fetch last paid invoice for each customer (in parallel)
+  const enriched = await Promise.all(unique.map(async (c) => {
+    let lastInvoice = null;
+    try {
+      const invs = await stripe.invoices.list({ customer: c.id, limit: 1, status: 'paid' });
+      if (invs.data.length > 0) {
+        const inv = invs.data[0];
+        lastInvoice = {
+          amount: Math.round((inv.amount_paid || inv.total || 0) / 100),
+          currency: inv.currency || 'eur',
+          date: new Date(inv.created * 1000),
+          number: inv.number,
+        };
+      }
+    } catch { /* ignore */ }
+
+    return {
+      id: c.id,
+      email: c.email,
+      name: c.name,
+      description: c.description || null,
+      created: new Date(c.created * 1000),
+      lastInvoice,
+    };
   }));
+
+  return enriched;
 }
 
 async function linkCustomerToContact(contactId, stripeCustomerId) {
