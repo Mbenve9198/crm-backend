@@ -26,10 +26,9 @@ async function getActiveSubscription(customerId) {
     customer: customerId,
     status: 'all',
     limit: 10,
-    expand: ['data.default_payment_method'],
+    expand: ['data.default_payment_method', 'data.items.data.price'],
   });
 
-  // Priorità: active > trialing > past_due > altri
   const priority = ['active', 'trialing', 'past_due', 'paused', 'incomplete', 'unpaid', 'canceled'];
   const sorted = subs.data.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status));
   return sorted.length > 0 ? sorted[0] : null;
@@ -46,74 +45,92 @@ async function getLatestInvoice(customerId) {
   return invoices.data.length > 0 ? invoices.data[0] : null;
 }
 
+function detectInterval(subscription, invoice) {
+  // 1. From subscription items
+  const items = subscription?.items?.data || [];
+  for (const item of items) {
+    const ri = item.price?.recurring?.interval;
+    if (ri) return { interval: ri, intervalCount: item.price.recurring.interval_count || 1 };
+    const pi = item.plan?.interval;
+    if (pi) return { interval: pi, intervalCount: item.plan.interval_count || 1 };
+  }
+
+  // 2. From deprecated subscription.plan field
+  if (subscription?.plan?.interval) {
+    return { interval: subscription.plan.interval, intervalCount: subscription.plan.interval_count || 1 };
+  }
+
+  // 3. From invoice line items
+  if (invoice?.lines?.data?.length > 0) {
+    for (const line of invoice.lines.data) {
+      const ri = line.price?.recurring?.interval;
+      if (ri) return { interval: ri, intervalCount: line.price.recurring.interval_count || 1 };
+      if (line.plan?.interval) return { interval: line.plan.interval, intervalCount: line.plan.interval_count || 1 };
+    }
+  }
+
+  // 4. Heuristic: compare subscription period length
+  if (subscription?.current_period_start && subscription?.current_period_end) {
+    const days = (subscription.current_period_end - subscription.current_period_start) / 86400;
+    if (days > 300) return { interval: 'year', intervalCount: 1 };
+    if (days > 25) return { interval: 'month', intervalCount: 1 };
+    if (days > 5) return { interval: 'week', intervalCount: 1 };
+    return { interval: 'day', intervalCount: 1 };
+  }
+
+  return { interval: 'month', intervalCount: 1 };
+}
+
+function centsToMonthly(cents, interval, intervalCount) {
+  if (interval === 'year') return Math.round(cents / (12 * intervalCount));
+  if (interval === 'week') return Math.round(cents * 52 / (12 * intervalCount));
+  if (interval === 'day') return Math.round(cents * 365 / (12 * intervalCount));
+  return Math.round(cents / intervalCount); // month
+}
+
 function extractStripeData(subscription, invoice, customer) {
-  const data = {
-    syncedAt: new Date(),
-  };
+  const data = { syncedAt: new Date() };
 
   if (subscription) {
     const safeDate = (ts) => (ts && typeof ts === 'number') ? new Date(ts * 1000) : null;
-
     const items = subscription.items?.data || [];
+    const { interval, intervalCount } = detectInterval(subscription, invoice);
 
-    // Log raw data for debugging
-    console.log(`[Stripe] Subscription ${subscription.id}: ${items.length} items`);
+    console.log(`[Stripe] Sub ${subscription.id}: ${items.length} items, detected interval=${interval}/${intervalCount}`);
     for (const item of items) {
-      console.log(`[Stripe]   Item: unit_amount=${item.price?.unit_amount}, quantity=${item.quantity}, interval=${item.price?.recurring?.interval}, interval_count=${item.price?.recurring?.interval_count}, nickname=${item.price?.nickname}`);
+      console.log(`[Stripe]   Item: unit_amount=${item.price?.unit_amount}, qty=${item.quantity}, price_interval=${item.price?.recurring?.interval}, plan_interval=${item.plan?.interval}`);
     }
 
-    // Calculate MRR: sum all items, convert to monthly
-    let totalMonthlyCents = 0;
+    // Items-based MRR
+    let itemsMonthlyCents = 0;
     for (const item of items) {
-      const price = item.price;
-      const unitAmount = price?.unit_amount || 0;
+      const unitAmount = item.price?.unit_amount || item.plan?.amount || 0;
       const quantity = item.quantity || 1;
-      const interval = price?.recurring?.interval || 'month';
-      const intervalCount = price?.recurring?.interval_count || 1;
-
-      // Total per billing cycle for this item
-      let itemTotalPerCycle = unitAmount * quantity;
-
-      // Convert to monthly
-      if (interval === 'year') itemTotalPerCycle = Math.round(itemTotalPerCycle / (12 * intervalCount));
-      else if (interval === 'week') itemTotalPerCycle = Math.round(itemTotalPerCycle * 52 / (12 * intervalCount));
-      else if (interval === 'day') itemTotalPerCycle = Math.round(itemTotalPerCycle * 365 / (12 * intervalCount));
-      else itemTotalPerCycle = Math.round(itemTotalPerCycle / intervalCount); // month
-
-      totalMonthlyCents += itemTotalPerCycle;
+      itemsMonthlyCents += centsToMonthly(unitAmount * quantity, interval, intervalCount);
     }
 
-    // Use invoice subtotal (net of tax) for accurate MRR
+    // Invoice-based MRR (net of tax — most reliable)
+    let invoiceMonthlyCents = 0;
     if (invoice) {
-      const subtotalCents = invoice.subtotal_excluding_tax ?? invoice.subtotal ?? 0;
-      const invoiceInterval = items[0]?.price?.recurring?.interval || 'month';
-      const invoiceIntervalCount = items[0]?.price?.recurring?.interval_count || 1;
+      const netCents = Number(invoice.subtotal_excluding_tax ?? invoice.subtotal ?? 0);
+      invoiceMonthlyCents = centsToMonthly(Math.abs(netCents), interval, intervalCount);
 
-      let invoiceMonthlyCents = Math.abs(subtotalCents);
-      if (invoiceInterval === 'year') invoiceMonthlyCents = Math.round(invoiceMonthlyCents / (12 * invoiceIntervalCount));
-      else if (invoiceInterval === 'week') invoiceMonthlyCents = Math.round(invoiceMonthlyCents * 52 / (12 * invoiceIntervalCount));
-      else invoiceMonthlyCents = Math.round(invoiceMonthlyCents / invoiceIntervalCount);
-
-      console.log(`[Stripe]   Invoice subtotal (net): €${Math.round(Math.abs(subtotalCents) / 100)}, tax: €${Math.round((invoice.tax || 0) / 100)}, total: €${Math.round((invoice.total || 0) / 100)}`);
-      console.log(`[Stripe]   Items-based MRR: €${Math.round(totalMonthlyCents / 100)}, Invoice-based MRR (net): €${Math.round(invoiceMonthlyCents / 100)}`);
-
-      // Prefer invoice-based MRR (net of tax) as it's the most accurate
-      if (invoiceMonthlyCents > 0) {
-        totalMonthlyCents = invoiceMonthlyCents;
-      }
+      console.log(`[Stripe]   Invoice: subtotal_excl_tax=${invoice.subtotal_excluding_tax}, subtotal=${invoice.subtotal}, tax=${invoice.tax}, total=${invoice.total}`);
+      console.log(`[Stripe]   Items MRR: €${Math.round(itemsMonthlyCents / 100)}, Invoice MRR (net): €${Math.round(invoiceMonthlyCents / 100)}`);
     }
+
+    const finalMonthlyCents = invoiceMonthlyCents > 0 ? invoiceMonthlyCents : itemsMonthlyCents;
 
     const firstItem = items[0];
     const firstPrice = firstItem?.price;
-    const interval = firstPrice?.recurring?.interval || 'month';
     const productName = product(firstPrice);
     const planLabel = firstPrice?.nickname || firstItem?.plan?.nickname || productName || null;
 
     data.subscriptionId = subscription.id;
     data.subscriptionStatus = subscription.status;
-    data.planName = planLabel || `€${Math.round(totalMonthlyCents / 100)}/mese`;
+    data.planName = planLabel || `€${Math.round(finalMonthlyCents / 100)}/mese`;
     data.planInterval = interval;
-    data.mrrFromStripe = Math.round(totalMonthlyCents / 100);
+    data.mrrFromStripe = Math.round(finalMonthlyCents / 100);
     data.subscriptionStartDate = safeDate(subscription.start_date);
     data.currentPeriodEnd = safeDate(subscription.current_period_end);
     data.canceledAt = safeDate(subscription.canceled_at);
@@ -124,14 +141,13 @@ function extractStripeData(subscription, invoice, customer) {
       data.paymentMethodLast4 = pm.card.last4;
     }
 
-    console.log(`[Stripe]   Final MRR: €${data.mrrFromStripe}, Plan: ${data.planName}, Status: ${data.subscriptionStatus}`);
+    console.log(`[Stripe]   FINAL → MRR: €${data.mrrFromStripe}, interval: ${interval}, plan: ${data.planName}`);
   }
 
   if (invoice) {
     const paidTs = invoice.status_transitions?.paid_at || invoice.created;
     data.lastPaymentDate = paidTs ? new Date(paidTs * 1000) : null;
     data.lastPaymentAmount = Math.round((invoice.amount_paid || 0) / 100);
-    console.log(`[Stripe]   Last invoice: €${data.lastPaymentAmount} (amount_paid=${invoice.amount_paid}, subtotal=${invoice.subtotal}, total=${invoice.total})`);
   }
 
   return data;
