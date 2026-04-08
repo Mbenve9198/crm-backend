@@ -437,18 +437,30 @@ async function searchCustomers(query, limit = 10) {
 
   const unique = results.slice(0, limit);
 
-  // Fetch last paid invoice for each customer (in parallel)
+  const intervalLabels = { year: 'anno', month: 'mese', week: 'settimana', day: 'giorno' };
+
   const enriched = await Promise.all(unique.map(async (c) => {
-    let lastInvoice = null;
+    let subscription = null;
     try {
-      const invs = await stripe.invoices.list({ customer: c.id, limit: 1, status: 'paid' });
-      if (invs.data.length > 0) {
-        const inv = invs.data[0];
-        lastInvoice = {
-          amount: Math.round((inv.amount_paid || inv.total || 0) / 100),
-          currency: inv.currency || 'eur',
-          date: new Date(inv.created * 1000),
-          number: inv.number,
+      const subs = await stripe.subscriptions.list({
+        customer: c.id, status: 'all', limit: 5,
+        expand: ['data.items.data.price'],
+      });
+      const priority = ['active', 'trialing', 'past_due', 'paused', 'incomplete', 'unpaid', 'canceled'];
+      const sorted = subs.data.sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status));
+      if (sorted.length > 0) {
+        const sub = sorted[0];
+        const item = sub.items?.data?.[0];
+        const amount = item?.price?.unit_amount || item?.plan?.amount || 0;
+        const interval = item?.price?.recurring?.interval || item?.plan?.interval || 'month';
+        const intervalCount = item?.price?.recurring?.interval_count || item?.plan?.interval_count || 1;
+        const label = intervalCount > 1
+          ? `€${Math.round(amount / 100)}/${intervalCount} ${intervalLabels[interval] || interval}i`
+          : `€${Math.round(amount / 100)}/${intervalLabels[interval] || interval}`;
+        subscription = {
+          status: sub.status,
+          plan: label,
+          productName: item?.price?.nickname || (typeof item?.price?.product === 'object' ? item.price.product.name : null),
         };
       }
     } catch { /* ignore */ }
@@ -459,7 +471,7 @@ async function searchCustomers(query, limit = 10) {
       name: c.name,
       description: c.description || null,
       created: new Date(c.created * 1000),
-      lastInvoice,
+      subscription,
     };
   }));
 
