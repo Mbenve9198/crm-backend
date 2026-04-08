@@ -16,8 +16,21 @@ function getStripe() {
 async function findCustomerByEmail(email) {
   if (!email) return null;
   const stripe = getStripe();
-  const customers = await stripe.customers.list({ email: email.toLowerCase(), limit: 1 });
-  return customers.data.length > 0 ? customers.data[0] : null;
+  const customers = await stripe.customers.list({ email: email.toLowerCase(), limit: 10 });
+  if (customers.data.length === 0) return null;
+  if (customers.data.length === 1) return customers.data[0];
+
+  // Multiple customers with same email: prefer the one with an active subscription
+  for (const cust of customers.data) {
+    const subs = await stripe.subscriptions.list({ customer: cust.id, status: 'active', limit: 1 });
+    if (subs.data.length > 0) return cust;
+  }
+  // Fallback: try trialing/past_due
+  for (const cust of customers.data) {
+    const subs = await stripe.subscriptions.list({ customer: cust.id, status: 'all', limit: 1 });
+    if (subs.data.length > 0) return cust;
+  }
+  return customers.data[0];
 }
 
 async function getActiveSubscription(customerId) {
