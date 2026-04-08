@@ -114,6 +114,21 @@ export const linkCustomer = async (req, res) => {
   }
 };
 
+export const diagnose = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const contact = await Contact.findById(id).lean();
+    if (!contact) {
+      return res.status(404).json({ success: false, message: 'Contatto non trovato' });
+    }
+    const result = await stripeService.diagnoseContact(contact);
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Stripe diagnose error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const unlinkCustomer = async (req, res) => {
   try {
     const { id } = req.params;

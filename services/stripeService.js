@@ -180,6 +180,71 @@ async function syncContactWithStripe(contact) {
   return { synced: true, stripeCustomerId: customer.id, stripeData };
 }
 
+async function diagnoseContact(contact) {
+  const customer = contact.stripeCustomerId
+    ? await getStripe().customers.retrieve(contact.stripeCustomerId)
+    : await findCustomerByEmail(contact.email);
+
+  if (!customer || customer.deleted) {
+    return { found: false, reason: 'Customer non trovato' };
+  }
+
+  const subscription = await getActiveSubscription(customer.id);
+  const invoice = await getLatestInvoice(customer.id);
+
+  const items = subscription?.items?.data || [];
+  const detected = subscription ? detectInterval(subscription, invoice) : null;
+
+  return {
+    found: true,
+    customerId: customer.id,
+    customerEmail: customer.email,
+    customerName: customer.name,
+    subscription: subscription ? {
+      id: subscription.id,
+      status: subscription.status,
+      currentPeriodStart: subscription.current_period_start,
+      currentPeriodEnd: subscription.current_period_end,
+      periodDays: subscription.current_period_end && subscription.current_period_start
+        ? Math.round((subscription.current_period_end - subscription.current_period_start) / 86400)
+        : null,
+      planInterval: subscription.plan?.interval,
+      planIntervalCount: subscription.plan?.interval_count,
+      items: items.map(it => ({
+        priceId: it.price?.id,
+        unitAmount: it.price?.unit_amount,
+        currency: it.price?.currency,
+        recurringInterval: it.price?.recurring?.interval,
+        recurringIntervalCount: it.price?.recurring?.interval_count,
+        quantity: it.quantity,
+        planInterval: it.plan?.interval,
+        planIntervalCount: it.plan?.interval_count,
+        planAmount: it.plan?.amount,
+        nickname: it.price?.nickname || it.plan?.nickname,
+      })),
+    } : null,
+    detectedInterval: detected,
+    invoice: invoice ? {
+      id: invoice.id,
+      number: invoice.number,
+      subtotal: invoice.subtotal,
+      subtotal_excluding_tax: invoice.subtotal_excluding_tax,
+      tax: invoice.tax,
+      total: invoice.total,
+      amount_paid: invoice.amount_paid,
+      currency: invoice.currency,
+      lines: (invoice.lines?.data || []).map(l => ({
+        type: l.type,
+        amount: l.amount,
+        description: l.description,
+        priceInterval: l.price?.recurring?.interval,
+        priceIntervalCount: l.price?.recurring?.interval_count,
+        planInterval: l.plan?.interval,
+      })),
+    } : null,
+  };
+}
+
 async function syncAllWonContacts() {
   const contacts = await Contact.find({
     status: 'won',
@@ -413,4 +478,5 @@ export {
   getCustomerInvoices,
   searchCustomers,
   linkCustomerToContact,
+  diagnoseContact,
 };
