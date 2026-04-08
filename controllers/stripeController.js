@@ -85,4 +85,33 @@ export const handleWebhook = async (req, res) => {
   }
 };
 
-export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook };
+export const searchCustomers = async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+    const customers = await stripeService.searchCustomers(q);
+    res.json({ success: true, data: customers });
+  } catch (error) {
+    console.error('Stripe search error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const linkCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stripeCustomerId } = req.body;
+    if (!stripeCustomerId) {
+      return res.status(400).json({ success: false, message: 'stripeCustomerId richiesto' });
+    }
+    const updated = await stripeService.linkCustomerToContact(id, stripeCustomerId);
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Stripe link error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook, searchCustomers, linkCustomer };

@@ -297,6 +297,58 @@ async function getCustomerInvoices(customerId, limit = 10) {
   }));
 }
 
+async function searchCustomers(query, limit = 10) {
+  const stripe = getStripe();
+  const results = [];
+
+  // Search by email
+  const byEmail = await stripe.customers.list({ email: query.toLowerCase(), limit });
+  results.push(...byEmail.data);
+
+  // Also search by name if we didn't fill the limit
+  if (results.length < limit) {
+    const all = await stripe.customers.search({
+      query: `name~"${query}"`,
+      limit: limit - results.length,
+    });
+    for (const c of all.data) {
+      if (!results.find(r => r.id === c.id)) results.push(c);
+    }
+  }
+
+  return results.slice(0, limit).map(c => ({
+    id: c.id,
+    email: c.email,
+    name: c.name,
+    created: new Date(c.created * 1000),
+  }));
+}
+
+async function linkCustomerToContact(contactId, stripeCustomerId) {
+  const stripe = getStripe();
+  const customer = await stripe.customers.retrieve(stripeCustomerId);
+  if (!customer || customer.deleted) {
+    throw new Error('Cliente Stripe non trovato o eliminato');
+  }
+
+  const subscription = await getActiveSubscription(stripeCustomerId);
+  const invoice = await getLatestInvoice(stripeCustomerId);
+  const stripeData = extractStripeData(subscription, invoice, customer);
+
+  const updated = await Contact.findByIdAndUpdate(
+    contactId,
+    { stripeCustomerId, stripeData },
+    { new: true }
+  )
+    .populate('owner', 'firstName lastName email role')
+    .populate('createdBy', 'firstName lastName email')
+    .populate('lastModifiedBy', 'firstName lastName email')
+    .lean();
+
+  if (!updated) throw new Error('Contatto CRM non trovato');
+  return updated;
+}
+
 export {
   getStripe,
   findCustomerByEmail,
@@ -304,4 +356,6 @@ export {
   syncAllWonContacts,
   handleWebhookEvent,
   getCustomerInvoices,
+  searchCustomers,
+  linkCustomerToContact,
 };
