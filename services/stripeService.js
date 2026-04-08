@@ -109,14 +109,20 @@ function extractStripeData(subscription, invoice, customer) {
       itemsMonthlyCents += centsToMonthly(unitAmount * quantity, interval, intervalCount);
     }
 
-    // Invoice-based MRR (net of tax — most reliable)
+    // Invoice-based MRR — use total (what customer actually pays, after discounts)
+    // If Stripe Tax is configured, tax field exists and we use total - tax.
+    // If not configured (tax=null), total already reflects actual payment.
     let invoiceMonthlyCents = 0;
     if (invoice) {
-      const netCents = Number(invoice.subtotal_excluding_tax ?? invoice.subtotal ?? 0);
-      invoiceMonthlyCents = centsToMonthly(Math.abs(netCents), interval, intervalCount);
+      const hasTax = typeof invoice.tax === 'number' && invoice.tax > 0;
+      const effectiveCents = hasTax
+        ? Math.abs((invoice.total || 0) - (invoice.tax || 0))
+        : Math.abs(invoice.total || 0);
+      invoiceMonthlyCents = centsToMonthly(effectiveCents, interval, intervalCount);
 
-      console.log(`[Stripe]   Invoice: subtotal_excl_tax=${invoice.subtotal_excluding_tax}, subtotal=${invoice.subtotal}, tax=${invoice.tax}, total=${invoice.total}`);
-      console.log(`[Stripe]   Items MRR: €${Math.round(itemsMonthlyCents / 100)}, Invoice MRR (net): €${Math.round(invoiceMonthlyCents / 100)}`);
+      console.log(`[Stripe]   Invoice: subtotal=${invoice.subtotal}, tax=${invoice.tax}, total=${invoice.total}, amount_paid=${invoice.amount_paid}`);
+      console.log(`[Stripe]   Using ${hasTax ? 'total-tax' : 'total'} = ${effectiveCents} cents → MRR €${Math.round(invoiceMonthlyCents / 100)}`);
+      console.log(`[Stripe]   Items MRR: €${Math.round(itemsMonthlyCents / 100)}, Invoice MRR: €${Math.round(invoiceMonthlyCents / 100)}`);
     }
 
     const finalMonthlyCents = invoiceMonthlyCents > 0 ? invoiceMonthlyCents : itemsMonthlyCents;
@@ -126,9 +132,11 @@ function extractStripeData(subscription, invoice, customer) {
     const productName = product(firstPrice);
     const planLabel = firstPrice?.nickname || firstItem?.plan?.nickname || productName || null;
 
+    const intervalLabel = { year: 'anno', month: 'mese', week: 'settimana', day: 'giorno' }[interval] || interval;
+
     data.subscriptionId = subscription.id;
     data.subscriptionStatus = subscription.status;
-    data.planName = planLabel || `€${Math.round(finalMonthlyCents / 100)}/mese`;
+    data.planName = planLabel || `€${Math.round(finalMonthlyCents / 100)}/mese (${intervalLabel})`;
     data.planInterval = interval;
     data.mrrFromStripe = Math.round(finalMonthlyCents / 100);
     data.subscriptionStartDate = safeDate(subscription.start_date);
