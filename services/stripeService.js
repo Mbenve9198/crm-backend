@@ -41,6 +41,7 @@ async function getLatestInvoice(customerId) {
     customer: customerId,
     limit: 1,
     status: 'paid',
+    expand: ['data.lines'],
   });
   return invoices.data.length > 0 ? invoices.data[0] : null;
 }
@@ -53,9 +54,16 @@ function extractStripeData(subscription, invoice, customer) {
   if (subscription) {
     const safeDate = (ts) => (ts && typeof ts === 'number') ? new Date(ts * 1000) : null;
 
-    // Sum across all subscription items (handles multi-item subscriptions)
-    let totalMonthlyCents = 0;
     const items = subscription.items?.data || [];
+
+    // Log raw data for debugging
+    console.log(`[Stripe] Subscription ${subscription.id}: ${items.length} items`);
+    for (const item of items) {
+      console.log(`[Stripe]   Item: unit_amount=${item.price?.unit_amount}, quantity=${item.quantity}, interval=${item.price?.recurring?.interval}, interval_count=${item.price?.recurring?.interval_count}, nickname=${item.price?.nickname}`);
+    }
+
+    // Calculate MRR: sum all items, convert to monthly
+    let totalMonthlyCents = 0;
     for (const item of items) {
       const price = item.price;
       const unitAmount = price?.unit_amount || 0;
@@ -63,13 +71,43 @@ function extractStripeData(subscription, invoice, customer) {
       const interval = price?.recurring?.interval || 'month';
       const intervalCount = price?.recurring?.interval_count || 1;
 
-      let monthlyCents = unitAmount * quantity;
-      if (interval === 'year') monthlyCents = Math.round(monthlyCents / (12 * intervalCount));
-      else if (interval === 'week') monthlyCents = Math.round(monthlyCents * 52 / (12 * intervalCount));
-      else if (interval === 'day') monthlyCents = Math.round(monthlyCents * 365 / (12 * intervalCount));
-      else monthlyCents = Math.round(monthlyCents / intervalCount);
+      // Total per billing cycle for this item
+      let itemTotalPerCycle = unitAmount * quantity;
 
-      totalMonthlyCents += monthlyCents;
+      // Convert to monthly
+      if (interval === 'year') itemTotalPerCycle = Math.round(itemTotalPerCycle / (12 * intervalCount));
+      else if (interval === 'week') itemTotalPerCycle = Math.round(itemTotalPerCycle * 52 / (12 * intervalCount));
+      else if (interval === 'day') itemTotalPerCycle = Math.round(itemTotalPerCycle * 365 / (12 * intervalCount));
+      else itemTotalPerCycle = Math.round(itemTotalPerCycle / intervalCount); // month
+
+      totalMonthlyCents += itemTotalPerCycle;
+    }
+
+    // If items-based MRR seems too low compared to what's actually invoiced,
+    // use the latest invoice as a more accurate source
+    if (invoice && invoice.lines?.data?.length > 0) {
+      // Sum recurring line items from the invoice (excludes one-off charges)
+      let invoiceRecurringCents = 0;
+      let invoiceInterval = 'month';
+      for (const line of invoice.lines.data) {
+        if (line.type === 'subscription' || line.price?.type === 'recurring') {
+          invoiceRecurringCents += line.amount || 0;
+          if (line.price?.recurring?.interval) invoiceInterval = line.price.recurring.interval;
+        }
+      }
+
+      if (invoiceRecurringCents > 0) {
+        let invoiceMonthlyCents = invoiceRecurringCents;
+        if (invoiceInterval === 'year') invoiceMonthlyCents = Math.round(invoiceRecurringCents / 12);
+        else if (invoiceInterval === 'week') invoiceMonthlyCents = Math.round(invoiceRecurringCents * 52 / 12);
+
+        console.log(`[Stripe]   Items-based MRR: €${Math.round(totalMonthlyCents / 100)}, Invoice-based MRR: €${Math.round(invoiceMonthlyCents / 100)}`);
+
+        // Use the higher of the two (invoice is usually more accurate as it includes all charges)
+        if (invoiceMonthlyCents > totalMonthlyCents) {
+          totalMonthlyCents = invoiceMonthlyCents;
+        }
+      }
     }
 
     const firstItem = items[0];
@@ -92,12 +130,15 @@ function extractStripeData(subscription, invoice, customer) {
       data.paymentMethodBrand = pm.card.brand;
       data.paymentMethodLast4 = pm.card.last4;
     }
+
+    console.log(`[Stripe]   Final MRR: €${data.mrrFromStripe}, Plan: ${data.planName}, Status: ${data.subscriptionStatus}`);
   }
 
   if (invoice) {
     const paidTs = invoice.status_transitions?.paid_at || invoice.created;
     data.lastPaymentDate = paidTs ? new Date(paidTs * 1000) : null;
     data.lastPaymentAmount = Math.round((invoice.amount_paid || 0) / 100);
+    console.log(`[Stripe]   Last invoice: €${data.lastPaymentAmount} (amount_paid=${invoice.amount_paid}, subtotal=${invoice.subtotal}, total=${invoice.total})`);
   }
 
   return data;
