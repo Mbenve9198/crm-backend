@@ -83,30 +83,23 @@ function extractStripeData(subscription, invoice, customer) {
       totalMonthlyCents += itemTotalPerCycle;
     }
 
-    // If items-based MRR seems too low compared to what's actually invoiced,
-    // use the latest invoice as a more accurate source
-    if (invoice && invoice.lines?.data?.length > 0) {
-      // Sum recurring line items from the invoice (excludes one-off charges)
-      let invoiceRecurringCents = 0;
-      let invoiceInterval = 'month';
-      for (const line of invoice.lines.data) {
-        if (line.type === 'subscription' || line.price?.type === 'recurring') {
-          invoiceRecurringCents += line.amount || 0;
-          if (line.price?.recurring?.interval) invoiceInterval = line.price.recurring.interval;
-        }
-      }
+    // Use invoice subtotal (net of tax) for accurate MRR
+    if (invoice) {
+      const subtotalCents = invoice.subtotal_excluding_tax ?? invoice.subtotal ?? 0;
+      const invoiceInterval = items[0]?.price?.recurring?.interval || 'month';
+      const invoiceIntervalCount = items[0]?.price?.recurring?.interval_count || 1;
 
-      if (invoiceRecurringCents > 0) {
-        let invoiceMonthlyCents = invoiceRecurringCents;
-        if (invoiceInterval === 'year') invoiceMonthlyCents = Math.round(invoiceRecurringCents / 12);
-        else if (invoiceInterval === 'week') invoiceMonthlyCents = Math.round(invoiceRecurringCents * 52 / 12);
+      let invoiceMonthlyCents = Math.abs(subtotalCents);
+      if (invoiceInterval === 'year') invoiceMonthlyCents = Math.round(invoiceMonthlyCents / (12 * invoiceIntervalCount));
+      else if (invoiceInterval === 'week') invoiceMonthlyCents = Math.round(invoiceMonthlyCents * 52 / (12 * invoiceIntervalCount));
+      else invoiceMonthlyCents = Math.round(invoiceMonthlyCents / invoiceIntervalCount);
 
-        console.log(`[Stripe]   Items-based MRR: €${Math.round(totalMonthlyCents / 100)}, Invoice-based MRR: €${Math.round(invoiceMonthlyCents / 100)}`);
+      console.log(`[Stripe]   Invoice subtotal (net): €${Math.round(Math.abs(subtotalCents) / 100)}, tax: €${Math.round((invoice.tax || 0) / 100)}, total: €${Math.round((invoice.total || 0) / 100)}`);
+      console.log(`[Stripe]   Items-based MRR: €${Math.round(totalMonthlyCents / 100)}, Invoice-based MRR (net): €${Math.round(invoiceMonthlyCents / 100)}`);
 
-        // Use the higher of the two (invoice is usually more accurate as it includes all charges)
-        if (invoiceMonthlyCents > totalMonthlyCents) {
-          totalMonthlyCents = invoiceMonthlyCents;
-        }
+      // Prefer invoice-based MRR (net of tax) as it's the most accurate
+      if (invoiceMonthlyCents > 0) {
+        totalMonthlyCents = invoiceMonthlyCents;
       }
     }
 
