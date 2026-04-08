@@ -47,15 +47,31 @@ async function getActiveSubscription(customerId) {
   return sorted.length > 0 ? sorted[0] : null;
 }
 
-async function getLatestInvoice(customerId) {
+async function getLatestInvoice(customerId, subscriptionId) {
   const stripe = getStripe();
+
+  // First try: invoice tied to this specific subscription
+  if (subscriptionId) {
+    const subInvs = await stripe.invoices.list({
+      customer: customerId,
+      subscription: subscriptionId,
+      limit: 5,
+      status: 'paid',
+      expand: ['data.lines'],
+    });
+    // Skip tiny prorated invoices (< €1)
+    const real = subInvs.data.find(inv => Math.abs(inv.total || 0) >= 100);
+    if (real) return real;
+  }
+
+  // Fallback: any paid invoice > €1
   const invoices = await stripe.invoices.list({
     customer: customerId,
-    limit: 1,
+    limit: 5,
     status: 'paid',
     expand: ['data.lines'],
   });
-  return invoices.data.length > 0 ? invoices.data[0] : null;
+  return invoices.data.find(inv => Math.abs(inv.total || 0) >= 100) || null;
 }
 
 function detectInterval(subscription, invoice) {
@@ -191,7 +207,7 @@ async function syncContactWithStripe(contact) {
   }
 
   const subscription = await getActiveSubscription(customer.id);
-  const invoice = await getLatestInvoice(customer.id);
+  const invoice = await getLatestInvoice(customer.id, subscription?.id);
   const stripeData = extractStripeData(subscription, invoice, customer);
 
   await Contact.findByIdAndUpdate(contact._id, {
@@ -212,7 +228,7 @@ async function diagnoseContact(contact) {
   }
 
   const subscription = await getActiveSubscription(customer.id);
-  const invoice = await getLatestInvoice(customer.id);
+  const invoice = await getLatestInvoice(customer.id, subscription?.id);
 
   const items = subscription?.items?.data || [];
   const detected = subscription ? detectInterval(subscription, invoice) : null;
@@ -322,7 +338,7 @@ async function handleSubscriptionChange(event) {
     return { handled: false, reason: 'contact_not_found' };
   }
 
-  const invoice = await getLatestInvoice(customerId);
+  const invoice = await getLatestInvoice(customerId, subscription.id);
   const stripe = getStripe();
   let fullSub = subscription;
   if (!subscription.default_payment_method || typeof subscription.default_payment_method === 'string') {
@@ -486,7 +502,7 @@ async function linkCustomerToContact(contactId, stripeCustomerId) {
   }
 
   const subscription = await getActiveSubscription(stripeCustomerId);
-  const invoice = await getLatestInvoice(stripeCustomerId);
+  const invoice = await getLatestInvoice(stripeCustomerId, subscription?.id);
   const stripeData = extractStripeData(subscription, invoice, customer);
 
   const updated = await Contact.findByIdAndUpdate(
