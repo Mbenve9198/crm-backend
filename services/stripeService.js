@@ -60,14 +60,16 @@ function extractStripeData(subscription, invoice, customer) {
     if (interval === 'year') mrrCents = Math.round(intervalAmount / 12);
     if (interval === 'week') mrrCents = Math.round(intervalAmount * 52 / 12);
 
+    const safeDate = (ts) => (ts && typeof ts === 'number') ? new Date(ts * 1000) : null;
+
     data.subscriptionId = subscription.id;
     data.subscriptionStatus = subscription.status;
     data.planName = price?.nickname || item?.plan?.nickname || product(price) || `${(mrrCents / 100).toFixed(0)}€/${interval}`;
     data.planInterval = interval;
     data.mrrFromStripe = Math.round(mrrCents / 100);
-    data.subscriptionStartDate = new Date(subscription.start_date * 1000);
-    data.currentPeriodEnd = new Date(subscription.current_period_end * 1000);
-    data.canceledAt = subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : null;
+    data.subscriptionStartDate = safeDate(subscription.start_date);
+    data.currentPeriodEnd = safeDate(subscription.current_period_end);
+    data.canceledAt = safeDate(subscription.canceled_at);
 
     const pm = subscription.default_payment_method;
     if (pm && typeof pm === 'object' && pm.card) {
@@ -77,7 +79,8 @@ function extractStripeData(subscription, invoice, customer) {
   }
 
   if (invoice) {
-    data.lastPaymentDate = new Date(invoice.status_transitions?.paid_at * 1000 || invoice.created * 1000);
+    const paidTs = invoice.status_transitions?.paid_at || invoice.created;
+    data.lastPaymentDate = paidTs ? new Date(paidTs * 1000) : null;
     data.lastPaymentAmount = Math.round((invoice.amount_paid || 0) / 100);
   }
 
