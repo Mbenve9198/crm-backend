@@ -51,22 +51,38 @@ function extractStripeData(subscription, invoice, customer) {
   };
 
   if (subscription) {
-    const item = subscription.items?.data?.[0];
-    const price = item?.price;
-    const intervalAmount = price?.unit_amount || 0;
-    const interval = price?.recurring?.interval || 'month';
-
-    let mrrCents = intervalAmount;
-    if (interval === 'year') mrrCents = Math.round(intervalAmount / 12);
-    if (interval === 'week') mrrCents = Math.round(intervalAmount * 52 / 12);
-
     const safeDate = (ts) => (ts && typeof ts === 'number') ? new Date(ts * 1000) : null;
+
+    // Sum across all subscription items (handles multi-item subscriptions)
+    let totalMonthlyCents = 0;
+    const items = subscription.items?.data || [];
+    for (const item of items) {
+      const price = item.price;
+      const unitAmount = price?.unit_amount || 0;
+      const quantity = item.quantity || 1;
+      const interval = price?.recurring?.interval || 'month';
+      const intervalCount = price?.recurring?.interval_count || 1;
+
+      let monthlyCents = unitAmount * quantity;
+      if (interval === 'year') monthlyCents = Math.round(monthlyCents / (12 * intervalCount));
+      else if (interval === 'week') monthlyCents = Math.round(monthlyCents * 52 / (12 * intervalCount));
+      else if (interval === 'day') monthlyCents = Math.round(monthlyCents * 365 / (12 * intervalCount));
+      else monthlyCents = Math.round(monthlyCents / intervalCount);
+
+      totalMonthlyCents += monthlyCents;
+    }
+
+    const firstItem = items[0];
+    const firstPrice = firstItem?.price;
+    const interval = firstPrice?.recurring?.interval || 'month';
+    const productName = product(firstPrice);
+    const planLabel = firstPrice?.nickname || firstItem?.plan?.nickname || productName || null;
 
     data.subscriptionId = subscription.id;
     data.subscriptionStatus = subscription.status;
-    data.planName = price?.nickname || item?.plan?.nickname || product(price) || `${(mrrCents / 100).toFixed(0)}€/${interval}`;
+    data.planName = planLabel || `€${Math.round(totalMonthlyCents / 100)}/mese`;
     data.planInterval = interval;
-    data.mrrFromStripe = Math.round(mrrCents / 100);
+    data.mrrFromStripe = Math.round(totalMonthlyCents / 100);
     data.subscriptionStartDate = safeDate(subscription.start_date);
     data.currentPeriodEnd = safeDate(subscription.current_period_end);
     data.canceledAt = safeDate(subscription.canceled_at);
