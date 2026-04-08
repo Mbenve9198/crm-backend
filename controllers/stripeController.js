@@ -114,4 +114,27 @@ export const linkCustomer = async (req, res) => {
   }
 };
 
-export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook, searchCustomers, linkCustomer };
+export const unlinkCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await Contact.findByIdAndUpdate(
+      id,
+      { $unset: { stripeCustomerId: 1, stripeData: 1 } },
+      { new: true }
+    )
+      .populate('owner', 'firstName lastName email role')
+      .populate('createdBy', 'firstName lastName email')
+      .populate('lastModifiedBy', 'firstName lastName email')
+      .lean();
+
+    if (!updated) {
+      return res.status(404).json({ success: false, message: 'Contatto non trovato' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    console.error('Stripe unlink error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook, searchCustomers, linkCustomer, unlinkCustomer };
