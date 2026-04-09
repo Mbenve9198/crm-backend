@@ -486,6 +486,63 @@ export async function getPlansTrend(numMonths = 12) {
   return { months, series };
 }
 
+/**
+ * Get plan comparison from CRM contacts grouped by billing frequency.
+ */
+export async function getPlansFromContacts() {
+  const activeContacts = await Contact.find({
+    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
+    'stripeData.mrrFromStripe': { $gt: 0 },
+  }).select('firstName lastName email stripeData stripeCustomerId').lean();
+
+  const intervalLabels = {
+    'year-1': 'Annuale',
+    'month-1': 'Mensile',
+    'month-2': 'Bimestrale',
+    'month-3': 'Trimestrale',
+    'month-4': 'Quadrimestrale',
+    'month-6': 'Semestrale',
+  };
+
+  const bucketMap = {};
+  let totalMrr = 0;
+
+  for (const c of activeContacts) {
+    const sd = c.stripeData || {};
+    const interval = sd.planInterval || 'month';
+    const count = sd.planIntervalCount || 1;
+    const key = `${interval}-${count}`;
+    const label = intervalLabels[key] || (interval === 'year'
+      ? (count === 1 ? 'Annuale' : `Ogni ${count} anni`)
+      : `Ogni ${count} ${interval === 'month' ? 'mesi' : interval}`);
+
+    if (!bucketMap[key]) bucketMap[key] = { key, label, customers: 0, mrr: 0, arr: 0, contacts: [] };
+    const mrr = sd.mrrFromStripe || 0;
+    bucketMap[key].customers++;
+    bucketMap[key].mrr += mrr;
+    bucketMap[key].arr += mrr * 12;
+    bucketMap[key].contacts.push({
+      _id: c._id,
+      name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email,
+      email: c.email,
+      mrr,
+      planName: sd.planName || '–',
+      status: sd.subscriptionStatus,
+    });
+    totalMrr += mrr;
+  }
+
+  const plans = Object.values(bucketMap)
+    .map(p => ({
+      ...p,
+      arpu: p.customers > 0 ? Math.round(p.mrr / p.customers) : 0,
+      percentage: totalMrr > 0 ? Math.round(p.mrr / totalMrr * 100) : 0,
+    }))
+    .sort((a, b) => b.mrr - a.mrr);
+
+  return { plans, totalMrr, totalCustomers: activeContacts.length };
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function classifyMovements(month, snapshotDate, activeContacts, prevContactMap, prevSnapshot) {

@@ -5,6 +5,7 @@ import {
   mrrOverview,
   plans,
   plansTrend,
+  plansFromContacts,
   snapshotGenerate,
   snapshotBackfill,
 } from '../controllers/saasMetricsController.js';
@@ -18,6 +19,7 @@ router.get('/overview', overview);
 router.get('/mrr-overview', mrrOverview);
 router.get('/plans', plans);
 router.get('/plans/trend', plansTrend);
+router.get('/plans/from-contacts', plansFromContacts);
 router.post('/snapshot/generate', snapshotGenerate);
 router.post('/snapshot/backfill', snapshotBackfill);
 

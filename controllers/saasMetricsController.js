@@ -3,6 +3,7 @@ import {
   getMrrOverview,
   getPlansBreakdown,
   getPlansTrend,
+  getPlansFromContacts,
   generateSnapshot,
   backfillFromStripe,
 } from '../services/saasMetricsService.js';
@@ -45,6 +46,16 @@ export async function plansTrend(req, res) {
     res.json({ success: true, data });
   } catch (error) {
     console.error('❌ SaaS Metrics plans trend error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+export async function plansFromContacts(req, res) {
+  try {
+    const data = await getPlansFromContacts();
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('❌ SaaS Metrics plans-from-contacts error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 }
