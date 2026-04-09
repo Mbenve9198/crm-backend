@@ -168,6 +168,7 @@ function extractStripeData(subscription, invoice, customer) {
     data.subscriptionStatus = subscription.status;
     data.planName = planLabel || `€${Math.round(finalMonthlyCents / 100)}/mese (${intervalLabel})`;
     data.planInterval = interval;
+    data.planIntervalCount = intervalCount;
     data.mrrFromStripe = Math.round(finalMonthlyCents / 100);
     data.subscriptionStartDate = safeDate(subscription.start_date);
     data.currentPeriodEnd = safeDate(subscription.current_period_end);
