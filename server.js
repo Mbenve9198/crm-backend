@@ -532,6 +532,10 @@ app.get('/debug/uploads', async (req, res) => {
   }
 });
 
+// Internal routes (agent-to-CRM, no auth) — MUST be before activityRoutes which applies protect to /api/*
+import internalRoutes from './routes/internalRoutes.js';
+app.use('/api/internal', internalRoutes);
+
 // Routes per autenticazione
 app.use('/api/auth', authRoutes);
 
@@ -580,9 +584,6 @@ app.use('/api/agent', agentRoutes);
 import agentTaskRoutes from './routes/agentTaskRoutes.js';
 app.use('/api/agent', agentTaskRoutes);
 
-// Internal routes (agent-to-CRM, no auth)
-import internalRoutes from './routes/internalRoutes.js';
-app.use('/api/internal', internalRoutes);
 
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
