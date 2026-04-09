@@ -4,6 +4,7 @@ import {
   getPlansBreakdown,
   getPlansTrend,
   getPlansFromContacts,
+  getCustomersList,
   generateSnapshot,
   backfillFromStripe,
 } from '../services/saasMetricsService.js';
@@ -46,6 +47,17 @@ export async function plansTrend(req, res) {
     res.json({ success: true, data });
   } catch (error) {
     console.error('❌ SaaS Metrics plans trend error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+export async function customersList(req, res) {
+  try {
+    const { search, sort, order } = req.query;
+    const data = await getCustomersList({ search, sort, order });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('❌ SaaS Metrics customers list error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 }

@@ -543,6 +543,116 @@ export async function getPlansFromContacts() {
   return { plans, totalMrr, totalCustomers: activeContacts.length };
 }
 
+/**
+ * Get the full customer list with current MRR and latest activity from snapshots.
+ */
+export async function getCustomersList({ search, sort, order } = {}) {
+  const activeContacts = await Contact.find({
+    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
+    'stripeData.mrrFromStripe': { $gt: 0 },
+  }).select('firstName lastName email stripeData stripeCustomerId').lean();
+
+  const currentMonth = getCurrentMonth();
+  const prevMonth = getPreviousMonth(currentMonth);
+
+  // Fetch last 2 months of snapshots to detect activity
+  const snapshots = await MrrSnapshot.find({ month: { $in: [currentMonth, prevMonth] } })
+    .select('month movements')
+    .lean();
+
+  // Build a map: contactId -> latest movement
+  const activityMap = {};
+  for (const snap of snapshots) {
+    for (const m of (snap.movements || [])) {
+      if (!m.contactId) continue;
+      const cid = m.contactId.toString();
+      const existing = activityMap[cid];
+      if (!existing || snap.month > existing._month) {
+        activityMap[cid] = { ...m, _month: snap.month };
+      }
+    }
+  }
+
+  const intervalLabels = {
+    'year-1': 'Annuale',
+    'month-1': 'Mensile',
+    'month-2': 'Bimestrale',
+    'month-3': 'Trimestrale',
+    'month-4': 'Quadrimestrale',
+    'month-6': 'Semestrale',
+  };
+
+  let totalMrr = 0;
+  let customers = activeContacts.map(c => {
+    const sd = c.stripeData || {};
+    const mrr = sd.mrrFromStripe || 0;
+    totalMrr += mrr;
+
+    const interval = sd.planInterval || 'month';
+    const count = sd.planIntervalCount || 1;
+    const iKey = `${interval}-${count}`;
+    const billingLabel = intervalLabels[iKey] || (interval === 'year'
+      ? (count === 1 ? 'Annuale' : `Ogni ${count} anni`)
+      : `Ogni ${count} mesi`);
+
+    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
+    const planDesc = [sd.planName, billingLabel].filter(Boolean).join(' · ');
+
+    const cid = c._id.toString();
+    const activity = activityMap[cid];
+    let activityType = 'existing';
+    let activityDelta = 0;
+    let activityDate = sd.subscriptionStartDate || sd.syncedAt || null;
+
+    if (activity) {
+      activityType = activity.type; // new, reactivation, expansion, contraction, voluntary_churn, delinquent_churn
+      activityDelta = activity.delta || 0;
+      activityDate = activity._month ? new Date(`${activity._month}-15`) : activityDate;
+    }
+
+    return {
+      _id: c._id,
+      name,
+      email: c.email,
+      planDesc,
+      planName: sd.planName || '–',
+      billingLabel,
+      mrr,
+      status: sd.subscriptionStatus,
+      activityType,
+      activityDelta,
+      activityDate,
+      subscriptionStartDate: sd.subscriptionStartDate,
+    };
+  });
+
+  // Search filter
+  if (search) {
+    const q = search.toLowerCase();
+    customers = customers.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.planName?.toLowerCase().includes(q)
+    );
+  }
+
+  // Sort
+  const sortField = sort || 'activityDate';
+  const sortOrder = order === 'asc' ? 1 : -1;
+  customers.sort((a, b) => {
+    let av = a[sortField], bv = b[sortField];
+    if (sortField === 'activityDate' || sortField === 'subscriptionStartDate') {
+      av = av ? new Date(av).getTime() : 0;
+      bv = bv ? new Date(bv).getTime() : 0;
+    }
+    if (av < bv) return -sortOrder;
+    if (av > bv) return sortOrder;
+    return 0;
+  });
+
+  return { customers, totalMrr, totalCustomers: activeContacts.length };
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function classifyMovements(month, snapshotDate, activeContacts, prevContactMap, prevSnapshot) {
