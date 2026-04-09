@@ -458,11 +458,34 @@ const EVENT_TYPE_MAP = {
   agent_loop_start: { type: 'processing', icon: 'loader', desc: 'Analisi in corso' },
   stage_transition: { type: 'stage_change', icon: 'arrow-right', desc: 'Cambio stage' },
   planner_processed: { type: 'planner_decision', icon: 'brain', desc: 'Planner ha deciso' },
+  planner_marked_terminal: { type: 'terminal_detected', icon: 'x-circle', desc: 'Planner: contatto terminale' },
   contact_marked_terminal: { type: 'terminal_detected', icon: 'x-circle', desc: 'Contatto terminale' },
   sales_manager_briefing: { type: 'sales_manager_briefing', icon: 'briefcase', desc: 'Briefing Sales Manager' },
   sales_manager_alert: { type: 'alert', icon: 'alert-triangle', desc: 'Alert Sales Manager' },
+  sales_manager_cycle_start: { type: 'sales_manager', icon: 'briefcase', desc: 'Sales Manager: ciclo avviato' },
+  sales_manager_cycle_complete: { type: 'sales_manager', icon: 'briefcase', desc: 'Sales Manager: ciclo completato' },
+  sales_manager_cycle_error: { type: 'alert', icon: 'alert-triangle', desc: 'Sales Manager: errore ciclo' },
+  sales_manager_directives_saved: { type: 'sales_manager', icon: 'brain', desc: 'Sales Manager: direttive salvate' },
   callback_booked: { type: 'callback', icon: 'phone', desc: 'Callback prenotata' },
   tasks_cancelled: { type: 'tasks_cancelled', icon: 'trash', desc: 'Task cancellati' },
+  tools_used: { type: 'tool_usage', icon: 'activity', desc: 'Tool utilizzati' },
+  tool_call: { type: 'tool_usage', icon: 'activity', desc: 'Tool eseguito' },
+  agent_service_call: { type: 'api_call', icon: 'send', desc: 'Chiamata Agent API' },
+  agent_service_error: { type: 'error', icon: 'alert-triangle', desc: 'Errore Agent API' },
+  agent_loop_error: { type: 'error', icon: 'alert-triangle', desc: 'Errore nel loop agente' },
+  agent_loop_circuit_breaker: { type: 'warning', icon: 'alert-triangle', desc: 'Circuit breaker attivato' },
+  agent_memory_feedback_sent: { type: 'feedback', icon: 'brain', desc: 'Feedback inviato alla memoria' },
+  agent_memory_feedback_failed: { type: 'warning', icon: 'alert-triangle', desc: 'Feedback memoria fallito' },
+  stuck_tasks_recovered: { type: 'maintenance', icon: 'activity', desc: 'Task bloccati recuperati' },
+  task_processor_error: { type: 'error', icon: 'alert-triangle', desc: 'Errore processamento task' },
+  task_skipped_terminal: { type: 'skip', icon: 'x-circle', desc: 'Task saltato: contatto terminale' },
+  direct_handoff: { type: 'handoff', icon: 'phone', desc: 'Handoff diretto al team' },
+  approve_whatsapp_sent: { type: 'whatsapp', icon: 'send', desc: 'WhatsApp inviato (approvato)' },
+  approve_whatsapp_failed: { type: 'error', icon: 'alert-triangle', desc: 'WhatsApp invio fallito' },
+  conversation_locked: { type: 'skip', icon: 'loader', desc: 'Conversazione in lavorazione' },
+  invalid_stage_transition: { type: 'warning', icon: 'alert-triangle', desc: 'Transizione stage non valida' },
+  planner_call_failed: { type: 'error', icon: 'alert-triangle', desc: 'Planner: chiamata fallita' },
+  crm_enrichment_error: { type: 'warning', icon: 'alert-triangle', desc: 'Errore arricchimento CRM' },
 };
 
 /**
@@ -474,6 +497,11 @@ router.get('/live-feed', async (req, res) => {
     const { limit = 30, since } = req.query;
     const filter = {};
     if (since) filter.createdAt = { $gt: new Date(since) };
+
+    const NOISY_EVENTS = ['agent_service_call', 'tool_call', 'crm_enrichment_error', 'agent_memory_feedback_sent', 'agent_memory_feedback_failed'];
+    if (!req.query.verbose) {
+      filter.event = { ...(filter.event || {}), $nin: NOISY_EVENTS };
+    }
 
     const logs = await AgentLog.find(filter)
       .sort({ createdAt: -1 })
@@ -556,13 +584,19 @@ router.get('/dashboard-stats', async (req, res) => {
     const fbModified = feedbacks.filter(f => f.action === 'modified').length;
     const fbDiscarded = feedbacks.filter(f => f.action === 'discarded').length;
 
+    const bySourceAgg = await Conversation.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      { $group: {
+        _id: '$context.leadSource',
+        contacted: { $sum: 1 },
+        responded: { $sum: { $cond: [{ $gt: [{ $size: { $filter: { input: '$messages', as: 'm', cond: { $eq: ['$$m.role', 'lead'] } } } }, 0] }, 1, 0] } },
+        converted: { $sum: { $cond: [{ $in: ['$outcome', ['sql', 'call_booked', 'converted']] }, 1, 0] } },
+      }},
+      { $sort: { contacted: -1 } },
+    ]);
     const bySource = {};
-    for (const o of outcomes) {
-      const src = o.contact?.source || 'unknown';
-      if (!bySource[src]) bySource[src] = { contacted: 0, responded: 0, converted: 0, cost: 0 };
-      bySource[src].contacted++;
-      if (o.humanMessages > 0) bySource[src].responded++;
-      if (['converted', 'call_booked'].includes(o.outcome)) bySource[src].converted++;
+    for (const s of bySourceAgg) {
+      bySource[s._id || 'unknown'] = { contacted: s.contacted, responded: s.responded, converted: s.converted };
     }
 
     res.json({
