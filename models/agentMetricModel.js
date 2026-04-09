@@ -8,7 +8,7 @@ const agentMetricSchema = new mongoose.Schema({
   },
   event: {
     type: String,
-    enum: ['llm_call', 'tool_call', 'message_sent', 'human_review', 'outreach', 'error'],
+    enum: ['llm_call', 'tool_call', 'message_sent', 'human_review', 'outreach', 'error', 'planner_call', 'sales_manager_call'],
     required: true,
     index: true
   },

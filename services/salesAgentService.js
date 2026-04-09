@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import AgentTask from '../models/agentTaskModel.js';
+import AgentMetric from '../models/agentMetricModel.js';
 import Activity from '../models/activityModel.js';
 import agentLogger from './agentLogger.js';
 import { executeTools } from './agentToolsService.js';
@@ -351,6 +352,19 @@ export const runAgentLoop = async (conversation, leadMessage) => {
       }
     });
 
+    AgentMetric.create({
+      conversation: conversation._id,
+      event: 'llm_call',
+      data: {
+        model: agentResponse.model_used || 'multi-node',
+        inputTokens: agentResponse.total_input_tokens || 0,
+        outputTokens: agentResponse.total_output_tokens || 0,
+        costUsd: agentResponse.estimated_cost_usd || 0,
+        durationMs: agentResponse.processing_time_ms || 0,
+        channel: agentResponse.channel,
+      }
+    }).catch(() => {});
+
     const toolsUsed = await processToolIntents(agentResponse.tool_intents, conversation, contact);
 
     if (agentResponse.action === 'terminal') {
@@ -588,6 +602,8 @@ export const handleAgentConversation = async ({
           reasoning: (agentResult.thinking || agentResult.strategy?.reasoning || '').substring(0, 500),
           generatedAt: new Date(),
         };
+        const stratTag = agentResult.strategy?.raw?.strategy_tag || agentResult.strategy?.strategy_tag;
+        if (stratTag) conversation.context.strategyTag = stratTag;
         conversation.markModified('context');
         await conversation.save();
       }

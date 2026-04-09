@@ -316,6 +316,28 @@ export async function callAgentPlan(event) {
   }
 }
 
+export async function callAgentSalesManager(reportData) {
+  agentLogger.info('agent_service_call', {
+    data: { endpoint: '/agent/sales-manager', keys: Object.keys(reportData) }
+  });
+
+  try {
+    const response = await client.post('/agent/sales-manager', reportData, { timeout: 180000 });
+    return response.data;
+  } catch (err) {
+    agentLogger.error('sales_manager_call_failed', {
+      data: { error: err.message }
+    });
+    return {
+      directives: [],
+      briefing: { headline: 'Errore', summary: err.message },
+      alerts: [],
+      performance: {},
+      error: err.message,
+    };
+  }
+}
+
 export async function callMemoryConsolidate() {
   try {
     const response = await client.post('/memory/consolidate', {}, { timeout: 60000 });
@@ -337,5 +359,6 @@ export async function checkAgentHealth() {
 
 export default {
   callAgentProcess, callAgentProactive, callAgentResume,
-  sendFeedbackToAgent, callAgentPlan, callMemoryConsolidate, checkAgentHealth,
+  sendFeedbackToAgent, callAgentPlan, callAgentSalesManager,
+  callMemoryConsolidate, checkAgentHealth,
 };

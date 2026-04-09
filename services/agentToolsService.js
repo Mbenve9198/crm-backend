@@ -4,6 +4,7 @@ import { replyToEmailThread } from './smartleadApiService.js';
 import { sendWhatsAppTemplate, sendWhatsAppMessage } from './whatsappAgentService.js';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
+import AgentMetric from '../models/agentMetricModel.js';
 import agentLogger from './agentLogger.js';
 // OutboundMessageJob rimosso — WhatsApp gestito da agentWhatsAppService.js
 
@@ -128,35 +129,57 @@ export const AGENT_TOOLS = [
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 export const executeTools = async (toolName, toolInput, conversationContext) => {
+  const startMs = Date.now();
   agentLogger.info('tool_call', {
     conversationId: conversationContext?.conversation?._id,
     data: { tool: toolName, input: JSON.stringify(toolInput).substring(0, 200) }
   });
 
-  switch (toolName) {
-    case 'search_similar_clients':
-      return await toolSearchSimilarClients(toolInput);
-    case 'research_business_serpapi':
-      return await toolResearchBusiness(toolInput);
-    case 'get_ranking_for_keyword':
-      return await toolGetRanking(toolInput);
-    case 'send_email_reply':
-      return await toolSendEmail(toolInput, conversationContext);
-    case 'send_whatsapp':
-      return await toolSendWhatsApp(toolInput, conversationContext);
-    case 'request_human_help':
-      return await toolRequestHumanHelp(toolInput, conversationContext);
-    case 'schedule_followup':
-      return await toolScheduleFollowup(toolInput, conversationContext);
-    case 'book_callback':
-      return await toolBookCallback(toolInput, conversationContext);
-    case 'update_smartlead_email':
-      return await toolUpdateSmartleadEmail(toolInput, conversationContext);
-    case 'update_contact':
-      return await toolUpdateContact(toolInput, conversationContext);
-    default:
-      return { error: `Tool sconosciuto: ${toolName}` };
+  let result;
+  let success = true;
+  try {
+    switch (toolName) {
+      case 'search_similar_clients':
+        result = await toolSearchSimilarClients(toolInput); break;
+      case 'research_business_serpapi':
+        result = await toolResearchBusiness(toolInput); break;
+      case 'get_ranking_for_keyword':
+        result = await toolGetRanking(toolInput); break;
+      case 'send_email_reply':
+        result = await toolSendEmail(toolInput, conversationContext); break;
+      case 'send_whatsapp':
+        result = await toolSendWhatsApp(toolInput, conversationContext); break;
+      case 'request_human_help':
+        result = await toolRequestHumanHelp(toolInput, conversationContext); break;
+      case 'schedule_followup':
+        result = await toolScheduleFollowup(toolInput, conversationContext); break;
+      case 'book_callback':
+        result = await toolBookCallback(toolInput, conversationContext); break;
+      case 'update_smartlead_email':
+        result = await toolUpdateSmartleadEmail(toolInput, conversationContext); break;
+      case 'update_contact':
+        result = await toolUpdateContact(toolInput, conversationContext); break;
+      default:
+        result = { error: `Tool sconosciuto: ${toolName}` };
+        success = false;
+    }
+    if (result?.error) success = false;
+  } catch (err) {
+    success = false;
+    result = { error: err.message };
+    throw err;
+  } finally {
+    AgentMetric.create({
+      conversation: conversationContext?.conversation?._id || null,
+      event: 'tool_call',
+      data: {
+        toolName,
+        toolSuccess: success,
+        durationMs: Date.now() - startMs,
+      }
+    }).catch(() => {});
   }
+  return result;
 };
 
 async function toolSearchSimilarClients({ cuisine_type, city, region }) {

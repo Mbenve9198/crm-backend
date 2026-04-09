@@ -1,4 +1,5 @@
 import AgentTask from '../models/agentTaskModel.js';
+import AgentMetric from '../models/agentMetricModel.js';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import { callAgentProactive, callAgentResume, callAgentPlan } from './agentServiceClient.js';
@@ -196,6 +197,19 @@ async function _executeSingleTask(task) {
       response = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
     }
   }
+
+  AgentMetric.create({
+    conversation: task.conversation?._id || task.conversation || null,
+    event: 'llm_call',
+    data: {
+      model: response.model_used || 'multi-node',
+      inputTokens: response.total_input_tokens || 0,
+      outputTokens: response.total_output_tokens || 0,
+      costUsd: response.estimated_cost_usd || 0,
+      durationMs: response.processing_time_ms || 0,
+      channel: response.channel,
+    }
+  }).catch(() => {});
 
   await processToolIntents(response.tool_intents || [], task);
 
@@ -451,6 +465,8 @@ async function handleAgentResponse(response, task) {
     reasoning: (response.thinking || response.strategy?.reasoning || '').substring(0, 500),
     generatedAt: new Date(),
   };
+  const stratTag = response.strategy?.raw?.strategy_tag || response.strategy?.strategy_tag;
+  if (stratTag) conversation.context.strategyTag = stratTag;
   conversation.status = 'awaiting_human';
   conversation.markModified('context');
   await conversation.save();
@@ -590,6 +606,16 @@ async function generateReactivationTasks() {
         conversation: situation.conversation,
         context: situation.context,
       });
+
+      AgentMetric.create({
+        event: 'planner_call',
+        data: {
+          model: 'opus-thinking',
+          costUsd: plan.estimated_cost_usd || 0,
+          channel: situation.type,
+          toolName: situation.contact.email,
+        }
+      }).catch(() => {});
 
       if (!plan.actions || plan.actions.length === 0) continue;
 

@@ -253,4 +253,44 @@ export const sendAgentActivityReport = async ({ action, contactName, contactEmai
   }
 };
 
-export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail, sendAgentActivityReport };
+/**
+ * Invia briefing del Sales Manager al team.
+ */
+export const sendSalesManagerBriefing = async (briefing, performance = {}) => {
+  try {
+    if (!resend) return;
+
+    const highlights = (briefing.highlights || []).map(h => `<li style="color:#16a34a">${h}</li>`).join('');
+    const concerns = (briefing.concerns || []).map(c => `<li style="color:#dc2626">${c}</li>`).join('');
+    const actions = (briefing.next_actions || []).map(a => `<li>${a}</li>`).join('');
+
+    const perfHtml = performance.conversion_rate != null
+      ? `<div style="margin-top:16px;padding:12px;background:#f8fafc;border-radius:8px">
+          <strong>Performance:</strong> Conv rate ${(performance.conversion_rate * 100).toFixed(1)}% |
+          Approval ${(performance.approval_rate * 100).toFixed(1)}% |
+          Costo/lead $${performance.avg_cost_per_lead_usd?.toFixed(2) || '?'}
+        </div>`
+      : '';
+
+    const html = `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
+      <h2 style="margin-bottom:4px">${briefing.headline || 'Sales Manager Briefing'}</h2>
+      <p style="color:#64748b;margin-top:0">${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}</p>
+      <p>${briefing.summary || ''}</p>
+      ${highlights ? `<h3 style="color:#16a34a;margin-bottom:4px">Highlights</h3><ul>${highlights}</ul>` : ''}
+      ${concerns ? `<h3 style="color:#dc2626;margin-bottom:4px">Concerns</h3><ul>${concerns}</ul>` : ''}
+      ${actions ? `<h3 style="margin-bottom:4px">Next Actions</h3><ul>${actions}</ul>` : ''}
+      ${perfHtml}
+    </body></html>`;
+
+    await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      subject: `[Sales Manager] ${briefing.headline || 'Briefing'}`,
+      html
+    });
+  } catch {
+    // non-blocking
+  }
+};
+
+export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail, sendAgentActivityReport, sendSalesManagerBriefing };

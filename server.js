@@ -580,6 +580,10 @@ app.use('/api/agent', agentRoutes);
 import agentTaskRoutes from './routes/agentTaskRoutes.js';
 app.use('/api/agent', agentTaskRoutes);
 
+// Internal routes (agent-to-CRM, no auth)
+import internalRoutes from './routes/internalRoutes.js';
+app.use('/api/internal', internalRoutes);
+
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
 import { checkAgentHealth } from './services/agentServiceClient.js';
@@ -600,39 +604,25 @@ setTimeout(async () => {
     console.log('ℹ️ Agent task system disabilitato (ENABLE_AGENT_OUTREACH != true)');
   }
 
-  // Weekly analysis job: ogni lunedì alle 8:00 Rome, analizza le performance dell'agente
-  const scheduleWeeklyAnalysis = () => {
-    const now = new Date();
-    const romeNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
-    const dayOfWeek = romeNow.getDay();
-    const hour = romeNow.getHours();
-
-    let daysUntilMonday = (1 - dayOfWeek + 7) % 7;
-    if (daysUntilMonday === 0 && hour >= 8) daysUntilMonday = 7;
-
-    const nextRun = new Date(romeNow);
-    nextRun.setDate(nextRun.getDate() + daysUntilMonday);
-    nextRun.setHours(8, 0, 0, 0);
-
-    const msUntilNextRun = nextRun.getTime() - romeNow.getTime();
-
-    console.log(`📊 Weekly analysis schedulata: prossima esecuzione tra ${Math.round(msUntilNextRun / 3600000)}h`);
-
-    setTimeout(async () => {
+  // Sales Manager Agent: ogni 4h durante orario lavorativo (7-22 Roma)
+  const SALES_MANAGER_INTERVAL_MS = 4 * 60 * 60 * 1000;
+  const runSalesManagerIfActive = async () => {
+    const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
+    if (romeH >= 7 && romeH <= 22) {
       try {
-        const { runWeeklyAnalysis } = await import('./services/agentAnalyticsService.js');
-        const result = await runWeeklyAnalysis();
+        const { runSalesManagerCycle } = await import('./services/salesManagerService.js');
+        const result = await runSalesManagerCycle();
         if (result) {
-          console.log(`📊 Weekly analysis completata: ${result.summary?.total || 0} outcome, ${result.dropOffs || 0} drop-off`);
+          console.log(`[Sales Manager] Ciclo completato: ${result.directives?.length || 0} directives, ${result.alerts?.length || 0} alerts`);
         }
       } catch (err) {
-        console.error('❌ Weekly analysis error:', err.message);
+        console.error('[Sales Manager] Errore:', err.message);
       }
-      scheduleWeeklyAnalysis();
-    }, msUntilNextRun);
+    }
   };
-
-  scheduleWeeklyAnalysis();
+  setTimeout(runSalesManagerIfActive, 30000);
+  setInterval(runSalesManagerIfActive, SALES_MANAGER_INTERVAL_MS);
+  console.log(`[Sales Manager] Schedulato ogni ${SALES_MANAGER_INTERVAL_MS / 3600000}h (orario 7-22 Roma)`);
 }, 10000);
 
 // Endpoint per la documentazione delle API
