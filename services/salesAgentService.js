@@ -88,39 +88,11 @@ export const resolveIdentity = (fromEmail) => {
 // POST-LOOP: estrazione insight e progressione stage
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const extractInsightsWithLLM = async (leadMessage) => {
-  try {
-    const insightClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await insightClient.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{ role: 'user', content: `Analizza questo messaggio di un ristoratore italiano che risponde a una proposta commerciale. Estrai obiezioni e pain point.
-
-MESSAGGIO: "${leadMessage}"
-
-Rispondi SOLO con JSON valido:
-{"objections":["etichetta_obiezione"],"painPoints":["etichetta_pain_point"]}
-
-Etichette obiezioni valide: no_tempo, mandami_mail, prezzo, ha_gia_fornitore, non_interessa, bad_timing, troppo_caro, no_bisogno, esperienza_negativa_competitor, non_capisce_valore
-Etichette pain point valide: poche_recensioni, competitor_visibili, no_menu_digitale, bassa_visibilita, recensioni_negative, calo_clienti, gestione_manuale, reputazione_online, difficolta_marketing
-Se non ci sono obiezioni o pain point, usa array vuoti.` }]
-    });
-    const parsed = JSON.parse(response.content[0].text.match(/\{[\s\S]*\}/)?.[0] || '{}');
-    return {
-      objections: Array.isArray(parsed.objections) ? parsed.objections : [],
-      painPoints: Array.isArray(parsed.painPoints) ? parsed.painPoints : []
-    };
-  } catch {
-    return { objections: [], painPoints: [] };
-  }
-};
-
 const updateConversationInsights = async (conversation, leadMessage, agentResponse) => {
-  const llmInsights = await extractInsightsWithLLM(leadMessage);
   const agentInsights = agentResponse?.extracted_insights || {};
 
-  const allObjections = [...(llmInsights.objections || []), ...(agentInsights.objections || [])];
-  const allPainPoints = [...(llmInsights.painPoints || []), ...(agentInsights.pain_points || [])];
+  const allObjections = agentInsights.objections || [];
+  const allPainPoints = agentInsights.pain_points || [];
 
   let changed = false;
 
@@ -225,10 +197,38 @@ const TASK_TYPE_ALIASES = {
   'closure_response': 'human_task', 'schedule_call': 'human_task',
   'follow_up': 'follow_up_no_reply', 'followup': 'follow_up_no_reply',
   'reactivation_seasonal': 'seasonal_reactivation',
+  'break_up': 'break_up_email', 'breakup': 'break_up_email', 'breakup_email': 'break_up_email',
 };
 function _normalizeTaskType(type) {
   if (VALID_TASK_TYPES.has(type)) return type;
   return TASK_TYPE_ALIASES[type] || 'human_task';
+}
+
+const MAX_PENDING_TASKS_PER_CONTACT = 3;
+
+function _safeScheduledAt(dateStr) {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime()) || date <= new Date()) {
+    const now = new Date();
+    const romeH = parseInt(now.toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
+    if (romeH >= 9 && romeH < 19) return now;
+    const romeOffset = (now.getMonth() >= 2 && now.getMonth() <= 9) ? 2 : 1;
+    const target = new Date(now);
+    target.setDate(target.getDate() + (romeH >= 19 ? 1 : 0));
+    target.setUTCHours(9 - romeOffset, 0, 0, 0);
+    return target;
+  }
+  return date;
+}
+
+async function _canCreateTaskForContact(contactId, taskType) {
+  const pendingCount = await AgentTask.countDocuments({
+    contact: contactId,
+    status: { $in: ['pending', 'executing'] },
+  });
+  if (pendingCount >= MAX_PENDING_TASKS_PER_CONTACT) return false;
+  const dup = await AgentTask.findOne({ contact: contactId, type: taskType, status: { $in: ['pending', 'executing'] } });
+  return !dup;
 }
 
 const processToolIntents = async (toolIntents, conversation, contact) => {
@@ -238,13 +238,18 @@ const processToolIntents = async (toolIntents, conversation, contact) => {
     if (intent.tool === 'mark_contact_terminal') continue;
 
     if (intent.tool === 'hibernate_workflow') {
+      const taskType = _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation');
+      if (!(await _canCreateTaskForContact(contact._id, taskType))) {
+        toolsUsed.push({ name: 'hibernate_workflow', input: intent.params, result: { scheduled: false, reason: 'duplicate_or_cap' } });
+        continue;
+      }
       await AgentTask.create({
-        type: _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation'),
+        type: taskType,
         contact: contact._id,
         conversation: conversation._id,
         threadId: intent.params.thread_id,
         hasCheckpoint: true,
-        scheduledAt: new Date(intent.params.wake_at),
+        scheduledAt: _safeScheduledAt(intent.params.wake_at),
         context: intent.params.context || {},
         priority: intent.params.priority || 'high',
         createdBy: 'agent'
@@ -252,12 +257,17 @@ const processToolIntents = async (toolIntents, conversation, contact) => {
       toolsUsed.push({ name: 'hibernate_workflow', input: intent.params, result: { scheduled: true } });
 
     } else if (intent.tool === 'schedule_task') {
+      const taskType = _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply');
+      if (!(await _canCreateTaskForContact(contact._id, taskType))) {
+        toolsUsed.push({ name: 'schedule_task', input: intent.params, result: { scheduled: false, reason: 'duplicate_or_cap' } });
+        continue;
+      }
       await AgentTask.create({
-        type: _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply'),
+        type: taskType,
         contact: contact._id,
         conversation: conversation._id,
         hasCheckpoint: false,
-        scheduledAt: new Date(intent.params.scheduled_at),
+        scheduledAt: _safeScheduledAt(intent.params.scheduled_at),
         context: intent.params.context || {},
         priority: intent.params.priority || 'medium',
         createdBy: 'agent'

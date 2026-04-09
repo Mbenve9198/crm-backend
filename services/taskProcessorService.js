@@ -93,16 +93,22 @@ function _canAutoSend(level, flowType, response, contact) {
   return false;
 }
 
-const STUCK_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+const STUCK_TASK_TIMEOUT_MS = 15 * 60 * 1000;
 
 async function _recoverStuckTasks() {
   const cutoff = new Date(Date.now() - STUCK_TASK_TIMEOUT_MS);
-  const result = await AgentTask.updateMany(
-    { status: 'executing', updatedAt: { $lte: cutoff } },
-    { status: 'pending', $inc: { attempts: 0 } }
-  );
-  if (result.modifiedCount > 0) {
-    agentLogger.info('stuck_tasks_recovered', { data: { count: result.modifiedCount } });
+  const stuckTasks = await AgentTask.find({
+    status: 'executing',
+    updatedAt: { $lte: cutoff },
+  });
+  for (const task of stuckTasks) {
+    task.attempts += 1;
+    task.status = task.attempts >= task.maxAttempts ? 'failed' : 'pending';
+    task.result = { error: 'Stuck task recovered after timeout' };
+    await task.save();
+  }
+  if (stuckTasks.length > 0) {
+    agentLogger.info('stuck_tasks_recovered', { data: { count: stuckTasks.length } });
   }
 }
 
@@ -139,15 +145,19 @@ async function processAgentTasks() {
         const task = batch[j];
         const result = results[j];
 
-        if (result.status === 'fulfilled') {
+        if (result.status === 'fulfilled' && result.value?.async) {
+          // Task dispatched to agent — stays 'executing' until callback arrives
+          continue;
+        } else if (result.status === 'fulfilled') {
           task.status = 'completed';
           task.result = result.value;
+          await task.save();
         } else {
           agentLogger.error('task_processor_error', { data: { taskId: task._id, type: task.type, error: result.reason?.message } });
           task.status = task.attempts >= task.maxAttempts ? 'failed' : 'pending';
           task.result = { error: result.reason?.message };
+          await task.save();
         }
-        await task.save();
       }
     }
   } finally {
@@ -177,25 +187,58 @@ async function _executeSingleTask(task) {
     return { action: 'skipped', reason: `Contact in terminal status: ${contact.status}` };
   }
 
-  let response;
   const isResume = !!(task.hasCheckpoint && task.threadId);
 
   if (isResume) {
-    response = await callAgentResume({
+    await callAgentResume({
       threadId: task.threadId,
       updatedContext: {
         current_date: new Date().toISOString(),
         days_since_hibernate: Math.floor((Date.now() - task.createdAt.getTime()) / (24 * 60 * 60 * 1000))
-      }
+      },
+      taskId: task._id.toString(),
     });
   } else {
-    const contact = task.contact || await Contact.findById(task.contact).lean();
+    const taskContact = task.contact || await Contact.findById(task.contact).lean();
     const conversation = task.conversation || (task.conversation ? await Conversation.findById(task.conversation) : null);
+    await callAgentProactive({ task, contact: taskContact, conversation });
+  }
 
-    response = await callAgentProactive({ task, contact, conversation });
-    if (conversation) {
-      response = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
-    }
+  return { action: 'dispatched', async: true };
+}
+
+/**
+ * Process the agent callback response for a task.
+ * Called by POST /api/internal/agent-callback.
+ */
+export async function handleAgentCallback(taskId, agentResponse, error) {
+  const task = await AgentTask.findById(taskId).populate('contact conversation');
+  if (!task) {
+    agentLogger.warn('agent_callback_task_not_found', { data: { taskId } });
+    return;
+  }
+
+  if (error) {
+    agentLogger.error('agent_callback_error', { data: { taskId, error } });
+    task.status = task.attempts >= task.maxAttempts ? 'failed' : 'pending';
+    task.result = { error };
+    await task.save();
+    return;
+  }
+
+  const response = agentResponse;
+
+  const contact = task.contact && typeof task.contact === 'object'
+    ? task.contact
+    : await Contact.findById(task.contact).lean();
+  const conversation = task.conversation && typeof task.conversation === 'object'
+    ? task.conversation
+    : (task.conversation ? await Conversation.findById(task.conversation) : null);
+
+  const isResume = !!(task.hasCheckpoint && task.threadId);
+  if (!isResume && conversation) {
+    const adjusted = applyChannelPolicyToAgentResponse(response, conversation, { flow: 'proactive' });
+    Object.assign(response, adjusted);
   }
 
   AgentMetric.create({
@@ -203,7 +246,7 @@ async function _executeSingleTask(task) {
     event: 'llm_call',
     data: {
       model: response.model_used || 'multi-node',
-      inputTokens: response.total_input_tokens || 0,
+      inputTokens: response.total_input_tokens || response.total_tokens || 0,
       outputTokens: response.total_output_tokens || 0,
       costUsd: response.estimated_cost_usd || 0,
       durationMs: response.processing_time_ms || 0,
@@ -229,7 +272,10 @@ async function _executeSingleTask(task) {
     if (response.draft) {
       await handleAgentResponse(response, task);
     }
-    return { action: 'terminal', reason: terminalIntent?.params?.terminal_reason };
+    task.status = 'completed';
+    task.result = { action: 'terminal', reason: terminalIntent?.params?.terminal_reason };
+    await task.save();
+    return;
   }
 
   const autonomyLevel = _getAutonomyLevel();
@@ -245,7 +291,10 @@ async function _executeSingleTask(task) {
     await handleAgentResponse(response, task);
   }
 
-  return { action: response.action, hasDraft: !!response.draft };
+  task.status = 'completed';
+  task.result = { action: response.action, hasDraft: !!response.draft };
+  await task.save();
+  agentLogger.info('agent_callback_processed', { data: { taskId, action: response.action } });
 }
 
 const VALID_TASK_TYPES = new Set([
@@ -262,6 +311,9 @@ const TASK_TYPE_ALIASES = {
   'follow_up': 'follow_up_no_reply',
   'followup': 'follow_up_no_reply',
   'reactivation_seasonal': 'seasonal_reactivation',
+  'break_up': 'break_up_email',
+  'breakup': 'break_up_email',
+  'breakup_email': 'break_up_email',
 };
 
 function _normalizeTaskType(type) {
@@ -271,29 +323,72 @@ function _normalizeTaskType(type) {
   return 'human_task';
 }
 
+const MAX_PENDING_TASKS_PER_CONTACT = 3;
+
+async function _safeScheduledAt(dateStr) {
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime()) || date <= new Date()) {
+    return nextBusinessHour();
+  }
+  return date;
+}
+
+async function _canCreateTaskForContact(contactId, taskType) {
+  const pendingCount = await AgentTask.countDocuments({
+    contact: contactId,
+    status: { $in: ['pending', 'executing'] },
+  });
+  if (pendingCount >= MAX_PENDING_TASKS_PER_CONTACT) {
+    agentLogger.warn('task_creation_blocked_cap', {
+      data: { contactId: contactId.toString(), pendingCount, taskType, cap: MAX_PENDING_TASKS_PER_CONTACT }
+    });
+    return false;
+  }
+  const duplicate = await AgentTask.findOne({
+    contact: contactId,
+    type: taskType,
+    status: { $in: ['pending', 'executing'] },
+  });
+  if (duplicate) {
+    agentLogger.warn('task_creation_blocked_duplicate', {
+      data: { contactId: contactId.toString(), taskType, existingTaskId: duplicate._id.toString() }
+    });
+    return false;
+  }
+  return true;
+}
+
 async function processToolIntents(toolIntents, task) {
   for (const intent of toolIntents) {
     if (intent.tool === 'mark_contact_terminal') continue;
 
+    const contactId = task.contact._id || task.contact;
+
     if (intent.tool === 'hibernate_workflow') {
+      const taskType = _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation');
+      if (!(await _canCreateTaskForContact(contactId, taskType))) continue;
+      const scheduledAt = await _safeScheduledAt(intent.params.wake_at);
       await AgentTask.create({
-        type: _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation'),
-        contact: task.contact._id || task.contact,
+        type: taskType,
+        contact: contactId,
         conversation: task.conversation?._id || task.conversation,
         threadId: intent.params.thread_id,
         hasCheckpoint: true,
-        scheduledAt: new Date(intent.params.wake_at),
+        scheduledAt,
         context: intent.params.context || {},
         priority: intent.params.priority || 'high',
         createdBy: 'agent'
       });
     } else if (intent.tool === 'schedule_task') {
+      const taskType = _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply');
+      if (!(await _canCreateTaskForContact(contactId, taskType))) continue;
+      const scheduledAt = await _safeScheduledAt(intent.params.scheduled_at);
       await AgentTask.create({
-        type: _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply'),
-        contact: task.contact._id || task.contact,
+        type: taskType,
+        contact: contactId,
         conversation: task.conversation?._id || task.conversation,
         hasCheckpoint: false,
-        scheduledAt: new Date(intent.params.scheduled_at),
+        scheduledAt,
         context: intent.params.context || {},
         priority: intent.params.priority || 'medium',
         createdBy: 'agent'
@@ -598,6 +693,8 @@ async function generateReactivationTasks() {
   const batch = situations.slice(0, PLANNER_BATCH_LIMIT);
   console.log(`🧠 Planner: ${situations.length} situazioni trovate, processo batch di ${batch.length}`);
 
+  const plannerProcessedContacts = new Set();
+
   for (const situation of batch) {
     try {
       const plan = await callAgentPlan({
@@ -661,6 +758,13 @@ async function generateReactivationTasks() {
         };
         const taskType = _normalizeTaskType(taskTypeMap[action.action] || action.task_type || 'follow_up_no_reply');
 
+        const existingDup = await AgentTask.findOne({
+          contact: situation.contactDoc._id,
+          type: taskType,
+          status: { $in: ['pending', 'executing'] },
+        });
+        if (existingDup) continue;
+
         const delayMs = (action.delay_hours || 0) * 3600000;
         const scheduledAt = delayMs > 0
           ? new Date(Date.now() + delayMs)
@@ -679,6 +783,7 @@ async function generateReactivationTasks() {
           priority: action.priority || 'medium',
           createdBy: 'planner',
         });
+        plannerProcessedContacts.add(situation.contactDoc._id.toString());
         created++;
       }
 
@@ -699,7 +804,7 @@ async function generateReactivationTasks() {
 
   // ── Contact scanner (legacy, still useful for edge cases) ──
   try {
-    const reactivated = await runDailyReactivationScan();
+    const reactivated = await runDailyReactivationScan(plannerProcessedContacts);
     created += reactivated;
   } catch (err) {
     console.error('❌ Contact scanner error:', err.message);
@@ -756,4 +861,4 @@ function scheduleDaily8AM(fn) {
   setInterval(run, 15 * 60 * 1000);
 }
 
-export default { startTaskProcessor, startTaskGenerator, processAgentTasks, generateReactivationTasks };
+export default { startTaskProcessor, startTaskGenerator, processAgentTasks, generateReactivationTasks, handleAgentCallback };

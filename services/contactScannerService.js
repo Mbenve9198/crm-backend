@@ -268,14 +268,21 @@ export function createReactivationTasks(candidates, dailyLimit = DAILY_LIMIT) {
 }
 
 
-export async function runDailyReactivationScan() {
+export async function runDailyReactivationScan(excludeContactIds = new Set()) {
   const candidates = await scanReactivationCandidates(DAILY_LIMIT);
   if (candidates.length === 0) return 0;
 
-  const tasks = createReactivationTasks(candidates, DAILY_LIMIT);
+  const filtered = candidates.filter(c => !excludeContactIds.has(c._id.toString()));
+  const tasks = createReactivationTasks(filtered, DAILY_LIMIT);
   let created = 0;
 
   for (const taskData of tasks) {
+    const dup = await AgentTask.findOne({
+      contact: taskData.contact,
+      type: taskData.type,
+      status: { $in: ['pending', 'executing'] },
+    });
+    if (dup) continue;
     await AgentTask.create(taskData);
     created++;
   }
