@@ -162,11 +162,9 @@ function extractStripeData(subscription, invoice, customer) {
     const productName = product(firstPrice);
     const planLabel = firstPrice?.nickname || firstItem?.plan?.nickname || productName || null;
 
-    const intervalLabel = { year: 'anno', month: 'mese', week: 'settimana', day: 'giorno' }[interval] || interval;
-
     data.subscriptionId = subscription.id;
     data.subscriptionStatus = subscription.status;
-    data.planName = planLabel || `€${Math.round(finalMonthlyCents / 100)}/mese (${intervalLabel})`;
+    data.planName = planLabel || productName || null;
     data.planInterval = interval;
     data.planIntervalCount = intervalCount;
     data.mrrFromStripe = Math.round(finalMonthlyCents / 100);
