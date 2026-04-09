@@ -8,84 +8,19 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
 import callRoutes from './routes/callRoutes.js';
-import twilioSettingsRoutes from './routes/twilioSettingsRoutes.js';
-import whatsappTemplateRoutes from './routes/whatsappTemplateRoutes.js';
-import whatsappSessionRoutes from './routes/whatsappSessionRoutes.js';
-import whatsappCampaignRoutes from './routes/whatsappCampaignRoutes.js';
-import sessionMonitorRoutes from './routes/sessionMonitorRoutes.js';
 import inboundLeadRoutes from './routes/inboundLeadRoutes.js';
 import voiceFileRoutes from './routes/voiceFileRoutes.js';
-import testRoutes from './routes/testRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import { statusCallback, recordingStatusCallback, testWebhook, answerCall, dialComplete, getRecordingProxy } from './controllers/callController.js';
-import whatsappService from './services/whatsappService.js';
-import fixNodePersistPermissions from './scripts/fixNodePersistPermissions.js';
 
 // Carica le variabili d'ambiente
 dotenv.config();
 
-// CRITICAL FIX: Configura il percorso per node-persist PRIMA di qualsiasi import OpenWA
 import path from 'path';
 import os from 'os';
-
-// Determina e imposta il percorso di storage per node-persist
-const isProduction = process.env.NODE_ENV === 'production';
-const storagePath = isProduction 
-  ? path.join(os.tmpdir(), 'wa-storage')
-  : path.join(process.cwd(), 'wa-storage');
-
-// Imposta le variabili d'ambiente per node-persist e OpenWA
-process.env.OPENWA_SESSION_DATA_PATH = storagePath;
-process.env.NODE_PERSIST_DIR = path.join(storagePath, 'node-persist');
-
-console.log(`🔧 CRITICAL FIX: Storage path impostato a ${storagePath}`);
-console.log(`🔧 CRITICAL FIX: NODE_PERSIST_DIR impostato a ${process.env.NODE_PERSIST_DIR}`);
-
-// CRITICAL FIX: Intercepta le chiamate a mkdir di node-persist
 import fsModule from 'fs';
-const originalMkdir = fsModule.mkdir;
-const originalMkdirSync = fsModule.mkdirSync;
 
-// Override fs.mkdir per redirectare .node-persist alla directory corretta
-fsModule.mkdir = function(pathToCreate, options, callback) {
-  if (typeof options === 'function') {
-    callback = options;
-    options = {};
-  }
-  
-  // Se sta cercando di creare .node-persist nella directory corrente, redirecta
-  if (pathToCreate === '.node-persist' || pathToCreate.endsWith('/.node-persist')) {
-    const redirectedPath = path.join(storagePath, 'node-persist');
-    console.log(`🔀 REDIRECT: ${pathToCreate} -> ${redirectedPath}`);
-    pathToCreate = redirectedPath;
-  }
-  
-  return originalMkdir.call(this, pathToCreate, { recursive: true, ...options }, callback);
-};
-
-// Override fs.mkdirSync per redirectare .node-persist alla directory corretta
-fsModule.mkdirSync = function(pathToCreate, options = {}) {
-  // Se sta cercando di creare .node-persist nella directory corrente, redirecta
-  if (pathToCreate === '.node-persist' || pathToCreate.endsWith('/.node-persist')) {
-    const redirectedPath = path.join(storagePath, 'node-persist');
-    console.log(`🔀 REDIRECT SYNC: ${pathToCreate} -> ${redirectedPath}`);
-    pathToCreate = redirectedPath;
-  }
-  
-  return originalMkdirSync.call(this, pathToCreate, { recursive: true, ...options });
-};
-
-console.log('🛠️ CRITICAL FIX: Override fs.mkdir applicato per node-persist');
-
-// CRITICAL FIX: Crea immediatamente le directory necessarie
-try {
-  fsModule.mkdirSync(storagePath, { recursive: true });
-  fsModule.mkdirSync(path.join(storagePath, 'node-persist'), { recursive: true });
-  fsModule.mkdirSync(path.join(storagePath, 'wa-sessions'), { recursive: true });
-  console.log(`✅ CRITICAL FIX: Directory storage create: ${storagePath}`);
-} catch (error) {
-  console.warn(`⚠️ CRITICAL FIX: Avviso creazione directory: ${error.message}`);
-}
+const isProduction = process.env.NODE_ENV === 'production';
 
 /**
  * SERVER PRINCIPALE PER MENUCHAT CRM
@@ -191,13 +126,9 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Cookie parser per gestione JWT
 app.use(cookieParser());
 
-// 🎤 CRITICO: Endpoint pubblico audio PRIMA del CORS globale
-// Questo endpoint DEVE essere completamente pubblico per WhatsApp/OpenWA
+// Endpoint pubblico audio
 import { serveVoiceFile } from './controllers/voiceFileController.js';
 app.get('/api/voice-files/:id/audio', serveVoiceFile);
-
-// 🧪 CRITICO: Endpoint test pubblico PRIMA del CORS
-app.use('/api/test', testRoutes);
 
 // CORS per permettere richieste dal frontend
 app.use(cors({
@@ -438,45 +369,6 @@ app.post('/api/calls/dial-complete', dialComplete);
 // Proxy per registrazioni audio - PUBBLICO (senza autenticazione)
 app.get('/api/calls/recording/:recordingSid', getRecordingProxy);
 
-// DEBUG: Endpoint per verificare installazione Chrome (SOLO PER DEBUG)
-app.get('/debug/chrome', async (req, res) => {
-  try {
-    const { existsSync } = await import('fs');
-    const paths = [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium'
-    ];
-    
-    const results = paths.map(path => ({
-      path,
-      exists: existsSync(path)
-    }));
-    
-    res.json({
-      environment: process.env.NODE_ENV,
-      chromePath: process.env.CHROME_PATH,
-      puppeteerPath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      availablePaths: results,
-      openwaConfig: {
-        headless: process.env.OPENWA_HEADLESS,
-        sessionDataPath: process.env.OPENWA_SESSION_DATA_PATH
-      },
-      deployInfo: {
-        lastUpdate: new Date().toISOString(),
-        serverStartTime: process.uptime(),
-        nodeVersion: process.version
-      }
-    });
-  } catch (error) {
-    res.status(500).json({
-      error: error.message,
-      stack: error.stack
-    });
-  }
-});
-
 // DEBUG: Endpoint per verificare permessi uploads (SOLO PER DEBUG)
 app.get('/debug/uploads', async (req, res) => {
   try {
@@ -558,23 +450,8 @@ app.use('/api', activityRoutes);
 // Routes per le chiamate (sotto /api/calls)
 app.use('/api/calls', callRoutes);
 
-// Routes per le impostazioni Twilio (sotto /api/settings/twilio)
-app.use('/api/settings/twilio', twilioSettingsRoutes);
-
-// Routes per i template WhatsApp (sotto /api/settings)
-app.use('/api/settings', whatsappTemplateRoutes);
-
-// Routes per le sessioni WhatsApp (sotto /api/whatsapp-sessions)
-app.use('/api/whatsapp-sessions', whatsappSessionRoutes);
-
-// Routes per le campagne WhatsApp (sotto /api/whatsapp-campaigns)
-app.use('/api/whatsapp-campaigns', whatsappCampaignRoutes);
-
-// 🎤 Routes per voice files (sotto /api/voice-files)
+// Routes per voice files (sotto /api/voice-files)
 app.use('/api/voice-files', voiceFileRoutes);
-
-// Routes per il monitor sessioni (sotto /api/session-monitor)
-app.use('/api/session-monitor', sessionMonitorRoutes);
 
 // Routes per l'AI Sales Agent
 import agentRoutes from './routes/agentRoutes.js';
@@ -588,7 +465,6 @@ app.use('/api/agent', agentTaskRoutes);
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
 import { checkAgentHealth } from './services/agentServiceClient.js';
-// outboundMessageWorkerService rimosso — WhatsApp gestito da agentWhatsAppService.js
 
 setTimeout(async () => {
   const agentOnline = await checkAgentHealth();
@@ -797,21 +673,6 @@ const server = app.listen(PORT, () => {
   console.log(`❤️  Health check: http://localhost:${PORT}/health`);
   console.log('🚀 ========================================');
   
-  // Fix permessi node-persist per OpenWA (solo in produzione)
-  if (process.env.NODE_ENV === 'production') {
-    fixNodePersistPermissions().catch(error => {
-      console.warn('⚠️ Avviso fix permessi node-persist:', error.message);
-    });
-  }
-  
-  // Inizializza il servizio WhatsApp
-  whatsappService.initialize().catch(error => {
-    console.error('❌ Errore inizializzazione WhatsApp Service:', error);
-  });
-  
-  // Preparazione per futura integrazione Twilio
-  console.log('📞 Preparato per integrazione Twilio (funzionalità dialing future)');
-
   // Graceful shutdown per Redis
   process.on('SIGINT', async () => {
     console.log('\n🔄 Graceful shutdown initiated...');
@@ -836,26 +697,9 @@ process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM ricevuto, chiusura graceful del server...');
   server.close(() => {
     console.log('✅ Server chiuso');
-    // Cleanup del servizio WhatsApp
-    whatsappService.cleanup().then(() => {
-      mongoose.connection.close(false, () => {
-        console.log('✅ Connessione MongoDB chiusa');
-        process.exit(0);
-      });
-    });
-  });
-});
-
-process.on('SIGINT', () => {
-  console.log('🛑 SIGINT ricevuto, chiusura graceful del server...');
-  server.close(() => {
-    console.log('✅ Server chiuso');
-    // Cleanup del servizio WhatsApp
-    whatsappService.cleanup().then(() => {
-      mongoose.connection.close(false, () => {
-        console.log('✅ Connessione MongoDB chiusa');
-        process.exit(0);
-      });
+    mongoose.connection.close(false, () => {
+      console.log('✅ Connessione MongoDB chiusa');
+      process.exit(0);
     });
   });
 });
