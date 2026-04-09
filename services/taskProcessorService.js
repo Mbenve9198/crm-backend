@@ -1,7 +1,7 @@
 import AgentTask from '../models/agentTaskModel.js';
 import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
-import { callAgentProactive, callAgentResume } from './agentServiceClient.js';
+import { callAgentProactive, callAgentResume, callAgentPlan } from './agentServiceClient.js';
 import { executeTools } from './agentToolsService.js';
 import { sendProactiveWhatsApp } from './agentWhatsAppService.js';
 import { sendAgentActivityReport, sendAgentHumanReviewEmail } from './emailNotificationService.js';
@@ -487,11 +487,14 @@ async function handleHumanTask(task) {
   }).catch(() => {});
 }
 
-async function generateReactivationTasks() {
-  console.log('📋 Generazione task di riattivazione...');
-  let created = 0;
+const PLANNER_BATCH_LIMIT = 25;
 
-  // ── 1. Rank Checker Outreach (primo contatto inbound) ──
+async function generateReactivationTasks() {
+  console.log('🧠 Task Generator (Planner-driven): avvio scansione...');
+  let created = 0;
+  const situations = [];
+
+  // ── 1. Rank Checker leads (new_lead) ──
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -505,115 +508,170 @@ async function generateReactivationTasks() {
     (await Conversation.distinct('contact')).map(id => id.toString())
   );
   const existingTaskContacts = new Set(
-    (await AgentTask.distinct('contact', { status: 'pending', type: 'rank_checker_outreach' })).map(id => id.toString())
+    (await AgentTask.distinct('contact', { status: 'pending' })).map(id => id.toString())
   );
 
   for (const lead of rcLeads) {
     if (!existingConvContacts.has(lead._id.toString()) && !existingTaskContacts.has(lead._id.toString())) {
-      const callRequested = lead.properties?.callRequested === true;
-
-      if (callRequested) {
-        await AgentTask.create({
-          type: 'human_task',
-          contact: lead._id,
-          scheduledAt: nextBusinessHour(),
-          context: {
-            reason: `Lead rank checker ha richiesto una chiamata (preferenza: ${lead.properties?.callPreference || 'non specificata'}). Telefono: ${lead.phone || 'N/A'}. Nome contatto: ${lead.properties?.contactName || lead.name}.`,
-            source: 'rank_checker',
-            callPreference: lead.properties?.callPreference,
-          },
-          priority: 'high',
-          createdBy: 'system'
-        });
-      } else {
-        await AgentTask.create({
-          type: 'rank_checker_outreach',
-          contact: lead._id,
-          scheduledAt: nextBusinessHour(),
-          context: { source: 'rank_checker' },
-          createdBy: 'system'
-        });
-      }
-      created++;
+      situations.push({
+        type: 'new_lead',
+        contact: _contactToPlanner(lead),
+        contactDoc: lead,
+        conversation: { stage: 'none', messages_count: 0 },
+        context: {
+          source: 'rank_checker',
+          call_requested: lead.properties?.callRequested === true,
+          call_preference: lead.properties?.callPreference || null,
+          days_since_signup: Math.floor((Date.now() - new Date(lead.createdAt).getTime()) / 86400000),
+        },
+      });
     }
   }
 
-  // ── 2. Conversation-based tasks (follow-up, break-up, dormant) ──
+  // ── 2. Stale conversations (no_reply_timeout) ──
   const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const staleActive = await Conversation.find({
     status: 'active',
     updatedAt: { $lte: threeDaysAgo }
-  }).select('_id contact');
+  }).populate('contact').lean();
 
   for (const conv of staleActive) {
-    const hasTask = await AgentTask.findOne({
-      conversation: conv._id,
-      type: { $in: ['follow_up_no_reply', 'break_up_email'] },
-      status: 'pending'
+    if (!conv.contact || existingTaskContacts.has((conv.contact._id || conv.contact).toString())) continue;
+    if (TERMINAL_CONTACT_STATUSES.has(conv.contact?.status)) continue;
+    const daysSince = Math.floor((Date.now() - new Date(conv.updatedAt).getTime()) / 86400000);
+    situations.push({
+      type: 'no_reply_timeout',
+      contact: _contactToPlanner(conv.contact),
+      contactDoc: conv.contact,
+      conversationDoc: conv,
+      conversation: {
+        stage: conv.stage || 'initial_reply',
+        messages_count: conv.messages?.length || 0,
+        conversation_id: conv._id.toString(),
+      },
+      context: { days_since_last_contact: daysSince },
     });
-    if (!hasTask) {
-      await AgentTask.create({
-        type: 'follow_up_no_reply',
-        contact: conv.contact,
-        conversation: conv._id,
-        scheduledAt: nextBusinessHour(),
-        context: { reason: 'No reply for 3+ days', attempt: 1 },
-        createdBy: 'system'
-      });
-      created++;
-    }
   }
 
+  // ── 3. Dormant conversations (timer_expired) ──
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const dormant = await Conversation.find({
     status: { $in: ['paused'] },
     updatedAt: { $lte: thirtyDaysAgo }
-  }).select('_id contact');
+  }).populate('contact').lean();
 
   for (const conv of dormant) {
-    const hasTask = await AgentTask.findOne({
-      conversation: conv._id,
-      type: 'reactivation',
-      status: 'pending'
+    if (!conv.contact || existingTaskContacts.has((conv.contact._id || conv.contact).toString())) continue;
+    if (TERMINAL_CONTACT_STATUSES.has(conv.contact?.status)) continue;
+    const daysSince = Math.floor((Date.now() - new Date(conv.updatedAt).getTime()) / 86400000);
+    situations.push({
+      type: 'timer_expired',
+      contact: _contactToPlanner(conv.contact),
+      contactDoc: conv.contact,
+      conversationDoc: conv,
+      conversation: {
+        stage: conv.stage || 'dormant',
+        messages_count: conv.messages?.length || 0,
+        conversation_id: conv._id.toString(),
+      },
+      context: { days_dormant: daysSince, original_status: conv.status },
     });
-    if (!hasTask) {
-      await AgentTask.create({
-        type: 'reactivation',
-        contact: conv.contact,
-        conversation: conv._id,
-        scheduledAt: nextBusinessHour(),
-        context: { reason: 'Dormant 30+ days' },
-        createdBy: 'system'
+  }
+
+  // ── Batch-call the Planner ──
+  const batch = situations.slice(0, PLANNER_BATCH_LIMIT);
+  console.log(`🧠 Planner: ${situations.length} situazioni trovate, processo batch di ${batch.length}`);
+
+  for (const situation of batch) {
+    try {
+      const plan = await callAgentPlan({
+        type: situation.type,
+        contact: situation.contact,
+        conversation: situation.conversation,
+        context: situation.context,
       });
-      created++;
+
+      if (!plan.actions || plan.actions.length === 0) continue;
+
+      for (const action of plan.actions) {
+        if (action.action === 'do_nothing') continue;
+
+        if (action.action === 'escalate_human' || situation.context.call_requested) {
+          await AgentTask.create({
+            type: 'human_task',
+            contact: situation.contactDoc._id,
+            conversation: situation.conversationDoc?._id || null,
+            scheduledAt: nextBusinessHour(),
+            context: {
+              reason: action.context?.reason || plan.reasoning,
+              source: situation.context.source || situation.type,
+              planner_confidence: plan.confidence,
+            },
+            priority: action.priority || 'medium',
+            createdBy: 'planner',
+          });
+          created++;
+          continue;
+        }
+
+        if (action.action === 'mark_terminal') {
+          await Contact.findByIdAndUpdate(situation.contactDoc._id, { status: 'not_interested_final' });
+          await AgentTask.updateMany(
+            { contact: situation.contactDoc._id, status: 'pending' },
+            { status: 'cancelled', cancelledReason: `Planner: ${action.context?.reason || 'terminal'}` }
+          );
+          agentLogger.info('planner_marked_terminal', {
+            data: { email: situation.contact.email, reason: action.context?.reason }
+          });
+          continue;
+        }
+
+        const taskTypeMap = {
+          'send_outreach': 'rank_checker_outreach',
+          'send_follow_up': 'follow_up_no_reply',
+          'send_break_up': 'break_up_email',
+          'send_reactivation': 'reactivation',
+          'schedule_task': action.task_type || 'follow_up_no_reply',
+        };
+        const taskType = _normalizeTaskType(taskTypeMap[action.action] || action.task_type || 'follow_up_no_reply');
+
+        const delayMs = (action.delay_hours || 0) * 3600000;
+        const scheduledAt = delayMs > 0
+          ? new Date(Date.now() + delayMs)
+          : nextBusinessHour();
+
+        await AgentTask.create({
+          type: taskType,
+          contact: situation.contactDoc._id,
+          conversation: situation.conversationDoc?._id || null,
+          scheduledAt,
+          context: {
+            reason: action.context?.reason || plan.reasoning,
+            planner_confidence: plan.confidence,
+            planner_action: action.action,
+          },
+          priority: action.priority || 'medium',
+          createdBy: 'planner',
+        });
+        created++;
+      }
+
+      agentLogger.info('planner_processed', {
+        data: {
+          type: situation.type,
+          email: situation.contact.email,
+          actions: plan.actions.map(a => a.action),
+          confidence: plan.confidence,
+        },
+      });
+    } catch (err) {
+      agentLogger.error('planner_call_failed', {
+        data: { type: situation.type, email: situation.contact.email, error: err.message }
+      });
     }
   }
 
-  const sevenDayStale = await Conversation.find({
-    status: { $in: ['active'] },
-    updatedAt: { $lte: sevenDaysAgo }
-  }).select('_id contact');
-
-  for (const conv of sevenDayStale) {
-    const hasTask = await AgentTask.findOne({
-      conversation: conv._id,
-      type: 'break_up_email',
-      status: 'pending'
-    });
-    if (!hasTask) {
-      await AgentTask.create({
-        type: 'break_up_email',
-        contact: conv.contact,
-        conversation: conv._id,
-        scheduledAt: nextBusinessHour(),
-        context: { reason: 'Stale 7+ days' },
-        createdBy: 'system'
-      });
-      created++;
-    }
-  }
-
-  // ── 3. Contact-based reactivation scan (the new smart scanner) ──
+  // ── Contact scanner (legacy, still useful for edge cases) ──
   try {
     const reactivated = await runDailyReactivationScan();
     created += reactivated;
@@ -622,8 +680,22 @@ async function generateReactivationTasks() {
   }
 
   if (created > 0) {
-    console.log(`📋 Task Generator: ${created} task creati totali`);
+    console.log(`🧠 Task Generator (Planner): ${created} task creati`);
   }
+}
+
+function _contactToPlanner(contact) {
+  return {
+    email: contact.email,
+    name: contact.name,
+    phone: contact.phone || null,
+    city: contact.properties?.city || contact.properties?.location || null,
+    rating: contact.properties?.rating ? parseFloat(contact.properties.rating) : null,
+    reviews: contact.properties?.reviews ? parseInt(contact.properties.reviews) : null,
+    source: contact.source || null,
+    status: contact.status || null,
+    category: contact.properties?.category || null,
+  };
 }
 
 function nextBusinessHour() {
