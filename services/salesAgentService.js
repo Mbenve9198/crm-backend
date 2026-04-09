@@ -144,8 +144,20 @@ const updateConversationInsights = async (conversation, leadMessage, agentRespon
   }
 
   if (agentResponse?.new_stage && agentResponse.new_stage !== conversation.stage) {
-    conversation.stage = agentResponse.new_stage;
-    changed = true;
+    if (_isValidStageTransition(conversation.stage, agentResponse.new_stage)) {
+      const oldStage = conversation.stage;
+      conversation.stage = agentResponse.new_stage;
+      changed = true;
+      agentLogger.info('stage_transition', {
+        conversationId: conversation._id,
+        data: { from: oldStage, to: agentResponse.new_stage }
+      });
+    } else {
+      agentLogger.warn('invalid_stage_transition', {
+        conversationId: conversation._id,
+        data: { from: conversation.stage, to: agentResponse.new_stage }
+      });
+    }
   }
 
   const msgCount = conversation.messages?.length || 0;
@@ -202,13 +214,31 @@ export const routeLeadReply = (category, confidence, extracted, replyText) => {
 // PYTHON AGENT SERVICE CALL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+const VALID_TASK_TYPES = new Set([
+  'rank_checker_outreach', 'follow_up_no_reply', 'follow_up_scheduled',
+  'break_up_email', 'seasonal_reactivation', 'reactivation',
+  'reactivation_warm', 'reactivation_cold', 'human_task',
+]);
+const TASK_TYPE_ALIASES = {
+  'business_closed': 'human_task', 'find_alternative_contact': 'human_task',
+  'closure_response': 'human_task', 'schedule_call': 'human_task',
+  'follow_up': 'follow_up_no_reply', 'followup': 'follow_up_no_reply',
+  'reactivation_seasonal': 'seasonal_reactivation',
+};
+function _normalizeTaskType(type) {
+  if (VALID_TASK_TYPES.has(type)) return type;
+  return TASK_TYPE_ALIASES[type] || 'human_task';
+}
+
 const processToolIntents = async (toolIntents, conversation, contact) => {
   const toolsUsed = [];
 
   for (const intent of (toolIntents || [])) {
+    if (intent.tool === 'mark_contact_terminal') continue;
+
     if (intent.tool === 'hibernate_workflow') {
       await AgentTask.create({
-        type: intent.params.task_type || 'seasonal_reactivation',
+        type: _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation'),
         contact: contact._id,
         conversation: conversation._id,
         threadId: intent.params.thread_id,
@@ -222,7 +252,7 @@ const processToolIntents = async (toolIntents, conversation, contact) => {
 
     } else if (intent.tool === 'schedule_task') {
       await AgentTask.create({
-        type: intent.params.task_type || 'follow_up_no_reply',
+        type: _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply'),
         contact: contact._id,
         conversation: conversation._id,
         hasCheckpoint: false,
@@ -250,9 +280,50 @@ const processToolIntents = async (toolIntents, conversation, contact) => {
   return toolsUsed;
 };
 
+const STAGE_TRANSITIONS = {
+  prospecting:       ['initial_reply', 'engaged', 'lost', 'terminal', 'dormant'],
+  initial_reply:     ['engaged', 'objection_handling', 'qualification', 'lost', 'terminal', 'dormant'],
+  engaged:           ['objection_handling', 'negotiating', 'qualification', 'scheduling', 'lost', 'terminal', 'dormant'],
+  objection_handling:['engaged', 'negotiating', 'qualification', 'lost', 'terminal', 'dormant'],
+  negotiating:       ['qualification', 'scheduling', 'handoff', 'lost', 'terminal', 'dormant'],
+  qualification:     ['scheduling', 'handoff', 'won', 'lost', 'terminal', 'dormant'],
+  scheduling:        ['handoff', 'won', 'lost', 'terminal', 'dormant'],
+  handoff:           ['won', 'lost'],
+  dormant:           ['initial_reply', 'engaged', 'lost', 'terminal'],
+  won:               [],
+  lost:              ['dormant', 'engaged'],
+  terminal:          [],
+};
+
+function _isValidStageTransition(from, to) {
+  const allowed = STAGE_TRANSITIONS[from];
+  if (!allowed) return true;
+  return allowed.includes(to);
+}
+
+const MAX_CONSECUTIVE_AGENT_MSGS = 3;
+
+function _countConsecutiveAgentMessages(messages) {
+  let count = 0;
+  for (let i = (messages || []).length - 1; i >= 0; i--) {
+    if (messages[i].role === 'agent') count++;
+    else break;
+  }
+  return count;
+}
+
 export const runAgentLoop = async (conversation, leadMessage) => {
   const contact = await Contact.findById(conversation.contact).lean();
   const identity = conversation.agentIdentity || IDENTITIES.marco;
+
+  const consecutiveAgentMsgs = _countConsecutiveAgentMessages(conversation.messages);
+  if (consecutiveAgentMsgs >= MAX_CONSECUTIVE_AGENT_MSGS) {
+    agentLogger.warn('agent_loop_circuit_breaker', {
+      conversationId: conversation._id,
+      data: { consecutiveAgentMsgs, threshold: MAX_CONSECUTIVE_AGENT_MSGS, contactEmail: contact?.email }
+    });
+    return { response: null, toolsUsed: [], identity, rounds: 0, circuitBreaker: true };
+  }
 
   try {
     let agentResponse = await callAgentProcess({
@@ -281,6 +352,32 @@ export const runAgentLoop = async (conversation, leadMessage) => {
     });
 
     const toolsUsed = await processToolIntents(agentResponse.tool_intents, conversation, contact);
+
+    if (agentResponse.action === 'terminal') {
+      const terminalIntent = (agentResponse.tool_intents || []).find(i => i.tool === 'mark_contact_terminal');
+      const terminalReason = terminalIntent?.params?.terminal_reason || 'business_closed';
+      await Contact.findByIdAndUpdate(contact._id, { status: terminalReason });
+      await AgentTask.updateMany(
+        { contact: contact._id, status: 'pending' },
+        { status: 'cancelled', cancelledReason: `Terminal: ${terminalReason}` }
+      );
+      agentLogger.info('contact_marked_terminal', {
+        conversationId: conversation._id,
+        data: { email: contact.email, reason: terminalReason }
+      });
+      if (agentResponse.draft) {
+        conversation.addMessage('agent', agentResponse.draft, agentResponse.channel || 'email', {
+          wasAutoSent: false, isDraft: true,
+        });
+        conversation.status = 'awaiting_human';
+        await conversation.save();
+        return { response: agentResponse.draft, toolsUsed: [], identity, rounds: 1, terminal: true };
+      }
+      conversation.status = 'dead';
+      conversation.outcome = terminalReason;
+      await conversation.save();
+      return { response: null, toolsUsed: [], identity, rounds: 1, terminal: true };
+    }
 
     if (agentResponse.action === 'escalate_human') {
       await executeTools('request_human_help', {
@@ -575,9 +672,10 @@ export const approveAndSend = async (conversationId, options = {}) => {
     conversation.markModified('messages');
   }
 
+  const currentChannel = conversation.channelState?.currentChannel || conversation.channel || 'email';
   const phone = contact.phone;
   const waToSend = whatsappContent ?? originalWaDraft;
-  if (phone && waToSend) {
+  if (phone && waToSend && currentChannel !== 'whatsapp') {
     const waMessage = waToSend.length > 900 ? waToSend.slice(0, 897) + '...' : waToSend;
     sendProactiveWhatsApp({
       phone,

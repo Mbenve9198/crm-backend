@@ -340,7 +340,9 @@ async function toolSendEmail({ message, subject }, ctx) {
   const contact = await Contact.findById(conversation.contact).lean();
   if (!contact) return { error: 'Contatto non trovato' };
 
-  if (process.env.AGENT_APPROVAL_MODE === 'true' && !ctx?.approvedByHuman) {
+  const approvalMode = process.env.AGENT_APPROVAL_MODE;
+  const needsApproval = (approvalMode === 'true' || approvalMode === 'A') && !ctx?.approvedByHuman;
+  if (needsApproval) {
     conversation.addMessage('agent', message, 'email', {
       wasAutoSent: false,
       isDraft: true,
@@ -406,7 +408,9 @@ async function toolSendWhatsApp({ message, phone, is_first_contact }, ctx) {
     return { sent: false, error: 'Nessun numero di telefono' };
   }
 
-  if (process.env.AGENT_APPROVAL_MODE === 'true' && conversation) {
+  const waApprovalMode = process.env.AGENT_APPROVAL_MODE;
+  const waNeedsApproval = (waApprovalMode === 'true' || waApprovalMode === 'A') && conversation;
+  if (waNeedsApproval) {
     conversation.addMessage('agent', message, 'whatsapp', {
       wasAutoSent: false,
       isDraft: true,

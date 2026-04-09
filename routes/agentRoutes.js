@@ -12,6 +12,29 @@ import { protect } from '../controllers/authController.js';
 
 const router = express.Router();
 
+function _computeModifications(original, final) {
+  if (!original || !final || original === final) return null;
+  const origLines = new Set(original.split('\n').map(l => l.trim()).filter(Boolean));
+  const finalLines = new Set(final.split('\n').map(l => l.trim()).filter(Boolean));
+
+  const added = [...finalLines].filter(l => !origLines.has(l));
+  const removed = [...origLines].filter(l => !finalLines.has(l));
+
+  const origLower = original.toLowerCase();
+  const finalLower = final.toLowerCase();
+  const toneIndicators = ['!', '?', '...'];
+  const toneChanged = toneIndicators.some(t =>
+    (origLower.split(t).length - 1) !== (finalLower.split(t).length - 1)
+  ) || (original.length > 0 && Math.abs(final.length - original.length) / original.length > 0.3);
+
+  return {
+    addedContent: added.length > 0 ? added.join('\n') : null,
+    removedContent: removed.length > 0 ? removed.join('\n') : null,
+    toneChange: toneChanged ? 'Tono modificato dall\'umano' : null,
+    structureChange: added.length > 2 || removed.length > 2,
+  };
+}
+
 router.use(protect);
 
 /**
@@ -97,45 +120,59 @@ router.post('/conversations/:id/approve', async (req, res) => {
 
     const emailAction = result.emailModified ? 'modified' : 'approved';
     const waAction = result.waModified ? 'modified' : (whatsappContent ? 'approved' : null);
+    const finalEmail = result.finalEmail || agentDraft;
 
-    await AgentFeedback.create({
+    const emailModifications = _computeModifications(agentDraft, finalEmail);
+
+    const emailFb = await AgentFeedback.create({
       conversation: conversation._id,
       contact: conversation.contact,
       agentDraft,
-      finalSent: result.finalEmail || agentDraft,
+      finalSent: finalEmail,
       action: emailAction,
       channel: 'email',
+      modifications: emailAction === 'modified' ? emailModifications : undefined,
       conversationContext: buildFeedbackContext(conversation),
       reviewedBy: req.user?._id,
       weekNumber: getISOWeek(new Date())
-    }).catch(() => {});
+    }).catch(() => null);
 
+    let waFb = null;
     if (waAction && agentWaDraft) {
-      await AgentFeedback.create({
+      const finalWa = result.finalWhatsapp || agentWaDraft;
+      const waModifications = _computeModifications(agentWaDraft, finalWa);
+      waFb = await AgentFeedback.create({
         conversation: conversation._id,
         contact: conversation.contact,
         agentDraft: agentWaDraft,
-        finalSent: result.finalWhatsapp || agentWaDraft,
+        finalSent: finalWa,
         action: waAction,
         channel: 'whatsapp',
+        modifications: waAction === 'modified' ? waModifications : undefined,
         conversationContext: buildFeedbackContext(conversation),
         reviewedBy: req.user?._id,
         weekNumber: getISOWeek(new Date())
-      }).catch(() => {});
+      }).catch(() => null);
     }
 
     const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
+
     sendFeedbackToAgent({
       conversation,
       contact: contactDoc,
       agentDraft,
-      finalSent: result.finalEmail || agentDraft,
+      finalSent: finalEmail,
       action: emailAction,
       channel: 'email',
-      modifications: result.emailModified ? { addedContent: emailContent } : null,
-    }).catch(() => {});
+      modifications: emailAction === 'modified' ? emailModifications : null,
+    }).then(() => {
+      if (emailFb) AgentFeedback.findByIdAndUpdate(emailFb._id, { sentToAgent: true }).catch(() => {});
+    }).catch(() => {
+      if (emailFb) AgentFeedback.findByIdAndUpdate(emailFb._id, { sentToAgent: false }).catch(() => {});
+    });
 
     if (waAction && agentWaDraft) {
+      const waModifications = _computeModifications(agentWaDraft, result.finalWhatsapp || agentWaDraft);
       sendFeedbackToAgent({
         conversation,
         contact: contactDoc,
@@ -143,8 +180,12 @@ router.post('/conversations/:id/approve', async (req, res) => {
         finalSent: result.finalWhatsapp || agentWaDraft,
         action: waAction,
         channel: 'whatsapp',
-        modifications: result.waModified ? { addedContent: whatsappContent } : null,
-      }).catch(() => {});
+        modifications: waAction === 'modified' ? waModifications : null,
+      }).then(() => {
+        if (waFb) AgentFeedback.findByIdAndUpdate(waFb._id, { sentToAgent: true }).catch(() => {});
+      }).catch(() => {
+        if (waFb) AgentFeedback.findByIdAndUpdate(waFb._id, { sentToAgent: false }).catch(() => {});
+      });
     }
 
     res.json({ ...result, feedbackAction: emailAction, waFeedbackAction: waAction });
@@ -169,7 +210,7 @@ router.post('/conversations/:id/discard', async (req, res) => {
 
     const result = await discardReply(req.params.id);
 
-    await AgentFeedback.create({
+    const fb = await AgentFeedback.create({
       conversation: conversation._id,
       contact: conversation.contact,
       agentDraft,
@@ -179,7 +220,7 @@ router.post('/conversations/:id/discard', async (req, res) => {
       conversationContext: buildFeedbackContext(conversation),
       reviewedBy: req.user?._id,
       weekNumber: getISOWeek(new Date())
-    }).catch(() => {});
+    }).catch(() => null);
 
     const contactDoc = await Contact.findById(conversation.contact).lean().catch(() => null);
     sendFeedbackToAgent({
@@ -189,7 +230,11 @@ router.post('/conversations/:id/discard', async (req, res) => {
       action: 'discarded',
       discardReason: discardReason || 'other',
       discardNotes,
-    }).catch(() => {});
+    }).then(() => {
+      if (fb) AgentFeedback.findByIdAndUpdate(fb._id, { sentToAgent: true }).catch(() => {});
+    }).catch(() => {
+      if (fb) AgentFeedback.findByIdAndUpdate(fb._id, { sentToAgent: false }).catch(() => {});
+    });
 
     res.json({ ...result, feedbackAction: 'discarded' });
   } catch (error) {
@@ -220,7 +265,7 @@ router.post('/conversations/:id/reply', async (req, res) => {
 router.patch('/conversations/:id/stage', async (req, res) => {
   try {
     const { stage } = req.body;
-    const validStages = ['initial_reply', 'objection_handling', 'qualification', 'scheduling', 'handoff'];
+    const validStages = ['prospecting', 'initial_reply', 'engaged', 'objection_handling', 'negotiating', 'qualification', 'scheduling', 'handoff', 'won', 'lost', 'dormant', 'terminal'];
     if (!validStages.includes(stage)) return res.status(400).json({ success: false, error: 'Stage non valido' });
 
     const conversation = await Conversation.findByIdAndUpdate(

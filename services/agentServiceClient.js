@@ -300,6 +300,32 @@ export async function sendFeedbackToAgent({ conversation, contact, agentDraft, f
   }
 }
 
+export async function callAgentPlan(event) {
+  agentLogger.info('agent_service_call', {
+    data: { endpoint: '/agent/plan', eventType: event.type, contact: event.contact?.email }
+  });
+
+  try {
+    const response = await client.post('/agent/plan', event, { timeout: 30000 });
+    return response.data;
+  } catch (err) {
+    agentLogger.warn('agent_plan_failed', {
+      data: { eventType: event.type, error: err.message }
+    });
+    return { actions: [], reasoning: `Error: ${err.message}`, confidence: 0 };
+  }
+}
+
+export async function callMemoryConsolidate() {
+  try {
+    const response = await client.post('/memory/consolidate', {}, { timeout: 60000 });
+    return response.data;
+  } catch (err) {
+    agentLogger.warn('memory_consolidate_failed', { data: { error: err.message } });
+    return null;
+  }
+}
+
 export async function checkAgentHealth() {
   try {
     const response = await client.get('/health', { timeout: 5000 });
@@ -309,4 +335,7 @@ export async function checkAgentHealth() {
   }
 }
 
-export default { callAgentProcess, callAgentProactive, callAgentResume, sendFeedbackToAgent, checkAgentHealth };
+export default {
+  callAgentProcess, callAgentProactive, callAgentResume,
+  sendFeedbackToAgent, callAgentPlan, callMemoryConsolidate, checkAgentHealth,
+};

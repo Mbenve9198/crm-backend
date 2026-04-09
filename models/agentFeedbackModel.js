@@ -65,7 +65,8 @@ const agentFeedbackSchema = new mongoose.Schema({
 
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   reviewTimeMs: Number,
-  weekNumber: Number
+  weekNumber: Number,
+  sentToAgent: { type: Boolean, default: false },
 }, { timestamps: true });
 
 agentFeedbackSchema.index({ action: 1, 'conversationContext.source': 1, createdAt: -1 });

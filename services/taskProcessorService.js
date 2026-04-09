@@ -42,6 +42,69 @@ export function startTaskGenerator() {
   });
 }
 
+/**
+ * Autonomy levels:
+ *   A = full approval (current default)
+ *   B = auto-approve proactive tasks with high confidence + guardrail pass
+ *   C = auto-approve reactive responses to positive/neutral leads
+ *   D = approval only for complex situations (escalation, first contact, objections)
+ */
+function _getAutonomyLevel() {
+  const mode = process.env.AGENT_APPROVAL_MODE;
+  if (mode === 'true' || mode === 'A') return 'A';
+  if (mode === 'B') return 'B';
+  if (mode === 'C') return 'C';
+  if (mode === 'D') return 'D';
+  if (mode === 'false') return 'D';
+  return 'A';
+}
+
+function _canAutoSend(level, flowType, response, contact) {
+  if (level === 'A') return false;
+
+  if (level === 'B') {
+    if (flowType === 'proactive') {
+      const confidence = response.strategy?.raw?.confidence || 0;
+      return confidence >= 0.9;
+    }
+    return false;
+  }
+
+  if (level === 'C') {
+    if (flowType === 'proactive') return true;
+    if (flowType === 'reactive') {
+      const sentiment = response.strategy?.raw?.lead_sentiment;
+      return sentiment === 'positive' || sentiment === 'neutral';
+    }
+    return false;
+  }
+
+  if (level === 'D') {
+    if (flowType === 'proactive') return true;
+    if (flowType === 'reactive') {
+      const stage = response.new_stage;
+      const complexStages = ['objection_handling', 'negotiating', 'terminal'];
+      return !complexStages.includes(stage);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+const STUCK_TASK_TIMEOUT_MS = 30 * 60 * 1000;
+
+async function _recoverStuckTasks() {
+  const cutoff = new Date(Date.now() - STUCK_TASK_TIMEOUT_MS);
+  const result = await AgentTask.updateMany(
+    { status: 'executing', updatedAt: { $lte: cutoff } },
+    { status: 'pending', $inc: { attempts: 0 } }
+  );
+  if (result.modifiedCount > 0) {
+    agentLogger.info('stuck_tasks_recovered', { data: { count: result.modifiedCount } });
+  }
+}
+
 async function processAgentTasks() {
   const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
   if (romeH < 9 || romeH >= 20) return;
@@ -53,6 +116,8 @@ async function processAgentTasks() {
   _processingLock = true;
 
   try {
+    await _recoverStuckTasks();
+
     const dueTasks = await AgentTask.findDueTasks(BATCH_CONCURRENCY * 3);
     if (dueTasks.length === 0) return;
 
@@ -89,10 +154,26 @@ async function processAgentTasks() {
   }
 }
 
+const TERMINAL_CONTACT_STATUSES = new Set([
+  'bad_data', 'lost', 'dnc', 'do_not_contact', 'closed', 'deceased',
+  'wrong_contact', 'business_closed', 'not_interested_final',
+]);
+
 async function _executeSingleTask(task) {
   if (task.type === 'human_task') {
     await handleHumanTask(task);
     return { action: 'human_task' };
+  }
+
+  const contact = task.contact && typeof task.contact === 'object'
+    ? task.contact
+    : await Contact.findById(task.contact).lean();
+
+  if (contact && TERMINAL_CONTACT_STATUSES.has(contact.status)) {
+    agentLogger.info('task_skipped_terminal', {
+      data: { taskId: task._id, type: task.type, contactStatus: contact.status, email: contact.email }
+    });
+    return { action: 'skipped', reason: `Contact in terminal status: ${contact.status}` };
   }
 
   let response;
@@ -118,12 +199,31 @@ async function _executeSingleTask(task) {
 
   await processToolIntents(response.tool_intents || [], task);
 
-  const approvalMode = process.env.AGENT_APPROVAL_MODE === 'true';
+  if (response.action === 'terminal') {
+    const terminalIntent = (response.tool_intents || []).find(i => i.tool === 'mark_contact_terminal');
+    if (terminalIntent && contact) {
+      const terminalReason = terminalIntent.params?.terminal_reason || 'business_closed';
+      await Contact.findByIdAndUpdate(contact._id, { status: terminalReason });
+      await AgentTask.updateMany(
+        { contact: contact._id, status: 'pending' },
+        { status: 'cancelled', cancelledReason: `Terminal: ${terminalReason}` }
+      );
+      agentLogger.info('contact_marked_terminal', {
+        data: { email: contact.email, reason: terminalReason }
+      });
+    }
+    if (response.draft) {
+      await handleAgentResponse(response, task);
+    }
+    return { action: 'terminal', reason: terminalIntent?.params?.terminal_reason };
+  }
+
+  const autonomyLevel = _getAutonomyLevel();
   const shouldAutoSendProactive =
     !isResume &&
     response.action === 'draft_ready' &&
     response.draft &&
-    !approvalMode;
+    _canAutoSend(autonomyLevel, 'proactive', response, contact);
 
   if (shouldAutoSendProactive) {
     await deliverProactiveOutreach(response, task);
@@ -134,11 +234,36 @@ async function _executeSingleTask(task) {
   return { action: response.action, hasDraft: !!response.draft };
 }
 
+const VALID_TASK_TYPES = new Set([
+  'rank_checker_outreach', 'follow_up_no_reply', 'follow_up_scheduled',
+  'break_up_email', 'seasonal_reactivation', 'reactivation',
+  'reactivation_warm', 'reactivation_cold', 'human_task',
+]);
+
+const TASK_TYPE_ALIASES = {
+  'business_closed': 'human_task',
+  'find_alternative_contact': 'human_task',
+  'closure_response': 'human_task',
+  'schedule_call': 'human_task',
+  'follow_up': 'follow_up_no_reply',
+  'followup': 'follow_up_no_reply',
+  'reactivation_seasonal': 'seasonal_reactivation',
+};
+
+function _normalizeTaskType(type) {
+  if (VALID_TASK_TYPES.has(type)) return type;
+  if (TASK_TYPE_ALIASES[type]) return TASK_TYPE_ALIASES[type];
+  agentLogger.warn('unknown_task_type_mapped', { data: { original: type, mappedTo: 'human_task' } });
+  return 'human_task';
+}
+
 async function processToolIntents(toolIntents, task) {
   for (const intent of toolIntents) {
+    if (intent.tool === 'mark_contact_terminal') continue;
+
     if (intent.tool === 'hibernate_workflow') {
       await AgentTask.create({
-        type: intent.params.task_type || 'seasonal_reactivation',
+        type: _normalizeTaskType(intent.params.task_type || 'seasonal_reactivation'),
         contact: task.contact._id || task.contact,
         conversation: task.conversation?._id || task.conversation,
         threadId: intent.params.thread_id,
@@ -150,7 +275,7 @@ async function processToolIntents(toolIntents, task) {
       });
     } else if (intent.tool === 'schedule_task') {
       await AgentTask.create({
-        type: intent.params.task_type || 'follow_up_no_reply',
+        type: _normalizeTaskType(intent.params.task_type || 'follow_up_no_reply'),
         contact: task.contact._id || task.contact,
         conversation: task.conversation?._id || task.conversation,
         hasCheckpoint: false,

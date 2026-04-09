@@ -13,7 +13,7 @@ const messageSchema = new mongoose.Schema({
   },
   channel: {
     type: String,
-    enum: ['email', 'whatsapp'],
+    enum: ['email', 'whatsapp', 'voice'],
     required: true
   },
   metadata: {
@@ -40,7 +40,7 @@ const conversationSchema = new mongoose.Schema({
   },
   channel: {
     type: String,
-    enum: ['email', 'whatsapp'],
+    enum: ['email', 'whatsapp', 'voice'],
     required: true
   },
   /**
@@ -50,17 +50,21 @@ const conversationSchema = new mongoose.Schema({
    * - whatsappWindowOpenUntil: regola 24h (freeform vs template)
    */
   channelState: {
-    currentChannel: { type: String, enum: ['email', 'whatsapp'], default: 'email', index: true },
-    lastInboundChannel: { type: String, enum: ['email', 'whatsapp'], default: 'email' },
+    currentChannel: { type: String, enum: ['email', 'whatsapp', 'voice'], default: 'email', index: true },
+    lastInboundChannel: { type: String, enum: ['email', 'whatsapp', 'voice'], default: 'email' },
     lastInboundAt: {
       email: { type: Date, default: null },
-      whatsapp: { type: Date, default: null }
+      whatsapp: { type: Date, default: null },
+      voice: { type: Date, default: null }
     },
     lastOutboundAt: {
       email: { type: Date, default: null },
-      whatsapp: { type: Date, default: null }
+      whatsapp: { type: Date, default: null },
+      voice: { type: Date, default: null }
     },
-    whatsappWindowOpenUntil: { type: Date, default: null }
+    whatsappWindowOpenUntil: { type: Date, default: null },
+    voiceCallActive: { type: Boolean, default: false },
+    lastCallSid: { type: String, default: null },
   },
   status: {
     type: String,
@@ -70,7 +74,20 @@ const conversationSchema = new mongoose.Schema({
   },
   stage: {
     type: String,
-    enum: ['initial_reply', 'objection_handling', 'qualification', 'scheduling', 'handoff'],
+    enum: [
+      'prospecting',
+      'initial_reply',
+      'engaged',
+      'objection_handling',
+      'negotiating',
+      'qualification',
+      'scheduling',
+      'handoff',
+      'won',
+      'lost',
+      'dormant',
+      'terminal',
+    ],
     default: 'initial_reply'
   },
 
