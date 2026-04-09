@@ -441,6 +441,10 @@ app.use('/api/dashboard', dashboardRoutes);
 import stripeRoutes from './routes/stripeRoutes.js';
 app.use('/api/stripe', stripeRoutes);
 
+// Routes per SaaS Metrics (sotto /api/saas-metrics)
+import saasMetricsRoutes from './routes/saasMetricsRoutes.js';
+app.use('/api/saas-metrics', saasMetricsRoutes);
+
 // Routes per i contatti (tutte le API sotto /api/contacts)
 app.use('/api/contacts', contactRoutes);
 
