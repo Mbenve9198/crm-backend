@@ -1,8 +1,23 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import ResearchCache from '../models/researchCacheModel.js';
 import SalesManagerDirective from '../models/salesManagerDirectiveModel.js';
+import Conversation from '../models/conversationModel.js';
+import Contact from '../models/contactModel.js';
+import AgentMetric from '../models/agentMetricModel.js';
+import AgentLog from '../models/agentLogModel.js';
+import AgentFeedback from '../models/agentFeedbackModel.js';
+import AgentTask from '../models/agentTaskModel.js';
+import ConversationOutcome from '../models/conversationOutcomeModel.js';
+import Call from '../models/callModel.js';
 
 const router = express.Router();
+
+function periodToDate(period) {
+  const map = { '1d': 1, '7d': 7, '30d': 30 };
+  const days = map[period] || 1;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
 
 /**
  * GET /api/internal/research-cache/:email
@@ -74,6 +89,347 @@ router.get('/directives', async (req, res) => {
       .lean();
 
     res.json({ directives });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── Sales Manager Tool Endpoints ───
+
+router.get('/sm/overview', async (req, res) => {
+  try {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [
+      convByStatus, convByStage, convBySource,
+      costAgg, errorCount, taskStats,
+      feedbackAgg, callCount,
+    ] = await Promise.all([
+      Conversation.aggregate([
+        { $match: { status: { $in: ['active', 'awaiting_human', 'paused', 'escalated'] } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      Conversation.aggregate([
+        { $match: { status: { $in: ['active', 'awaiting_human'] } } },
+        { $group: { _id: '$stage', count: { $sum: 1 } } },
+      ]),
+      Conversation.aggregate([
+        { $match: { status: { $in: ['active', 'awaiting_human', 'paused'] } } },
+        { $group: { _id: '$context.leadSource', count: { $sum: 1 } } },
+      ]),
+      AgentMetric.aggregate([
+        { $match: { createdAt: { $gte: since24h }, event: 'llm_call' } },
+        { $group: { _id: null, totalCost: { $sum: '$data.costUsd' }, totalCalls: { $sum: 1 } } },
+      ]),
+      AgentLog.countDocuments({ level: 'error', createdAt: { $gte: since24h } }),
+      AgentTask.aggregate([
+        { $match: { updatedAt: { $gte: since24h } } },
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+      ]),
+      AgentFeedback.aggregate([
+        { $match: { createdAt: { $gte: since24h } } },
+        { $group: { _id: '$action', count: { $sum: 1 } } },
+      ]),
+      Call.countDocuments({ status: 'completed', createdAt: { $gte: since24h } }),
+    ]);
+
+    const feedbackMap = Object.fromEntries(feedbackAgg.map(f => [f._id, f.count]));
+    const totalFb = (feedbackMap.approved || 0) + (feedbackMap.modified || 0) + (feedbackMap.discarded || 0);
+
+    res.json({
+      conversations: {
+        byStatus: Object.fromEntries(convByStatus.map(s => [s._id, s.count])),
+        byStage: Object.fromEntries(convByStage.map(s => [s._id, s.count])),
+        bySource: Object.fromEntries(convBySource.map(s => [s._id || 'unknown', s.count])),
+      },
+      costs: costAgg[0] || { totalCost: 0, totalCalls: 0 },
+      errors24h: errorCount,
+      tasks: Object.fromEntries(taskStats.map(t => [t._id, t.count])),
+      feedback: { ...feedbackMap, total: totalFb, approvalRate: totalFb > 0 ? ((feedbackMap.approved || 0) / totalFb).toFixed(2) : null },
+      callsCompleted24h: callCount,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sm/conversations', async (req, res) => {
+  try {
+    const { source, status, stage, period, hasLeadReply, minMessages, limit } = req.query;
+    const filter = {};
+
+    if (source) filter['context.leadSource'] = source;
+    if (status) filter.status = status;
+    if (stage) filter.stage = stage;
+    if (period) filter.updatedAt = { $gte: periodToDate(period) };
+    if (hasLeadReply === 'true') filter['messages'] = { $elemMatch: { role: 'lead' } };
+    if (minMessages) filter.$expr = { $gte: [{ $size: '$messages' }, parseInt(minMessages)] };
+
+    const convs = await Conversation.find(filter)
+      .populate('contact', 'name email source')
+      .sort({ updatedAt: -1 })
+      .limit(parseInt(limit) || 20)
+      .lean();
+
+    res.json({
+      conversations: convs.map(c => ({
+        id: c._id,
+        contactName: c.contact?.name,
+        contactEmail: c.contact?.email,
+        source: c.context?.leadSource,
+        stage: c.stage,
+        status: c.status,
+        channel: c.channelState?.currentChannel || c.channel,
+        messageCount: c.messages?.length || 0,
+        leadMessages: c.messages?.filter(m => m.role === 'lead').length || 0,
+        lastMessagePreview: c.messages?.slice(-1)[0]?.content?.substring(0, 250),
+        lastMessageRole: c.messages?.slice(-1)[0]?.role,
+        strategyTag: c.context?.strategyTag,
+        objections: c.context?.objections,
+        updatedAt: c.updatedAt,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sm/conversation/:id', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid conversation ID' });
+    }
+
+    const conv = await Conversation.findById(req.params.id)
+      .populate('contact', 'name email phone source status rankCheckerData properties')
+      .lean();
+
+    if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+
+    const feedbacks = await AgentFeedback.find({ conversation: conv._id })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({
+      id: conv._id,
+      contact: {
+        name: conv.contact?.name,
+        email: conv.contact?.email,
+        phone: conv.contact?.phone,
+        source: conv.contact?.source,
+        status: conv.contact?.status,
+      },
+      stage: conv.stage,
+      status: conv.status,
+      channel: conv.channelState?.currentChannel || conv.channel,
+      channelState: conv.channelState,
+      context: {
+        leadSource: conv.context?.leadSource,
+        objections: conv.context?.objections,
+        painPoints: conv.context?.painPoints,
+        restaurantData: conv.context?.restaurantData,
+        conversationSummary: conv.context?.conversationSummary,
+        strategyTag: conv.context?.strategyTag,
+      },
+      messages: conv.messages?.map(m => ({
+        role: m.role,
+        content: m.content,
+        channel: m.channel,
+        isDraft: m.metadata?.isDraft,
+        whatsappDraft: m.metadata?.whatsappDraft,
+        createdAt: m.createdAt,
+      })),
+      metrics: conv.metrics,
+      feedbackHistory: feedbacks.map(f => ({
+        action: f.action,
+        channel: f.channel,
+        modifications: f.modifications,
+        discardReason: f.discardReason,
+        agentDraftPreview: f.agentDraft?.substring(0, 200),
+        createdAt: f.createdAt,
+      })),
+      updatedAt: conv.updatedAt,
+      createdAt: conv.createdAt,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sm/calls', async (req, res) => {
+  try {
+    const { period, outcome, minDuration, hasAnalysis, limit } = req.query;
+    const filter = { status: 'completed' };
+
+    if (period) filter.createdAt = { $gte: periodToDate(period) };
+    if (outcome) filter.outcome = outcome;
+    if (minDuration) filter.duration = { $gte: parseInt(minDuration) };
+    if (hasAnalysis === 'true') filter.callAnalysis = { $exists: true, $ne: null };
+
+    const calls = await Call.find(filter)
+      .populate('contact', 'name email source')
+      .populate('initiatedBy', 'firstName lastName')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit) || 10)
+      .lean();
+
+    const totalCalls = await Call.countDocuments({ status: 'completed', createdAt: filter.createdAt || {} });
+    const outcomeAgg = await Call.aggregate([
+      { $match: { status: 'completed', ...(period ? { createdAt: { $gte: periodToDate(period) } } : {}) } },
+      { $group: { _id: '$outcome', count: { $sum: 1 } } },
+    ]);
+
+    res.json({
+      calls: calls.map(c => ({
+        id: c._id,
+        contactName: c.contact?.name,
+        contactEmail: c.contact?.email,
+        contactSource: c.contact?.source,
+        agentName: c.initiatedBy ? `${c.initiatedBy.firstName} ${c.initiatedBy.lastName || ''}`.trim() : null,
+        duration: c.duration,
+        outcome: c.outcome,
+        callAnalysis: c.callAnalysis || null,
+        rating: c.rating,
+        flag: c.flag,
+        transcript: c.transcript ? c.transcript.substring(0, 3000) : null,
+        createdAt: c.createdAt,
+      })),
+      stats: {
+        totalCalls,
+        byOutcome: Object.fromEntries(outcomeAgg.map(o => [o._id || 'no_outcome', o.count])),
+        avgDuration: calls.length > 0 ? Math.round(calls.reduce((s, c) => s + (c.duration || 0), 0) / calls.length) : 0,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sm/feedback', async (req, res) => {
+  try {
+    const { action, period, limit } = req.query;
+    const filter = {};
+
+    if (action) filter.action = action;
+    if (period) filter.createdAt = { $gte: periodToDate(period) };
+
+    const feedbacks = await AgentFeedback.find(filter)
+      .populate({ path: 'conversation', select: 'stage context.leadSource context.strategyTag' })
+      .populate('contact', 'name email source')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit) || 20)
+      .lean();
+
+    const actionAgg = await AgentFeedback.aggregate([
+      { $match: period ? { createdAt: { $gte: periodToDate(period) } } : {} },
+      { $group: { _id: '$action', count: { $sum: 1 } } },
+    ]);
+    const discardReasonAgg = await AgentFeedback.aggregate([
+      { $match: { action: 'discarded', ...(period ? { createdAt: { $gte: periodToDate(period) } } : {}) } },
+      { $group: { _id: '$discardReason', count: { $sum: 1 } } },
+    ]);
+
+    res.json({
+      feedbacks: feedbacks.map(f => ({
+        action: f.action,
+        channel: f.channel,
+        contactName: f.contact?.name,
+        contactEmail: f.contact?.email,
+        contactSource: f.contact?.source,
+        conversationStage: f.conversation?.stage,
+        leadSource: f.conversation?.context?.leadSource,
+        strategyTag: f.conversation?.context?.strategyTag,
+        agentDraftPreview: f.agentDraft?.substring(0, 300),
+        finalSentPreview: f.finalSent?.substring(0, 300),
+        modifications: f.modifications,
+        discardReason: f.discardReason,
+        discardNotes: f.discardNotes,
+        createdAt: f.createdAt,
+      })),
+      stats: {
+        byAction: Object.fromEntries(actionAgg.map(a => [a._id, a.count])),
+        discardReasons: Object.fromEntries(discardReasonAgg.map(d => [d._id || 'unknown', d.count])),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/sm/lead-timeline/:email', async (req, res) => {
+  try {
+    const contact = await Contact.findOne({ email: req.params.email }).lean();
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    const [conversations, calls, feedbacks, tasks] = await Promise.all([
+      Conversation.find({ contact: contact._id })
+        .sort({ createdAt: -1 })
+        .lean(),
+      Call.find({ contact: contact._id })
+        .populate('initiatedBy', 'firstName lastName')
+        .sort({ createdAt: -1 })
+        .lean(),
+      AgentFeedback.find({ contact: contact._id })
+        .sort({ createdAt: -1 })
+        .lean(),
+      AgentTask.find({ contact: contact._id })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .lean(),
+    ]);
+
+    res.json({
+      contact: {
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        source: contact.source,
+        status: contact.status,
+        rankCheckerData: contact.rankCheckerData || null,
+        createdAt: contact.createdAt,
+      },
+      conversations: conversations.map(c => ({
+        id: c._id,
+        stage: c.stage,
+        status: c.status,
+        channel: c.channelState?.currentChannel || c.channel,
+        strategyTag: c.context?.strategyTag,
+        objections: c.context?.objections,
+        messageCount: c.messages?.length || 0,
+        messages: c.messages?.map(m => ({
+          role: m.role,
+          content: m.content?.substring(0, 500),
+          channel: m.channel,
+          isDraft: m.metadata?.isDraft,
+          createdAt: m.createdAt,
+        })),
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      })),
+      calls: calls.map(c => ({
+        duration: c.duration,
+        outcome: c.outcome,
+        agentName: c.initiatedBy ? `${c.initiatedBy.firstName} ${c.initiatedBy.lastName || ''}`.trim() : null,
+        callAnalysis: c.callAnalysis || null,
+        rating: c.rating,
+        transcriptPreview: c.transcript?.substring(0, 1000),
+        createdAt: c.createdAt,
+      })),
+      feedbacks: feedbacks.map(f => ({
+        action: f.action,
+        channel: f.channel,
+        modifications: f.modifications,
+        discardReason: f.discardReason,
+        createdAt: f.createdAt,
+      })),
+      tasks: tasks.map(t => ({
+        type: t.type,
+        status: t.status,
+        scheduledAt: t.scheduledAt,
+        result: t.result ? JSON.stringify(t.result).substring(0, 200) : null,
+      })),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

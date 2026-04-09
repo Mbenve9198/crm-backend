@@ -699,4 +699,272 @@ router.get('/strategy-stats', async (req, res) => {
   }
 });
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GROUPED ACTIVITY STREAM + DRILL-DOWN ENDPOINTS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+const DRAFT_EVENTS = new Set([
+  'agent_loop_start', 'tools_used', 'agent_service_response', 'draft_saved',
+  'agent_service_call', 'tool_call',
+]);
+const SM_EVENTS = new Set([
+  'sales_manager_cycle_start', 'sales_manager_cycle_complete', 'sales_manager_cycle_error',
+  'sales_manager_briefing', 'sales_manager_alert', 'sales_manager_directives_saved',
+]);
+const ERROR_EVENTS = new Set([
+  'agent_service_error', 'agent_loop_error', 'agent_loop_circuit_breaker',
+  'task_processor_error', 'planner_call_failed',
+]);
+
+router.get('/activity-stream', async (req, res) => {
+  try {
+    const { limit = 20, since } = req.query;
+    const filter = {};
+    if (since) filter.createdAt = { $gt: new Date(since) };
+
+    const logs = await AgentLog.find(filter)
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    const cards = [];
+    const used = new Set();
+
+    for (let i = 0; i < logs.length; i++) {
+      if (used.has(i)) continue;
+      const log = logs[i];
+
+      if (SM_EVENTS.has(log.event)) {
+        const group = [log];
+        used.add(i);
+        const windowEnd = new Date(log.createdAt.getTime() + 5 * 60 * 1000);
+        const windowStart = new Date(log.createdAt.getTime() - 5 * 60 * 1000);
+        for (let j = i + 1; j < logs.length; j++) {
+          if (used.has(j)) continue;
+          if (SM_EVENTS.has(logs[j].event) && logs[j].createdAt >= windowStart && logs[j].createdAt <= windowEnd) {
+            group.push(logs[j]);
+            used.add(j);
+          }
+        }
+        const complete = group.find(g => g.event === 'sales_manager_cycle_complete');
+        const briefing = group.find(g => g.event === 'sales_manager_briefing');
+        const alerts = group.filter(g => g.event === 'sales_manager_alert');
+        const directives = group.find(g => g.event === 'sales_manager_directives_saved');
+        cards.push({
+          type: 'sales_manager',
+          timestamp: log.createdAt,
+          narrative: `Sales Manager ha completato l'analisi giornaliera${directives ? ` — ${directives.data?.count || 0} direttive` : ''}${alerts.length > 0 ? `, ${alerts.length} alert` : ''}`,
+          costUsd: complete?.data?.costUsd || null,
+          toolCalls: complete?.data?.toolCallsMade || null,
+          briefingHeadline: briefing?.data?.headline || null,
+          alerts: alerts.map(a => ({ severity: a.data?.severity, message: a.data?.message })),
+          events: group.length,
+        });
+        continue;
+      }
+
+      if (log.conversationId && DRAFT_EVENTS.has(log.event)) {
+        const group = [log];
+        used.add(i);
+        const windowEnd = new Date(log.createdAt.getTime() + 5 * 60 * 1000);
+        const windowStart = new Date(log.createdAt.getTime() - 5 * 60 * 1000);
+        for (let j = i + 1; j < logs.length; j++) {
+          if (used.has(j)) continue;
+          const other = logs[j];
+          if (
+            DRAFT_EVENTS.has(other.event) &&
+            String(other.conversationId) === String(log.conversationId) &&
+            other.createdAt >= windowStart && other.createdAt <= windowEnd
+          ) {
+            group.push(other);
+            used.add(j);
+          }
+        }
+
+        const draftEvt = group.find(g => g.event === 'draft_saved' || g.event === 'agent_service_response');
+        const loopStart = group.find(g => g.event === 'agent_loop_start');
+        const toolEvt = group.find(g => g.event === 'tools_used');
+        const data = draftEvt?.data || loopStart?.data || {};
+        const contactName = data.contactName || data.name || log.contactEmail || '';
+        const channel = data.channel || '';
+        const costUsd = group.reduce((sum, g) => sum + (g.data?.costUsd || 0), 0);
+
+        let narrative = `Ha analizzato **${contactName || 'lead'}**`;
+        if (toolEvt?.data?.tools) narrative += ` (${toolEvt.data.tools})`;
+        if (channel) narrative += `, preparato bozza **${channel}**`;
+        if (draftEvt?.event === 'draft_saved') narrative += ' — In attesa review';
+
+        let draftPreview = null;
+        if (log.conversationId) {
+          try {
+            const conv = await Conversation.findById(log.conversationId).lean();
+            const lastDraft = conv?.messages?.filter(m => m.metadata?.isDraft).pop();
+            if (lastDraft) draftPreview = lastDraft.content?.substring(0, 200);
+          } catch { /* non-blocking */ }
+        }
+
+        cards.push({
+          type: 'draft',
+          timestamp: log.createdAt,
+          conversationId: log.conversationId,
+          contactName,
+          contactEmail: log.contactEmail || data.email || '',
+          channel,
+          costUsd: costUsd > 0 ? parseFloat(costUsd.toFixed(4)) : null,
+          narrative,
+          draftPreview,
+          strategyTag: data.strategyTag || null,
+          toolsUsed: toolEvt?.data?.tools || null,
+          events: group.length,
+        });
+        continue;
+      }
+
+      if (ERROR_EVENTS.has(log.event)) {
+        used.add(i);
+        const mapping = EVENT_TYPE_MAP[log.event] || { desc: log.event };
+        cards.push({
+          type: 'error',
+          timestamp: log.createdAt,
+          narrative: mapping.desc,
+          contactEmail: log.contactEmail || '',
+          conversationId: log.conversationId || null,
+          error: typeof log.data === 'string' ? log.data.substring(0, 200) : (log.data?.error || log.data?.message || ''),
+          events: 1,
+        });
+        continue;
+      }
+
+      used.add(i);
+      const mapping = EVENT_TYPE_MAP[log.event] || { type: log.event, icon: 'activity', desc: log.event };
+      const data = log.data || {};
+      cards.push({
+        type: mapping.type || 'event',
+        timestamp: log.createdAt,
+        conversationId: log.conversationId || null,
+        contactName: data.contactName || data.name || log.contactEmail || '',
+        contactEmail: log.contactEmail || data.email || '',
+        narrative: mapping.desc,
+        channel: data.channel || null,
+        costUsd: data.costUsd || null,
+        events: 1,
+      });
+    }
+
+    res.json({ success: true, cards: cards.slice(0, parseInt(limit)) });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/conversations/:id/peek', async (req, res) => {
+  try {
+    const conv = await Conversation.findById(req.params.id)
+      .populate('contact', 'name email phone source status')
+      .lean();
+
+    if (!conv) return res.status(404).json({ success: false, error: 'Not found' });
+
+    const lastMessages = (conv.messages || []).slice(-4).map(m => ({
+      role: m.role,
+      content: m.content?.substring(0, 300),
+      channel: m.channel,
+      isDraft: m.metadata?.isDraft || false,
+      createdAt: m.createdAt,
+    }));
+
+    const lastDraft = (conv.messages || []).filter(m => m.metadata?.isDraft).pop();
+    const lastWaDraft = (conv.messages || []).filter(m => m.metadata?.whatsappDraft).pop();
+
+    res.json({
+      success: true,
+      data: {
+        id: conv._id,
+        contact: conv.contact ? {
+          id: conv.contact._id,
+          name: conv.contact.name,
+          email: conv.contact.email,
+          phone: conv.contact.phone,
+          source: conv.contact.source,
+          status: conv.contact.status,
+        } : null,
+        stage: conv.stage,
+        status: conv.status,
+        channel: conv.channelState?.currentChannel || conv.channel,
+        strategyTag: conv.context?.strategyTag,
+        lastMessages,
+        emailDraft: lastDraft ? lastDraft.content?.substring(0, 500) : null,
+        whatsappDraft: lastWaDraft?.metadata?.whatsappDraft?.substring(0, 500) || null,
+        messageCount: conv.messages?.length || 0,
+        updatedAt: conv.updatedAt,
+        reviewUrl: `/agent/review?id=${conv._id}`,
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/conversations-by-filter', async (req, res) => {
+  try {
+    const { source, status, hasLeadReply, feedbackAction, period = '30d', limit = 30 } = req.query;
+    const periodDays = { '1d': 1, '7d': 7, '30d': 30, 'today': 1, 'week': 7, 'month': 30 };
+    const since = new Date(Date.now() - (periodDays[period] || 7) * 24 * 60 * 60 * 1000);
+
+    if (feedbackAction) {
+      const feedbacks = await AgentFeedback.find({
+        action: feedbackAction,
+        createdAt: { $gte: since },
+      })
+        .populate({ path: 'conversation', populate: { path: 'contact', select: 'name email source' } })
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .lean();
+
+      const results = feedbacks
+        .filter(f => f.conversation)
+        .map(f => ({
+          id: f.conversation._id,
+          contactName: f.conversation.contact?.name,
+          contactEmail: f.conversation.contact?.email,
+          stage: f.conversation.stage,
+          status: f.conversation.status,
+          lastMessagePreview: f.conversation.messages?.slice(-1)[0]?.content?.substring(0, 150),
+          updatedAt: f.conversation.updatedAt,
+        }));
+
+      return res.json({ success: true, data: results, total: results.length });
+    }
+
+    const filter = { updatedAt: { $gte: since } };
+    if (source) filter['context.leadSource'] = source;
+    if (status) filter.status = status;
+
+    let convs = await Conversation.find(filter)
+      .populate('contact', 'name email source')
+      .sort({ updatedAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    if (hasLeadReply === 'true') {
+      convs = convs.filter(c => c.messages?.some(m => m.role === 'lead'));
+    }
+
+    const results = convs.map(c => ({
+      id: c._id,
+      contactName: c.contact?.name,
+      contactEmail: c.contact?.email,
+      stage: c.stage,
+      status: c.status,
+      source: c.context?.leadSource,
+      lastMessagePreview: c.messages?.slice(-1)[0]?.content?.substring(0, 150),
+      updatedAt: c.updatedAt,
+    }));
+
+    res.json({ success: true, data: results, total: results.length });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 export default router;

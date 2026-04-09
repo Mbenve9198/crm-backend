@@ -124,6 +124,19 @@ const callSchema = new mongoose.Schema({
   transcriptGeneratedAt: {
     type: Date
   },
+
+  callAnalysis: {
+    objections: [{
+      objection: String,
+      handling: String,
+      effective: Boolean,
+    }],
+    closingTechnique: String,
+    leadPreparation: String,
+    keyMoment: String,
+    outcomeReason: String,
+    salesScore: { type: Number, min: 1, max: 5 },
+  },
   
   // Outcome della chiamata (per tracking vendite)
   outcome: {

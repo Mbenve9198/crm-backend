@@ -7,8 +7,23 @@ const salesManagerDirectiveSchema = new mongoose.Schema({
     required: true,
     index: true,
   },
+  type: {
+    type: String,
+    enum: ['observation', 'pattern', 'recommendation'],
+    default: 'observation',
+  },
   directive: { type: String, required: true },
+  evidence: String,
   reason: String,
+  confidence: {
+    type: String,
+    enum: ['low', 'medium', 'high'],
+    default: 'low',
+  },
+  dataPoints: {
+    type: Number,
+    default: 0,
+  },
   priority: {
     type: String,
     enum: ['high', 'medium', 'low'],

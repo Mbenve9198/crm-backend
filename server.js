@@ -481,25 +481,31 @@ setTimeout(async () => {
     console.log('ℹ️ Agent task system disabilitato (ENABLE_AGENT_OUTREACH != true)');
   }
 
-  // Sales Manager Agent: ogni 4h durante orario lavorativo (7-22 Roma)
-  const SALES_MANAGER_INTERVAL_MS = 4 * 60 * 60 * 1000;
-  const runSalesManagerIfActive = async () => {
-    const romeH = parseInt(new Date().toLocaleString('en-US', { timeZone: 'Europe/Rome', hour: 'numeric', hour12: false }));
-    if (romeH >= 7 && romeH <= 22) {
+  // Sales Manager Agent: daily at 7 AM Rome time
+  const SM_CHECK_INTERVAL_MS = 15 * 60 * 1000; // check every 15min
+  let smLastRunDate = null;
+  const runSalesManagerDaily = async () => {
+    const now = new Date();
+    const romeTime = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
+    const romeH = romeTime.getHours();
+    const todayStr = romeTime.toISOString().slice(0, 10);
+
+    if (romeH >= 7 && smLastRunDate !== todayStr) {
+      smLastRunDate = todayStr;
       try {
         const { runSalesManagerCycle } = await import('./services/salesManagerService.js');
         const result = await runSalesManagerCycle();
         if (result) {
-          console.log(`[Sales Manager] Ciclo completato: ${result.directives?.length || 0} directives, ${result.alerts?.length || 0} alerts`);
+          console.log(`[Sales Manager] Ciclo giornaliero completato: ${result.directives?.length || 0} directives, ${result.alerts?.length || 0} alerts, ${result.tool_calls_made || 0} tool calls`);
         }
       } catch (err) {
         console.error('[Sales Manager] Errore:', err.message);
       }
     }
   };
-  setTimeout(runSalesManagerIfActive, 30000);
-  setInterval(runSalesManagerIfActive, SALES_MANAGER_INTERVAL_MS);
-  console.log(`[Sales Manager] Schedulato ogni ${SALES_MANAGER_INTERVAL_MS / 3600000}h (orario 7-22 Roma)`);
+  setTimeout(runSalesManagerDaily, 30000);
+  setInterval(runSalesManagerDaily, SM_CHECK_INTERVAL_MS);
+  console.log('[Sales Manager] Schedulato giornaliero alle 7:00 Roma');
 }, 10000);
 
 // Endpoint per la documentazione delle API
