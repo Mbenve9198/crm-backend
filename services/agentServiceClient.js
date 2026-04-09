@@ -4,11 +4,12 @@ import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8100';
-const FIRE_AND_FORGET_TIMEOUT_MS = parseInt(process.env.AGENT_FIRE_TIMEOUT_MS || '15000');
+const FIRE_AND_FORGET_TIMEOUT_MS = 15_000;
+const SYNC_TIMEOUT_MS = parseInt(process.env.AGENT_SERVICE_TIMEOUT_MS || '300000');
 
 const client = axios.create({
   baseURL: AGENT_SERVICE_URL,
-  timeout: FIRE_AND_FORGET_TIMEOUT_MS,
+  timeout: SYNC_TIMEOUT_MS,
   headers: { 'Content-Type': 'application/json' }
 });
 
@@ -210,7 +211,7 @@ export async function callAgentProcess({
   });
 
   if (taskId) {
-    const response = await client.post('/agent/process', payload);
+    const response = await client.post('/agent/process', payload, { timeout: FIRE_AND_FORGET_TIMEOUT_MS });
     return { status: 'processing', taskId, accepted: response.status < 400 };
   }
   const response = await client.post('/agent/process', payload);
@@ -254,7 +255,7 @@ export async function callAgentProactive({ task, contact, conversation }) {
     data: { endpoint: '/agent/proactive', type: task.type, contact: contact.email, taskId }
   });
 
-  const response = await client.post('/agent/proactive', payload);
+  const response = await client.post('/agent/proactive', payload, { timeout: FIRE_AND_FORGET_TIMEOUT_MS });
   return { status: 'processing', taskId, accepted: response.status < 400 };
 }
 
@@ -263,11 +264,12 @@ export async function callAgentResume({ threadId, updatedContext, taskId }) {
     data: { endpoint: '/agent/resume', thread_id: threadId, taskId }
   });
 
+  const timeout = taskId ? FIRE_AND_FORGET_TIMEOUT_MS : undefined;
   const response = await client.post('/agent/resume', {
     thread_id: threadId,
     updated_context: updatedContext || {},
     task_id: taskId || null,
-  });
+  }, timeout ? { timeout } : undefined);
   if (taskId) {
     return { status: 'processing', taskId, accepted: response.status < 400 };
   }

@@ -10,8 +10,6 @@ import AgentFeedback from '../models/agentFeedbackModel.js';
 import AgentTask from '../models/agentTaskModel.js';
 import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import Call from '../models/callModel.js';
-import { handleAgentCallback } from '../services/taskProcessorService.js';
-
 const router = express.Router();
 
 function periodToDate(period) {
@@ -439,12 +437,14 @@ router.get('/sm/lead-timeline/:email', async (req, res) => {
 /**
  * POST /api/internal/agent-callback
  * Receives async agent results and completes the corresponding task.
+ * Lazy-import to avoid circular dependency with taskProcessorService.
  */
 router.post('/agent-callback', async (req, res) => {
   try {
     const { taskId, response, error } = req.body;
     if (!taskId) return res.status(400).json({ error: 'taskId required' });
 
+    const { handleAgentCallback } = await import('../services/taskProcessorService.js');
     await handleAgentCallback(taskId, response || null, error || null);
     res.json({ success: true });
   } catch (err) {
