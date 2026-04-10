@@ -152,4 +152,14 @@ export const unlinkCustomer = async (req, res) => {
   }
 };
 
-export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook, searchCustomers, linkCustomer, unlinkCustomer };
+export const unmatchedCustomers = async (req, res) => {
+  try {
+    const result = await stripeService.getUnmatchedStripeCustomers();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Stripe unmatched customers error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export default { syncSingleContact, syncAllWon, getInvoices, handleWebhook, searchCustomers, linkCustomer, unlinkCustomer, unmatchedCustomers };

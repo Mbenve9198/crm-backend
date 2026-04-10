@@ -518,6 +518,97 @@ async function linkCustomerToContact(contactId, stripeCustomerId) {
   return updated;
 }
 
+async function getUnmatchedStripeCustomers() {
+  const stripe = getStripe();
+  const VAT_RATE = Number(process.env.STRIPE_VAT_RATE) || 0.22;
+
+  // 1. Fetch all active/trialing subscriptions from Stripe
+  const allSubs = [];
+  let hasMore = true;
+  let startingAfter = undefined;
+  while (hasMore) {
+    const params = {
+      limit: 100,
+      status: 'active',
+      expand: ['data.items.data.price', 'data.customer'],
+    };
+    if (startingAfter) params.starting_after = startingAfter;
+    const batch = await stripe.subscriptions.list(params);
+    allSubs.push(...batch.data);
+    hasMore = batch.has_more;
+    if (batch.data.length > 0) startingAfter = batch.data[batch.data.length - 1].id;
+  }
+  // Also fetch trialing
+  hasMore = true;
+  startingAfter = undefined;
+  while (hasMore) {
+    const params = {
+      limit: 100,
+      status: 'trialing',
+      expand: ['data.items.data.price', 'data.customer'],
+    };
+    if (startingAfter) params.starting_after = startingAfter;
+    const batch = await stripe.subscriptions.list(params);
+    allSubs.push(...batch.data);
+    hasMore = batch.has_more;
+    if (batch.data.length > 0) startingAfter = batch.data[batch.data.length - 1].id;
+  }
+
+  // 2. Deduplicate by customer ID (keep highest-priority sub per customer)
+  const byCustomer = {};
+  for (const sub of allSubs) {
+    const custId = typeof sub.customer === 'object' ? sub.customer.id : sub.customer;
+    if (!byCustomer[custId] || sub.status === 'active') {
+      byCustomer[custId] = sub;
+    }
+  }
+
+  // 3. Get all stripeCustomerIds already linked in CRM
+  const linkedIds = new Set(
+    (await Contact.find({ stripeCustomerId: { $exists: true, $ne: null } })
+      .select('stripeCustomerId').lean()
+    ).map(c => c.stripeCustomerId)
+  );
+
+  // 4. Filter unmatched and build result
+  const unmatched = [];
+  for (const [custId, sub] of Object.entries(byCustomer)) {
+    if (linkedIds.has(custId)) continue;
+
+    const customer = typeof sub.customer === 'object' ? sub.customer : null;
+    const items = sub.items?.data || [];
+    const { interval, intervalCount } = detectInterval(sub, null);
+
+    let mrr = 0;
+    for (const item of items) {
+      const unitAmount = item.price?.unit_amount || item.plan?.amount || 0;
+      const qty = item.quantity || 1;
+      mrr += centsToMonthly(unitAmount * qty, interval, intervalCount);
+    }
+    mrr = Math.round(mrr / (1 + VAT_RATE) / 100);
+
+    const firstItem = items[0];
+    const planName = firstItem?.price?.nickname
+      || (typeof firstItem?.price?.product === 'object' ? firstItem.price.product.name : null)
+      || 'Unknown';
+
+    unmatched.push({
+      stripeCustomerId: custId,
+      email: customer?.email || null,
+      name: customer?.name || customer?.email || custId,
+      status: sub.status,
+      planName,
+      mrr,
+      interval,
+      intervalCount,
+      subscriptionId: sub.id,
+    });
+  }
+
+  unmatched.sort((a, b) => b.mrr - a.mrr);
+  return { unmatched, totalStripe: Object.keys(byCustomer).length, totalLinked: linkedIds.size };
+}
+
 export {
   getStripe,
   findCustomerByEmail,
@@ -528,4 +619,5 @@ export {
   searchCustomers,
   linkCustomerToContact,
   diagnoseContact,
+  getUnmatchedStripeCustomers,
 };
