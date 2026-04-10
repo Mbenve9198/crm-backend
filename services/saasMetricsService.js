@@ -754,19 +754,14 @@ function buildContactMapFromSnapshot(snapshot) {
 }
 
 export async function buildPrevContactMap(prevMonth) {
-  // Get all contacts that were active subscribers
-  // We approximate by using current stripeData (works well for recent months)
-  // For historical accuracy, the backfill stores movements
   const snap = await MrrSnapshot.findOne({ month: prevMonth }).lean();
-  if (!snap) return {};
 
   const map = {};
-  // Reconstruct from movements: customers active at end of month =
-  // those with positive currentMrr (non-churn movements)
-  for (const m of (snap.movements || [])) {
-    if (m.currentMrr > 0) {
-      // Find the corresponding contact's stripeCustomerId
-      if (m.contactId) {
+
+  // If a snapshot exists, reconstruct from its movements
+  if (snap) {
+    for (const m of (snap.movements || [])) {
+      if (m.currentMrr > 0 && m.contactId) {
         const contact = await Contact.findById(m.contactId)
           .select('stripeCustomerId').lean();
         if (contact?.stripeCustomerId) {
@@ -782,20 +777,23 @@ export async function buildPrevContactMap(prevMonth) {
     }
   }
 
-  // Also include "existing" contacts (no movement recorded but still active)
-  // These are contacts whose MRR stayed the same — they won't appear in movements
-  // So we add all contacts that have active subs and were presumably active last month
-  const totalFromMovements = Object.values(map).reduce((s, v) => s + v.mrr, 0);
-  if (totalFromMovements < snap.totalMrr) {
-    // Some existing contacts are missing — fill from DB
-    const contacts = await Contact.find({
-      'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
-      'stripeData.mrrFromStripe': { $gt: 0 },
-      stripeCustomerId: { $exists: true },
-    }).select('_id name email stripeCustomerId stripeData').lean();
+  // Fill gaps from currently active contacts whose subscription started
+  // before the end of prevMonth. This handles two cases:
+  // 1) No snapshot exists at all — we infer who was active from current DB state
+  // 2) Snapshot exists but "existing" customers have no movement entry
+  const [y, m] = prevMonth.split('-').map(Number);
+  const prevMonthEnd = new Date(y, m, 0, 23, 59, 59);
 
-    for (const c of contacts) {
-      if (c.stripeCustomerId && !map[c.stripeCustomerId]) {
+  const contacts = await Contact.find({
+    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
+    'stripeData.mrrFromStripe': { $gt: 0 },
+    stripeCustomerId: { $exists: true },
+  }).select('_id name email stripeCustomerId stripeData').lean();
+
+  for (const c of contacts) {
+    if (c.stripeCustomerId && !map[c.stripeCustomerId]) {
+      const subStart = c.stripeData?.subscriptionStartDate;
+      if (subStart && subStart <= prevMonthEnd) {
         map[c.stripeCustomerId] = {
           mrr: c.stripeData?.mrrFromStripe || 0,
           planName: c.stripeData?.planName || 'Unknown',
