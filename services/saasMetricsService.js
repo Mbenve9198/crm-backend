@@ -17,7 +17,7 @@ export async function computeCurrentSnapshot() {
     'stripeData.mrrFromStripe': { $gt: 0 },
   }).select('_id name email stripeData stripeCustomerId').lean();
 
-  const prevContactMap = buildContactMapFromSnapshot(prevSnapshot);
+  const prevContactMap = await buildPrevContactMap(previousMonth);
 
   return classifyMovements(month, now, activeContacts, prevContactMap, prevSnapshot);
 }
@@ -39,7 +39,7 @@ export async function generateSnapshot(monthStr) {
     'stripeData.mrrFromStripe': { $gt: 0 },
   }).select('_id name email stripeData stripeCustomerId').lean();
 
-  const prevContactMap = buildContactMapFromSnapshot(prevSnapshot);
+  const prevContactMap = await buildPrevContactMap(previousMonth);
   const snapshot = classifyMovements(monthStr, endOfMonth, activeContacts, prevContactMap, prevSnapshot);
 
   await MrrSnapshot.findOneAndUpdate(
