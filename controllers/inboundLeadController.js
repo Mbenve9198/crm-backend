@@ -443,7 +443,8 @@ export const receiveSmartleadLead = async (req, res) => {
         'lost before free trial',
         'lost after free trial',
         'bad_data',
-        'non_qualificato'
+        'non_qualificato',
+        'do_not_contact'
       ];
       const currentStatusIndex = statusHierarchy.indexOf(contact.status);
       const newStatusIndex = statusHierarchy.indexOf(status);

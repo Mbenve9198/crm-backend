@@ -1914,8 +1914,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const createdContacts = await Contact.find({
       source: { $in: sourcesOfInterest },
       createdAt: { $gte: dateFrom, $lte: dateTo },
-      // Escludi sempre lead negativi "prima del free trial"
-      status: { $ne: 'lost before free trial' },
+      status: { $nin: ['lost before free trial', 'do_not_contact'] },
       ...(ownerId ? { owner: ownerId } : {})
     })
       .select('_id name email mrr source createdAt')
@@ -1985,8 +1984,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         $match: {
           'contact.source': { $in: sourcesOfInterest },
           'contact.createdAt': { $lt: dateFrom },
-          // Escludi sempre lead negativi "prima del free trial"
-          'contact.status': { $ne: 'lost before free trial' },
+          'contact.status': { $nin: ['lost before free trial', 'do_not_contact'] },
           ...(ownerId ? { 'contact.owner': ownerId } : {})
         }
       },
@@ -2005,7 +2003,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
                     {
                       $in: [
                         '$firstActivity.data.statusChange.newStatus',
-                        ['lost before free trial']
+                        ['lost before free trial', 'do_not_contact']
                       ]
                     }
                   ]
@@ -2015,11 +2013,9 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
           }
         }
       },
-      // Escludi activity con titoli esplicitamente negativi (Smartlead salva titoli tipo "🚫 Lead NON INTERESSATO (AI)")
       {
         $match: {
           'firstActivity.title': {
-            // NB: MongoDB usa PCRE2 e non supporta escape \u.... nelle regex
             $not: /lost before free trial|do not contact|🚫|🛑/i
           }
         }
@@ -2386,7 +2382,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
             $expr: {
               $and: [
                 { $ne: ['$firstActivity', null] },
-                { $not: { $and: [{ $eq: ['$firstActivity.type', 'status_change'] }, { $in: ['$firstActivity.data.statusChange.newStatus', ['lost before free trial']] }] } }
+                { $not: { $and: [{ $eq: ['$firstActivity.type', 'status_change'] }, { $in: ['$firstActivity.data.statusChange.newStatus', ['lost before free trial', 'do_not_contact']] }] } }
               ]
             }
           }
@@ -2938,7 +2934,8 @@ export const updateContactStatus = async (req, res) => {
       'lost before free trial',
       'lost after free trial',
       'bad_data',
-      'non_qualificato'
+      'non_qualificato',
+      'do_not_contact'
     ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({
