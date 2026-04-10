@@ -553,24 +553,15 @@ export async function getCustomersList({ search, sort, order } = {}) {
   }).select('firstName lastName email stripeData stripeCustomerId').lean();
 
   const currentMonth = getCurrentMonth();
-  const prevMonth = getPreviousMonth(currentMonth);
 
-  // Fetch last 2 months of snapshots to detect activity
-  const snapshots = await MrrSnapshot.find({ month: { $in: [currentMonth, prevMonth] } })
-    .select('month movements')
-    .lean();
+  // Compute live snapshot for the current month so activity types are always accurate
+  const liveSnapshot = await computeCurrentSnapshot();
 
-  // Build a map: contactId -> latest movement
   const activityMap = {};
-  for (const snap of snapshots) {
-    for (const m of (snap.movements || [])) {
-      if (!m.contactId) continue;
-      const cid = m.contactId.toString();
-      const existing = activityMap[cid];
-      if (!existing || snap.month > existing._month) {
-        activityMap[cid] = { ...m, _month: snap.month };
-      }
-    }
+  for (const m of (liveSnapshot.movements || [])) {
+    if (!m.contactId) continue;
+    const cid = m.contactId.toString();
+    activityMap[cid] = m;
   }
 
   const intervalLabels = {
@@ -605,9 +596,15 @@ export async function getCustomersList({ search, sort, order } = {}) {
     let activityDate = sd.subscriptionStartDate || sd.syncedAt || null;
 
     if (activity) {
-      activityType = activity.type; // new, reactivation, expansion, contraction, voluntary_churn, delinquent_churn
+      activityType = activity.type;
       activityDelta = activity.delta || 0;
-      activityDate = activity._month ? new Date(`${activity._month}-15`) : activityDate;
+      // Use syncedAt for the activity date (when the change was detected)
+      // rather than a synthetic "15th of the month"
+      if (activityType === 'new') {
+        activityDate = sd.subscriptionStartDate || sd.syncedAt || null;
+      } else {
+        activityDate = sd.syncedAt || sd.subscriptionStartDate || null;
+      }
     }
 
     return {
