@@ -4,12 +4,11 @@ import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 
 const AGENT_SERVICE_URL = process.env.AGENT_SERVICE_URL || 'http://localhost:8100';
-const FIRE_AND_FORGET_TIMEOUT_MS = 15_000;
-const SYNC_TIMEOUT_MS = parseInt(process.env.AGENT_SERVICE_TIMEOUT_MS || '300000');
+const TIMEOUT_MS = parseInt(process.env.AGENT_SERVICE_TIMEOUT_MS || '120000');
 
 const client = axios.create({
   baseURL: AGENT_SERVICE_URL,
-  timeout: SYNC_TIMEOUT_MS,
+  timeout: TIMEOUT_MS,
   headers: { 'Content-Type': 'application/json' }
 });
 
@@ -171,7 +170,7 @@ function _extractCityFromAddress(address) {
 }
 
 export async function callAgentProcess({
-  contact, conversation, leadMessage, category, confidence, extracted, fromEmail, taskId
+  contact, conversation, leadMessage, category, confidence, extracted, fromEmail
 }) {
   const identity = conversation.agentIdentity || { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' };
   const contactId = contact._id || conversation.contact;
@@ -202,18 +201,13 @@ export async function callAgentProcess({
     is_first_contact: false,
     agent_identity: { name: identity.name, surname: identity.surname, role: identity.role },
     crm_enrichment: crmEnrichment,
-    task_id: taskId || null,
   };
 
   agentLogger.info('agent_service_call', {
     conversationId: conversation._id,
-    data: { endpoint: '/agent/process', contact: contact.email, taskId }
+    data: { endpoint: '/agent/process', contact: contact.email }
   });
 
-  if (taskId) {
-    const response = await client.post('/agent/process', payload, { timeout: FIRE_AND_FORGET_TIMEOUT_MS });
-    return { status: 'processing', taskId, accepted: response.status < 400 };
-  }
   const response = await client.post('/agent/process', payload);
   return response.data;
 }
@@ -221,7 +215,6 @@ export async function callAgentProcess({
 export async function callAgentProactive({ task, contact, conversation }) {
   const identity = conversation?.agentIdentity || { name: 'Marco', surname: 'Benvenuti', role: 'co-founder' };
   const contactId = contact._id || task.contact;
-  const taskId = task._id?.toString();
 
   const crmEnrichment = await buildCrmEnrichment(contactId, conversation);
 
@@ -247,32 +240,26 @@ export async function callAgentProactive({ task, contact, conversation }) {
       : null,
     last_outcome: conversation?.outcome || null,
     crm_enrichment: crmEnrichment,
-    task_id: taskId,
   };
 
   agentLogger.info('agent_service_call', {
     conversationId: conversation?._id,
-    data: { endpoint: '/agent/proactive', type: task.type, contact: contact.email, taskId }
+    data: { endpoint: '/agent/proactive', type: task.type, contact: contact.email }
   });
 
-  const response = await client.post('/agent/proactive', payload, { timeout: FIRE_AND_FORGET_TIMEOUT_MS });
-  return { status: 'processing', taskId, accepted: response.status < 400 };
+  const response = await client.post('/agent/proactive', payload);
+  return response.data;
 }
 
-export async function callAgentResume({ threadId, updatedContext, taskId }) {
+export async function callAgentResume({ threadId, updatedContext }) {
   agentLogger.info('agent_service_call', {
-    data: { endpoint: '/agent/resume', thread_id: threadId, taskId }
+    data: { endpoint: '/agent/resume', thread_id: threadId }
   });
 
-  const timeout = taskId ? FIRE_AND_FORGET_TIMEOUT_MS : undefined;
   const response = await client.post('/agent/resume', {
     thread_id: threadId,
-    updated_context: updatedContext || {},
-    task_id: taskId || null,
-  }, timeout ? { timeout } : undefined);
-  if (taskId) {
-    return { status: 'processing', taskId, accepted: response.status < 400 };
-  }
+    updated_context: updatedContext || {}
+  });
   return response.data;
 }
 

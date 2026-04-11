@@ -91,7 +91,7 @@ const contactSchema = new mongoose.Schema({
   // Tipo di sorgente del contatto
   source: {
     type: String,
-    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_form', 'inbound_api', 'smartlead_outbound', 'referral'],
+    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_form', 'inbound_api', 'smartlead_outbound', 'referral'],
     default: 'manual',
     index: true
   },
@@ -119,6 +119,9 @@ const contactSchema = new mongoose.Schema({
     qualifiedAt: Date,
     leadCapturedAt: Date
   },
+
+  // Dati specifici per lead WhatsApp Acquisition (source = inbound_acquisition)
+  acquisitionData: mongoose.Schema.Types.Mixed,
   
   // Dati Stripe
   stripeCustomerId: {

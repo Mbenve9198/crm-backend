@@ -40,7 +40,7 @@ const activitySchema = new mongoose.Schema({
     },
     origin: {
       type: String,
-      enum: ['rank_checker', 'smartlead', 'manual', 'system', 'other']
+      enum: ['rank_checker', 'smartlead', 'acquisition', 'manual', 'system', 'other']
     },
     // Payload libero per casi non coperti dallo schema (webhook metadata, ecc.)
     meta: {

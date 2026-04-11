@@ -1,5 +1,5 @@
 import express from 'express';
-import { receiveRankCheckerLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
+import { receiveRankCheckerLead, receiveAcquisitionLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
 import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
 import { handleResendInbound } from '../controllers/resendWebhookController.js';
 
@@ -11,6 +11,7 @@ const router = express.Router();
  */
 
 router.post('/rank-checker-lead', receiveRankCheckerLead);
+router.post('/acquisition-lead', receiveAcquisitionLead);
 router.post('/smartlead-lead', receiveSmartleadLead);
 router.post('/smartlead-webhook', handleSmartleadWebhook);
 

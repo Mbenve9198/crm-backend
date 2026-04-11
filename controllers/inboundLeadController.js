@@ -349,6 +349,142 @@ export const receiveRankCheckerLead = async (req, res) => {
 };
 
 /**
+ * Riceve e processa lead da WhatsApp Acquisition (funnel MENU o RECENSIONI)
+ * POST /api/inbound/acquisition-lead
+ */
+export const receiveAcquisitionLead = async (req, res) => {
+  try {
+    const {
+      phone,
+      name,
+      restaurantName,
+      funnelType,
+      acquisitionData,
+      leadSource,
+      leadType
+    } = req.body;
+
+    if (!phone || !restaurantName) {
+      return res.status(400).json({
+        success: false,
+        message: 'Telefono e nome ristorante sono obbligatori'
+      });
+    }
+
+    console.log(`📥 INBOUND ACQUISITION LEAD: ${restaurantName} (${funnelType}) — ${phone}`);
+
+    let defaultOwner;
+    if (process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL) {
+      defaultOwner = await User.findOne({
+        email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL.toLowerCase()
+      });
+    }
+    if (!defaultOwner) {
+      defaultOwner = await User.findOne({
+        role: { $in: ['admin', 'manager'] },
+        isActive: true
+      }).sort({ createdAt: 1 });
+    }
+    if (!defaultOwner) {
+      return res.status(500).json({ success: false, message: 'Nessun owner disponibile' });
+    }
+
+    const syntheticEmail = `acq-${funnelType?.toLowerCase() || 'unknown'}-${phone.replace(/\+/g, '')}@acquisition.menuchat.it`;
+    const listName = `Inbound - WhatsApp Acquisition - ${funnelType || 'UNKNOWN'}`;
+
+    let contact = await Contact.findOne({ email: syntheticEmail.toLowerCase() });
+
+    const leadData = {
+      name: restaurantName,
+      email: syntheticEmail.toLowerCase(),
+      phone,
+      lists: [listName],
+      status: acquisitionData?.callSlot ? 'interessato' : 'da contattare',
+      source: 'inbound_acquisition',
+      owner: defaultOwner._id,
+      acquisitionData: {
+        funnelType: funnelType || 'UNKNOWN',
+        ...(acquisitionData || {})
+      },
+      properties: {
+        contactName: name || null,
+        restaurantAddress: acquisitionData?.address || '',
+        googleMapsUrl: acquisitionData?.placeId ? `https://www.google.com/maps/place/?q=place_id:${acquisitionData.placeId}` : '',
+        menuPreviewUrl: acquisitionData?.menuPreviewUrl || null,
+        leadSource: leadSource || 'google-ads-whatsapp',
+        leadType: leadType || 'INBOUND'
+      }
+    };
+
+    let action;
+    if (contact) {
+      if (!contact.lists.includes(listName)) {
+        contact.lists.push(listName);
+      }
+      if (contact.source === 'manual') {
+        contact.source = 'inbound_acquisition';
+      }
+      contact.acquisitionData = leadData.acquisitionData;
+      contact.properties = { ...contact.properties, ...leadData.properties };
+      if (acquisitionData?.callSlot && contact.status === 'da contattare') {
+        contact.status = 'interessato';
+      }
+      contact.lastModifiedBy = defaultOwner._id;
+      await contact.save();
+      action = 'updated';
+      console.log(`🔄 Contatto acquisition aggiornato: ${contact.name}`);
+    } else {
+      contact = new Contact(leadData);
+      contact.createdBy = defaultOwner._id;
+      await contact.save();
+      action = 'created';
+      console.log(`✅ Nuovo contatto acquisition creato: ${contact.name}`);
+    }
+
+    // Create activity
+    try {
+      const activity = new Activity({
+        contact: contact._id,
+        type: 'whatsapp',
+        title: `📥 Lead ${funnelType}: ${restaurantName}`,
+        description: `Lead WhatsApp Acquisition (${funnelType})${acquisitionData?.callSlot ? ` — Chiamata richiesta: ${acquisitionData.callSlot}` : ''}`,
+        data: {
+          kind: 'lead_inbound',
+          origin: 'acquisition',
+          meta: {
+            funnelType,
+            leadScore: acquisitionData?.leadScore,
+            leadTemperature: acquisitionData?.leadTemperature,
+            weeklyCovers: acquisitionData?.weeklyCovers,
+            menuPreviewUrl: acquisitionData?.menuPreviewUrl
+          }
+        },
+        performedBy: defaultOwner._id
+      });
+      await activity.save();
+    } catch (actErr) {
+      console.error('⚠️ Activity creation failed:', actErr.message);
+    }
+
+    return res.status(action === 'created' ? 201 : 200).json({
+      success: true,
+      data: { contactId: contact._id, action },
+      message: `Lead acquisition ${action}`
+    });
+  } catch (error) {
+    console.error('❌ Errore ricezione acquisition lead:', error);
+    if (error.code === 11000) {
+      return res.status(409).json({ success: false, message: 'Contatto già esistente con questa email' });
+    }
+    return res.status(500).json({
+      success: false,
+      message: 'Errore interno del server',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+/**
  * Riceve e processa lead da Smartlead (campagne email outbound)
  * POST /api/inbound/smartlead-lead
  */

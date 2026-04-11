@@ -101,7 +101,7 @@ const conversationSchema = new mongoose.Schema({
 
   context: {
     leadCategory: String,
-    leadSource: { type: String, enum: ['smartlead_outbound', 'inbound_rank_checker', 'manual'] },
+    leadSource: { type: String, enum: ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'manual'] },
     objections: [String],
     painPoints: [String],
     qualificationData: mongoose.Schema.Types.Mixed,
