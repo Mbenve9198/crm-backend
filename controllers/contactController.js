@@ -365,7 +365,7 @@ export const updateContact = async (req, res) => {
     delete updates.createdAt;
 
     // Gestisce il cambio di owner (solo manager/admin)
-    if (updates.owner && updates.owner !== existingContact.owner.toString()) {
+    if (updates.owner && updates.owner !== existingContact.owner?.toString()) {
       if (!req.user.hasRole('manager')) {
         return res.status(403).json({
           success: false,
@@ -2954,7 +2954,7 @@ export const updateContactStatus = async (req, res) => {
     }
 
     // Verifica permessi
-    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per modificare questo contatto'
@@ -3147,7 +3147,7 @@ export const bulkChangeOwner = async (req, res) => {
       // Conta quanti contatti per vecchio owner
       const ownerChanges = {};
       contactsToUpdate.forEach(contact => {
-        const oldOwnerId = contact.owner.toString();
+        const oldOwnerId = contact.owner?.toString() || 'unassigned';
         if (!ownerChanges[oldOwnerId]) {
           ownerChanges[oldOwnerId] = 0;
         }
@@ -3241,7 +3241,7 @@ export const updateContactCallback = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contatto non trovato' });
     }
 
-    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per modificare questo contatto'

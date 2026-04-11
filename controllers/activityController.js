@@ -24,7 +24,7 @@ export const getContactActivities = async (req, res) => {
     }
 
     // Verifica permessi
-    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per visualizzare le activities di questo contatto'
@@ -88,7 +88,7 @@ export const createActivity = async (req, res) => {
     }
 
     // Verifica permessi
-    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per creare activities per questo contatto'
@@ -249,7 +249,7 @@ export const getContactActivityStats = async (req, res) => {
     }
 
     // Verifica permessi
-    if (req.user.role === 'agent' && contact.owner.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'Non hai i permessi per visualizzare le statistiche di questo contatto'
