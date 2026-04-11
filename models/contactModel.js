@@ -135,6 +135,7 @@ const contactSchema = new mongoose.Schema({
     },
     planName: String,
     planInterval: String,
+    planIntervalCount: Number,
     mrrFromStripe: Number,
     subscriptionStartDate: Date,
     currentPeriodEnd: Date,
