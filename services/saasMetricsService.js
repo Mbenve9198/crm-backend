@@ -552,7 +552,7 @@ export async function getPlansFromContacts() {
     bucketMap[key].arr += mrr * 12;
     bucketMap[key].contacts.push({
       _id: c._id,
-      name: [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email,
+      name: c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email,
       email: c.email,
       mrr,
       planName: sd.planName || '–',
@@ -612,7 +612,7 @@ export async function getCustomersList({ search, sort, order } = {}) {
       ? (count === 1 ? 'Annuale' : `Ogni ${count} anni`)
       : `Ogni ${count} mesi`);
 
-    const name = [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
+    const name = c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
     const planDesc = [sd.planName, billingLabel].filter(Boolean).join(' · ');
 
     const cid = c._id.toString();
