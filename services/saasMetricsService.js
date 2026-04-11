@@ -3,6 +3,41 @@ import MrrSnapshot from '../models/mrrSnapshotModel.js';
 import { getStripe } from './stripeService.js';
 
 /**
+ * Finds all active paying customers: Stripe subscribers + bonifico bancario.
+ * Normalizes bonifico contacts to have a compatible shape.
+ */
+async function findAllActiveCustomers(selectFields = '_id name email stripeData stripeCustomerId') {
+  const [stripeContacts, bonificoContacts] = await Promise.all([
+    Contact.find({
+      'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
+      'stripeData.mrrFromStripe': { $gt: 0 },
+    }).select(selectFields).lean(),
+    Contact.find({
+      'properties.paymentMethod': 'bonifico_bancario',
+      status: 'won',
+    }).select(`${selectFields} properties`).lean(),
+  ]);
+
+  const normalized = bonificoContacts.map(c => ({
+    ...c,
+    stripeCustomerId: `bonifico_${c._id}`,
+    stripeData: {
+      subscriptionStatus: 'active',
+      mrrFromStripe: c.properties?.manualMrr || c.mrr || 0,
+      planName: c.properties?.manualPlanName || 'Bonifico Bancario',
+      planInterval: 'year',
+      planIntervalCount: 1,
+      subscriptionStartDate: c.properties?.manualSubscriptionStart
+        ? new Date(c.properties.manualSubscriptionStart)
+        : c.createdAt,
+      syncedAt: c.updatedAt,
+    },
+  }));
+
+  return [...stripeContacts, ...normalized];
+}
+
+/**
  * Build a live snapshot for a given month by querying current contact data.
  * For past months we look at stored snapshots; for the current month we compute on-the-fly.
  */
@@ -12,10 +47,7 @@ export async function computeCurrentSnapshot() {
   const previousMonth = getPreviousMonth(month);
   const prevSnapshot = await MrrSnapshot.findOne({ month: previousMonth }).lean();
 
-  const activeContacts = await Contact.find({
-    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
-    'stripeData.mrrFromStripe': { $gt: 0 },
-  }).select('_id name email stripeData stripeCustomerId').lean();
+  const activeContacts = await findAllActiveCustomers();
 
   const prevContactMap = await buildPrevContactMap(previousMonth);
 
@@ -490,10 +522,7 @@ export async function getPlansTrend(numMonths = 12) {
  * Get plan comparison from CRM contacts grouped by billing frequency.
  */
 export async function getPlansFromContacts() {
-  const activeContacts = await Contact.find({
-    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
-    'stripeData.mrrFromStripe': { $gt: 0 },
-  }).select('firstName lastName email stripeData stripeCustomerId').lean();
+  const activeContacts = await findAllActiveCustomers('_id name firstName lastName email stripeData stripeCustomerId mrr');
 
   const intervalLabels = {
     'year-1': 'Annuale',
@@ -547,10 +576,7 @@ export async function getPlansFromContacts() {
  * Get the full customer list with current MRR and latest activity from snapshots.
  */
 export async function getCustomersList({ search, sort, order } = {}) {
-  const activeContacts = await Contact.find({
-    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
-    'stripeData.mrrFromStripe': { $gt: 0 },
-  }).select('firstName lastName email stripeData stripeCustomerId').lean();
+  const activeContacts = await findAllActiveCustomers('_id name firstName lastName email stripeData stripeCustomerId mrr');
 
   const currentMonth = getCurrentMonth();
 
@@ -784,17 +810,14 @@ export async function buildPrevContactMap(prevMonth) {
   const [y, m] = prevMonth.split('-').map(Number);
   const prevMonthEnd = new Date(y, m, 0, 23, 59, 59);
 
-  const contacts = await Contact.find({
-    'stripeData.subscriptionStatus': { $in: ['active', 'trialing'] },
-    'stripeData.mrrFromStripe': { $gt: 0 },
-    stripeCustomerId: { $exists: true },
-  }).select('_id name email stripeCustomerId stripeData').lean();
+  const contacts = await findAllActiveCustomers('_id name email stripeCustomerId stripeData mrr');
 
   for (const c of contacts) {
-    if (c.stripeCustomerId && !map[c.stripeCustomerId]) {
+    const custId = c.stripeCustomerId;
+    if (custId && !map[custId]) {
       const subStart = c.stripeData?.subscriptionStartDate;
       if (subStart && subStart <= prevMonthEnd) {
-        map[c.stripeCustomerId] = {
+        map[custId] = {
           mrr: c.stripeData?.mrrFromStripe || 0,
           planName: c.stripeData?.planName || 'Unknown',
           contactId: c._id,
