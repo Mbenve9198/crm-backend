@@ -83,6 +83,7 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - Bounce, delivery failure, mailer-daemon
    - Conferme di ricezione automatiche
    - "Siamo chiusi per ferie / riapriremo il..."
+   - **Notifiche automatiche di cambio indirizzo email**: "l'indirizzo X verrà disattivato", "potrete contattarci al nuovo indirizzo Y", "saremo lieti di soddisfare ogni vostra richiesta" — sono comunicazioni di servizio inviate in massa, non risposte personali alla nostra email
 
 REGOLE CRITICHE:
 - NEL DUBBIO tra INTERESTED e NEUTRAL → scegli NEUTRAL (non INTERESTED)
@@ -209,7 +210,14 @@ const quickClassify = (text) => {
     'per prenotazioni chiediamo gentilmente',
     'per prenotare clicca', 'prenota un tavolo',
     'siamo aperti a cena', 'siamo aperti a pranzo',
-    'orari di apertura'
+    'orari di apertura',
+    // Notifiche automatiche di cambio indirizzo email
+    'verrà a breve disattivato', 'verra a breve disattivato',
+    'verrà disattivato', 'verra disattivato',
+    'saremo lieti di soddisfare',
+    'nuovo indirizzo email', 'nuovo indirizzo di posta',
+    'cambio indirizzo email', 'cambio di indirizzo email',
+    'indirizzo email aggiornato', 'indirizzo aggiornato'
   ];
   for (const p of oooPatterns) {
     if (normalized.includes(p)) return { category: 'OUT_OF_OFFICE', confidence: 0.95, reason: 'Risposta automatica / fuori ufficio', shouldStopSequence: false, extracted: {} };
