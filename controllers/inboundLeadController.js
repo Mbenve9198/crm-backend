@@ -116,14 +116,22 @@ export const receiveRankCheckerLead = async (req, res) => {
     // Verifica se esiste già un contatto con questa email
     let contact = await Contact.findOne({ email: email.toLowerCase() });
     
+    // Distingui prova-gratuita da rank-checker per source e lista CRM
+    const isProvaGratuita = leadSource === 'prova-gratuita';
+    const crmSource = isProvaGratuita ? 'inbound_prova_gratuita' : 'inbound_rank_checker';
+    const crmList = isProvaGratuita ? 'Inbound - Prova Gratuita' : 'Inbound - Rank Checker';
+
+    if (isProvaGratuita) {
+      console.log(`🚀 Lead da landing PROVA GRATUITA`);
+    }
+
     const leadData = {
       name: restaurantName,
       email: email.toLowerCase(),
       phone: phone,
-      lists: ['Inbound - Rank Checker'], // Lista dedicata per questi lead
+      lists: [crmList],
       status: 'da contattare',
-      // ⚠️ source deve essere un valore valido dell'enum - leadSource va in rankCheckerData
-      source: 'inbound_rank_checker',
+      source: crmSource,
       owner: defaultOwner._id,
       rankCheckerData: {
         placeId: placeId,
@@ -178,13 +186,13 @@ export const receiveRankCheckerLead = async (req, res) => {
       console.log(`🔄 Contatto esistente trovato, aggiorno i dati...`);
       
       // Aggiungi alla lista se non già presente
-      if (!contact.lists.includes('Inbound - Rank Checker')) {
-        contact.lists.push('Inbound - Rank Checker');
+      if (!contact.lists.includes(crmList)) {
+        contact.lists.push(crmList);
       }
-      
+
       // Aggiorna source solo se era manual
       if (contact.source === 'manual') {
-        contact.source = 'inbound_rank_checker';
+        contact.source = crmSource;
       }
       
       // Aggiorna sempre i dati rank checker (più recenti)
