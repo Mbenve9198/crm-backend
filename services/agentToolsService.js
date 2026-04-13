@@ -347,6 +347,10 @@ function isOutreachBypass(ctx) {
 }
 
 async function toolSendEmail({ message, subject }, ctx) {
+  // DISABILITATO: nessuna email viene inviata dall'agente AI
+  console.log('ℹ️  toolSendEmail DISABILITATO — email non inviata');
+  return { sent: false, skipped: true, reason: 'Email sending disabled' };
+
   const conversation = ctx?.conversation;
   if (!conversation) return { error: 'Nessuna conversazione attiva' };
 

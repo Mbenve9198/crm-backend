@@ -470,6 +470,16 @@ app.use('/api/agent', agentTaskRoutes);
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
 import { checkAgentHealth } from './services/agentServiceClient.js';
 
+// ══════════════════════════════════════════════════════════════════════
+// DISABILITATO: Task Processor, Task Generator e Sales Manager Agent
+// Tutto il sistema di task automatici e l'agente AI sono spenti.
+// Per riattivare, decommentare il blocco sottostante.
+// ══════════════════════════════════════════════════════════════════════
+console.log('ℹ️  Task Processor DISABILITATO — nessun task verrà processato');
+console.log('ℹ️  Task Generator DISABILITATO — nessun task verrà generato');
+console.log('ℹ️  Sales Manager DISABILITATO — nessun ciclo giornaliero');
+
+/*
 setTimeout(async () => {
   const agentOnline = await checkAgentHealth();
   if (agentOnline) {
@@ -511,6 +521,7 @@ setTimeout(async () => {
   setInterval(runSalesManagerDaily, SM_CHECK_INTERVAL_MS);
   console.log('[Sales Manager] Schedulato giornaliero alle 7:00 Roma');
 }, 10000);
+*/
 
 // Endpoint per la documentazione delle API
 app.get('/api-docs', (req, res) => {
