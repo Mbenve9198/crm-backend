@@ -40,8 +40,8 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
 2. **NEUTRAL** — La risposta NON contiene né un segnale positivo esplicito né un rifiuto chiaro.
    Classifica come NEUTRAL se:
    - Risposte brevi senza contenuto: "Ok", "Ricevuto", "Grazie", "Buongiorno", "Ottimo"
-   - Reindirizzamento email/contatto: "scrivete a questo indirizzo", "contattate la nuova gestione"
-   - Spiega la propria situazione senza interesse: "siamo stagionali", "apriamo a maggio", "abbiamo chiuso"
+   - Reindirizzamento email/contatto: "scrivete a questo indirizzo", "contattate la nuova gestione" (se non è una cessione definitiva)
+   - Spiega una situazione TEMPORANEA senza interesse: "siamo stagionali", "apriamo a maggio", "siamo chiusi per ferie", "riapriamo a settembre"
    - Critica i dati della nostra email senza mostrare interesse nel servizio
    - Confusione: "non ho capito", "di cosa si tratta?", "chi sei?"
    - Delega generica: "c'è mia nipote che se ne occupa", "la mail è stata inoltrata al reparto"
@@ -49,8 +49,9 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - Risposte tipo "ho visto la mail", "grazie per il suo interessamento", "grazie comunque"
    - Risposte vaghe: "forse più avanti", "ci penso", "non adesso", "non è il momento"
    - Feedback sui dati: "il ristorante che citi è lontano da noi", "quella keyword è sbagliata"
+   - ATTENZIONE: "abbiamo chiuso" DA SOLO è ambiguo — se è chiusura definitiva/cessata attività → NOT_INTERESTED; se è chiusura stagionale/temporanea → NEUTRAL
 
-3. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE.
+3. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE, oppure l'attività non è più attiva/raggiungibile.
    Classifica come NOT_INTERESTED se:
    - Dice chiaramente "non ci interessa", "non ci serve", "non siamo interessati", "non sono interessato/a"
    - Dice "no mi interessa", "non mi interessava", "non ci interessava" (anche varianti passato)
@@ -60,6 +61,9 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - "Grazie ma non siamo interessati / non ci serve"
    - "Per il momento non sono interessato/a" (rifiuto temporale con "non")
    - Dice che non ha budget / soldi ("non investo", "non abbiamo fondi")
+   - **L'attività è stata VENDUTA o CEDUTA**: "il ristorante è stato venduto", "abbiamo venduto", "ho ceduto l'attività", "è stato ceduto" — il destinatario non è più il proprietario/decisore, quindi è un lead morto
+   - **Non è più il proprietario/titolare**: "non sono più il proprietario", "non siamo più i titolari", "ho cambiato attività"
+   - **Chiusura DEFINITIVA** (non stagionale): "abbiamo chiuso definitivamente", "il locale è chiuso", "abbiamo cessato l'attività" — senza indicazioni di riapertura
 
 4. **DO_NOT_CONTACT** — Rifiuto netto con richiesta di stop.
    Classifica come DO_NOT_CONTACT se:
@@ -82,6 +86,7 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
 
 REGOLE CRITICHE:
 - NEL DUBBIO tra INTERESTED e NEUTRAL → scegli NEUTRAL (non INTERESTED)
+- NEL DUBBIO tra NEUTRAL e NOT_INTERESTED → scegli NOT_INTERESTED se l'attività è definitivamente chiusa o venduta
 - INTERESTED richiede un SEGNALE POSITIVO ESPLICITO (domanda, telefono, richiesta info/call)
 - Un numero di telefono nella FIRMA email (dopo "Tel:", "Mobile:", "Fax:") NON conta come segnale positivo
 - Un numero di telefono SCRITTO NEL CORPO del messaggio dal lead È un segnale positivo forte
@@ -90,6 +95,9 @@ REGOLE CRITICHE:
 - "non mi interessava" (passato) = NOT_INTERESTED
 - Risposte che iniziano con rifiuto + disclaimer GDPR = DO_NOT_CONTACT
 - Autoresponder generici (anche con numeri di telefono o WhatsApp) = OUT_OF_OFFICE
+- ATTIVITÀ VENDUTA/CEDUTA = NOT_INTERESTED: "il ristorante è stato venduto", "abbiamo ceduto", "non sono più il proprietario" → il lead non è più un potenziale cliente, non ha senso contattarlo
+- CHIUSURA DEFINITIVA = NOT_INTERESTED: "abbiamo chiuso definitivamente", "cessata attività" — senza apertura futura
+- CHIUSURA TEMPORANEA = NEUTRAL: "chiusi per ferie", "riapriamo a settembre", "siamo stagionali" — potrebbero riaprire
 
 ESTRAZIONE ENTITÀ:
 Oltre alla classificazione, estrai i seguenti dati dalla risposta (se presenti):
@@ -268,10 +276,35 @@ const quickClassify = (text) => {
     'per il momento non sono interessat',
     'per ora non ci interessa', 'per adesso non ci interessa',
     'al momento non investo', 'non investo soldi',
-    'non abbiamo fondi', 'non abbiamo budget'
+    'non abbiamo fondi', 'non abbiamo budget',
+    // Attività venduta / ceduta → lead morto, non è più il decisore
+    'è stato venduto', 'e stato venduto',
+    'è stata venduta', 'e stata venduta',
+    'è stato ceduto', 'e stato ceduto',
+    'è stata ceduta', 'e stata ceduta',
+    'abbiamo venduto', 'ho venduto',
+    'abbiamo ceduto', 'ho ceduto',
+    'l\'attività è stata venduta', 'l\'attivita è stata venduta',
+    'il locale è stato venduto', 'il locale e stato venduto',
+    'il ristorante è stato venduto', 'il ristorante e stato venduto',
+    // Non più proprietario / titolare
+    'non sono più il proprietario', 'non sono piu il proprietario',
+    'non sono più la proprietaria', 'non sono piu la proprietaria',
+    'non sono più il titolare', 'non sono piu il titolare',
+    'non sono più la titolare', 'non sono piu la titolare',
+    'non siamo più i proprietari', 'non siamo piu i proprietari',
+    'non siamo più i titolari', 'non siamo piu i titolari',
+    'ho cambiato attività', 'ho cambiato attivita',
+    'abbiamo cambiato attività', 'abbiamo cambiato attivita',
+    // Chiusura definitiva (senza indicazioni di riapertura)
+    'abbiamo chiuso definitivamente', 'abbiamo chiuso per sempre',
+    'chiuso definitivamente', 'chiuso per sempre',
+    'cessata attività', 'cessata l\'attività', 'cessata l\'attivita',
+    'attività cessata', 'attivita cessata',
+    'abbiamo cessato l\'attività', 'abbiamo cessato l\'attivita'
   ];
   for (const p of negPatterns) {
-    if (normalized.includes(p)) return { category: 'NOT_INTERESTED', confidence: 0.95, reason: 'Rifiuto esplicito', shouldStopSequence: true, extracted: {} };
+    if (normalized.includes(p)) return { category: 'NOT_INTERESTED', confidence: 0.95, reason: 'Rifiuto esplicito o attività non più attiva', shouldStopSequence: true, extracted: {} };
   }
 
   // --- INTERESTED: segnale positivo esplicito ---
