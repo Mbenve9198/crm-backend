@@ -277,37 +277,68 @@ export const receiveRankCheckerLead = async (req, res) => {
 
       // Round robin per i lead inbound (Rank Checker)
       let ownerForNewContact = defaultOwner;
+      const isLandingLead = email.toLowerCase().endsWith('@landing.menuchat.it');
+
       try {
-        const roundRobinEmails = [
-          'alessandro.totti@menuchat.it',
-          'emanuele.funai@menuchat.it',
-          'marco@menuchat.com'
-        ];
+        if (isLandingLead) {
+          // Lead dalla landing landing.menuchat.it → solo Marco Benvenuti e Federico Desantis
+          const landingEmails = ['marco@menuchat.com', 'federico@menuchat.com'];
+          const owners = await User.find({ email: { $in: landingEmails }, isActive: true });
 
-        const owners = await User.find({
-          email: { $in: roundRobinEmails },
-          isActive: true
-        }).sort({ createdAt: 1 });
+          if (owners.length > 0) {
+            const orderedOwners = landingEmails
+              .map(emailVal => owners.find(u => u.email === emailVal))
+              .filter(Boolean);
 
-        if (owners.length > 0) {
-          const orderedOwners = roundRobinEmails
-            .map(emailVal => owners.find(u => u.email === emailVal))
-            .filter(Boolean);
+            if (orderedOwners.length > 0) {
+              const key = 'landing_round_robin';
+              let state = await AssignmentState.findOne({ key });
+              if (!state) {
+                state = await AssignmentState.create({ key, lastIndex: -1 });
+              }
 
-          if (orderedOwners.length > 0) {
-            const key = 'smartlead_round_robin';
-            let state = await AssignmentState.findOne({ key });
-            if (!state) {
-              state = await AssignmentState.create({ key, lastIndex: -1 });
+              const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+              ownerForNewContact = orderedOwners[nextIndex];
+
+              state.lastIndex = nextIndex;
+              await state.save();
+
+              console.log(`🎯 Round robin LANDING → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
             }
+          }
+        } else {
+          // Round robin standard per gli altri lead inbound
+          const roundRobinEmails = [
+            'alessandro.totti@menuchat.it',
+            'emanuele.funai@menuchat.it',
+            'marco@menuchat.com'
+          ];
 
-            const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
-            ownerForNewContact = orderedOwners[nextIndex];
+          const owners = await User.find({
+            email: { $in: roundRobinEmails },
+            isActive: true
+          }).sort({ createdAt: 1 });
 
-            state.lastIndex = nextIndex;
-            await state.save();
+          if (owners.length > 0) {
+            const orderedOwners = roundRobinEmails
+              .map(emailVal => owners.find(u => u.email === emailVal))
+              .filter(Boolean);
 
-            console.log(`🎯 Round robin INBOUND → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+            if (orderedOwners.length > 0) {
+              const key = 'smartlead_round_robin';
+              let state = await AssignmentState.findOne({ key });
+              if (!state) {
+                state = await AssignmentState.create({ key, lastIndex: -1 });
+              }
+
+              const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+              ownerForNewContact = orderedOwners[nextIndex];
+
+              state.lastIndex = nextIndex;
+              await state.save();
+
+              console.log(`🎯 Round robin INBOUND → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+            }
           }
         }
       } catch (err) {
@@ -442,6 +473,41 @@ export const receiveAcquisitionLead = async (req, res) => {
       action = 'updated';
       console.log(`🔄 Contatto acquisition aggiornato: ${contact.name}`);
     } else {
+      // Round robin per lead dalla landing landing.menuchat.it
+      const isLandingLead = syntheticEmail.endsWith('@landing.menuchat.it');
+      if (isLandingLead) {
+        try {
+          const landingEmails = ['marco@menuchat.com', 'federico@menuchat.com'];
+          const owners = await User.find({ email: { $in: landingEmails }, isActive: true });
+
+          if (owners.length > 0) {
+            const orderedOwners = landingEmails
+              .map(emailVal => owners.find(u => u.email === emailVal))
+              .filter(Boolean);
+
+            if (orderedOwners.length > 0) {
+              const key = 'landing_round_robin';
+              let state = await AssignmentState.findOne({ key });
+              if (!state) {
+                state = await AssignmentState.create({ key, lastIndex: -1 });
+              }
+
+              const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
+              const ownerForNewContact = orderedOwners[nextIndex];
+
+              state.lastIndex = nextIndex;
+              await state.save();
+
+              leadData.owner = ownerForNewContact._id;
+              defaultOwner = ownerForNewContact;
+              console.log(`🎯 Round robin LANDING (acquisition) → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
+            }
+          }
+        } catch (err) {
+          console.error('⚠️ Errore round robin landing acquisition, uso defaultOwner:', err.message);
+        }
+      }
+
       contact = new Contact(leadData);
       contact.createdBy = defaultOwner._id;
       await contact.save();
