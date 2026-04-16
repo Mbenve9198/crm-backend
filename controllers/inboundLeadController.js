@@ -36,7 +36,12 @@ export const receiveRankCheckerLead = async (req, res) => {
       // 🆕 Richiesta chiamata
       callRequested,
       callPreference,
-      callRequestedAt
+      callRequestedAt,
+      // Dati menu landing (arrivano dal secondo sync dopo creazione menu)
+      menuPreviewUrl,
+      menuId,
+      restaurantId,
+      eventType
     } = req.body;
 
     // Validazione base
@@ -116,14 +121,36 @@ export const receiveRankCheckerLead = async (req, res) => {
     // Verifica se esiste già un contatto con questa email
     let contact = await Contact.findOne({ email: email.toLowerCase() });
     
-    // Distingui prova-gratuita da rank-checker per source e lista CRM
+    // Mappa leadSource → source CRM e lista
+    const crmSourceMap = {
+      'prova-gratuita': {
+        source: 'inbound_prova_gratuita',
+        list: 'Inbound - Prova Gratuita',
+        log: '🚀 Lead da landing PROVA GRATUITA'
+      },
+      'menu-digitale-landing': {
+        source: 'inbound_menu_landing',
+        list: 'Inbound - Google Ads Menu',
+        log: '📱 Lead da Google Ads Menu Landing'
+      },
+      'social-proof': {
+        source: 'inbound_social_proof',
+        list: 'Inbound - Meta Social Proof',
+        log: '🎬 Lead da Meta Social Proof'
+      },
+      'qr-recensioni': {
+        source: 'inbound_qr_recensioni',
+        list: 'Inbound - Google Ads QR Recensioni',
+        log: '⭐ Lead da Google Ads QR Recensioni'
+      }
+    };
+    const defaultConfig = { source: 'inbound_rank_checker', list: 'Inbound - Rank Checker', log: '🎯 Lead da Rank Checker (organic)' };
+    const crmConfig = crmSourceMap[leadSource] || defaultConfig;
+    const crmSource = crmConfig.source;
+    const crmList = crmConfig.list;
     const isProvaGratuita = leadSource === 'prova-gratuita';
-    const crmSource = isProvaGratuita ? 'inbound_prova_gratuita' : 'inbound_rank_checker';
-    const crmList = isProvaGratuita ? 'Inbound - Prova Gratuita' : 'Inbound - Rank Checker';
 
-    if (isProvaGratuita) {
-      console.log(`🚀 Lead da landing PROVA GRATUITA`);
-    }
+    console.log(crmConfig.log);
 
     const leadData = {
       name: restaurantName,
@@ -177,7 +204,11 @@ export const receiveRankCheckerLead = async (req, res) => {
         // 🆕 Link singolo al report (accesso rapido dal CRM)
         rankCheckerReport: finalReportLink,
         // ⚠️ Warning se numero telefono invalido
-        phoneWarning: phoneWarning || null
+        phoneWarning: phoneWarning || null,
+        // Menu landing data (link al menu creato + ID per accesso rapido)
+        ...(menuPreviewUrl && { menuPreviewUrl }),
+        ...(menuId && { menuId }),
+        ...(restaurantId && { menuRestaurantId: restaurantId })
       }
     };
 
