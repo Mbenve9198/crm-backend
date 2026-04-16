@@ -208,7 +208,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         // Menu landing data (link al menu creato + ID per accesso rapido)
         ...(menuPreviewUrl && { menuPreviewUrl }),
         ...(menuId && { menuId }),
-        ...(restaurantId && { menuRestaurantId: restaurantId })
+        ...(restaurantId && { menuRestaurantId: restaurantId }),
+        // Agent session per conversazione WhatsApp
+        ...(req.body.agentSessionId && { agentSessionId: req.body.agentSessionId })
       }
     };
 
