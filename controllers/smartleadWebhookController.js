@@ -3,6 +3,7 @@ import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
+import { resolveOwnerForSource } from '../services/assignmentService.js';
 import { classifyReply } from '../services/replyClassifierService.js';
 import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
@@ -262,47 +263,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     console.log(`🆕 Nuovo contatto: ${name} (${email})`);
     isNew = true;
 
-    // Round robin per nuovi lead Smartlead
-    let ownerForNewContact = defaultOwner;
-    const isSmartleadLead = !!properties.smartlead_campaign_id;
-
-    if (isSmartleadLead) {
-      const roundRobinEmails = [
-        'alessandro.totti@menuchat.it',
-        'emanuele.funai@menuchat.it',
-        'marco@menuchat.com'
-      ];
-
-      // Recupera utenti per le email configurate (filtra solo attivi)
-      const owners = await User.find({
-        email: { $in: roundRobinEmails },
-        isActive: true
-      }).sort({ createdAt: 1 });
-
-      if (owners.length > 0) {
-        // Allinea l'ordine degli owner a quello delle email
-        const orderedOwners = roundRobinEmails
-          .map(emailVal => owners.find(u => u.email === emailVal))
-          .filter(Boolean);
-
-        if (orderedOwners.length > 0) {
-          // Legge/crea stato round robin
-          const key = 'smartlead_round_robin';
-          let state = await AssignmentState.findOne({ key });
-          if (!state) {
-            state = await AssignmentState.create({ key, lastIndex: -1 });
-          }
-
-          const nextIndex = (state.lastIndex + 1) % orderedOwners.length;
-          ownerForNewContact = orderedOwners[nextIndex];
-
-          state.lastIndex = nextIndex;
-          await state.save();
-
-          console.log(`🎯 Round robin Smartlead → owner: ${ownerForNewContact.email} (index: ${nextIndex})`);
-        }
-      }
-    }
+    const ownerForNewContact = await resolveOwnerForSource('smartlead_outbound', defaultOwner);
 
     contact = new Contact({
       name,

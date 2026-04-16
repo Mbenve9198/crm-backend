@@ -465,6 +465,10 @@ app.use('/api/agent', agentRoutes);
 import agentTaskRoutes from './routes/agentTaskRoutes.js';
 app.use('/api/agent', agentTaskRoutes);
 
+// Routes per impostazioni admin
+import adminSettingsRoutes from './routes/adminSettingsRoutes.js';
+app.use('/api/admin/settings', adminSettingsRoutes);
+
 
 // Agent Task System: Task Processor + Task Generator (sostituisce vecchi setInterval)
 import { startTaskProcessor, startTaskGenerator } from './services/taskProcessorService.js';
