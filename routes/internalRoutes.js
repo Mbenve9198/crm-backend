@@ -460,12 +460,18 @@ router.post('/contacts/upsert', async (req, res) => {
       return res.status(400).json({ error: 'email e name sono obbligatori' });
     }
 
-    // Trova il default owner (marco@midachat.com)
+    // Trova il default owner
     const User = (await import('../models/userModel.js')).default;
-    const defaultOwnerEmail = process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL || 'marco@midachat.com';
-    const owner = await User.findOne({ email: defaultOwnerEmail }).lean();
+    let owner = null;
+    if (process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL) {
+      owner = await User.findOne({ email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL.toLowerCase() }).lean();
+    }
     if (!owner) {
-      return res.status(500).json({ error: `Owner di default non trovato: ${defaultOwnerEmail}` });
+      owner = await User.findOne({ role: { $in: ['admin', 'manager'] }, isActive: true })
+        .sort({ createdAt: 1 }).lean();
+    }
+    if (!owner) {
+      return res.status(500).json({ error: 'Nessun owner disponibile nel CRM' });
     }
 
     // Upsert contatto per email
