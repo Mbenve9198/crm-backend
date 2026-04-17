@@ -5,7 +5,7 @@ import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
 import { classifyReply } from '../services/replyClassifierService.js';
-import { updateLeadCategory, resumeLead, fetchLeadByEmail, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
+import { updateLeadCategory, resumeLead, fetchLeadByEmail, fetchMessageHistory, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
 import { handleAgentConversation, routeLeadReply } from '../services/salesAgentService.js';
 import redisManager from '../config/redis.js';
@@ -368,6 +368,20 @@ export const handleSmartleadWebhook = async (req, res) => {
 // EMAIL_REPLY: AI classifica → Smartlead API → CRM → notifica
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/**
+ * Campagne gestite dal nuovo outbound-intelligence agent (webhook_server.py).
+ * Per queste campagne, questo handler delega al nuovo sistema e torna subito.
+ * Cambia ENABLE_OUTBOUND_AGENT_CAMPAIGNS=false per ripristinare il vecchio handler.
+ */
+const OUTBOUND_AGENT_CAMPAIGN_IDS = new Set([
+  2664620, 2681317, 2690771, 2690661, 2698765,
+  2728184, 2806537, 2837967, 2994719, 3103098,
+]);
+
+const isOutboundAgentCampaign = (campaignId) =>
+  process.env.ENABLE_OUTBOUND_AGENT_CAMPAIGNS !== 'false'
+  && OUTBOUND_AGENT_CAMPAIGN_IDS.has(Number(campaignId));
+
 const handleEmailReply = async (webhookData) => {
   const webhookBasic = extractWebhookBasicData(webhookData);
   const replyMessage = webhookData.reply_message || {};
@@ -376,6 +390,12 @@ const handleEmailReply = async (webhookData) => {
   const subject = webhookData.subject;
   const fromEmail = webhookData.from_email || webhookData.from || '';
 
+  // ── Guard: campagne outbound gestite dal nuovo agent ──────────
+  if (isOutboundAgentCampaign(webhookBasic.campaignId)) {
+    console.log(`⏩ EMAIL_REPLY campagna outbound (${webhookBasic.campaignId}) → gestita dal nuovo outbound agent, skip`);
+    return;
+  }
+
   console.log(`💬 EMAIL_REPLY da: ${webhookBasic.email}`);
   console.log(`   Nome (webhook): ${webhookBasic.toName}`);
   console.log(`   Campagna: ${webhookBasic.campaignName} (ID: ${webhookBasic.campaignId})`);
@@ -383,11 +403,28 @@ const handleEmailReply = async (webhookData) => {
   console.log(`   From (sender): ${fromEmail}`);
   console.log(`   Preview: ${replyText.substring(0, 150)}...`);
 
-  // 1. Classifica con AI + estrai entità
+  // 1. Recupera email originale inviata per dare contesto all'AI
+  let originalEmailText = null;
+  if (webhookBasic.campaignId && webhookBasic.leadId) {
+    try {
+      const history = await fetchMessageHistory(webhookBasic.campaignId, webhookBasic.leadId);
+      const sentMessages = history.filter(m => m.type === 'SENT');
+      const lastSent = sentMessages[sentMessages.length - 1];
+      if (lastSent?.email_body) {
+        originalEmailText = stripHtml(lastSent.email_body).substring(0, 800);
+        console.log(`📩 Email originale recuperata (${originalEmailText.length} char): ${originalEmailText.substring(0, 80)}...`);
+      }
+    } catch (e) {
+      console.warn('⚠️ Impossibile recuperare history per contesto AI:', e.message);
+    }
+  }
+
+  // 2. Classifica con AI + estrai entità
   const aiResult = await classifyReply(replyText, {
     restaurantName: webhookBasic.toName,
     campaignName: webhookBasic.campaignName,
-    subject
+    subject,
+    originalEmail: originalEmailText
   });
 
   const { category, confidence, reason, shouldStopSequence, extracted } = aiResult;
@@ -398,7 +435,7 @@ const handleEmailReply = async (webhookData) => {
   if (extracted?.phone) console.log(`   📱 Telefono estratto dalla risposta: ${extracted.phone}`);
   if (extracted?.contactName) console.log(`   👤 Contatto estratto: ${extracted.contactName}`);
 
-  // 2. Aggiorna categoria su Smartlead via API
+  // 3. Aggiorna categoria su Smartlead via API
   const { smartleadCategory, shouldPause } = mapAiCategoryToSmartlead(category);
   if (smartleadCategory && webhookBasic.campaignId && webhookBasic.leadId) {
     const slResult = await updateLeadCategory(webhookBasic.campaignId, webhookBasic.leadId, smartleadCategory, shouldPause);
@@ -420,7 +457,7 @@ const handleEmailReply = async (webhookData) => {
     fromEmail
   };
 
-  // 3. Azioni in base alla categoria
+  // 4. Azioni in base alla categoria
   if (category === 'INTERESTED') {
     console.log(`🔍 Recupero dati completi del lead da Smartlead...`);
     const smartleadLead = await fetchLeadByEmail(webhookBasic.email);

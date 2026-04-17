@@ -435,4 +435,92 @@ router.get('/sm/lead-timeline/:email', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/internal/contacts/upsert
+ * Crea o aggiorna un contatto da sorgente esterna (es. outbound intelligence agent).
+ * No auth richiesta — endpoint interno, non esposto pubblicamente.
+ *
+ * Body: { email, name, phone?, city?, status?, source?, properties? }
+ * Response: { success, contact_id, is_new }
+ */
+router.post('/contacts/upsert', async (req, res) => {
+  // Verifica shared secret
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret) {
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== secret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { email, name, phone, city, status, source, properties } = req.body;
+
+    if (!email || !name) {
+      return res.status(400).json({ error: 'email e name sono obbligatori' });
+    }
+
+    // Trova il default owner (marco@midachat.com)
+    const User = (await import('../models/userModel.js')).default;
+    const defaultOwnerEmail = process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL || 'marco@midachat.com';
+    const owner = await User.findOne({ email: defaultOwnerEmail }).lean();
+    if (!owner) {
+      return res.status(500).json({ error: `Owner di default non trovato: ${defaultOwnerEmail}` });
+    }
+
+    // Upsert contatto per email
+    const existingContact = await Contact.findOne({ email: email.toLowerCase().trim() });
+
+    if (existingContact) {
+      // Aggiorna campi se forniti
+      if (phone && !existingContact.phone) existingContact.phone = phone;
+      if (city) existingContact.setProperty('city', city);
+      if (status && ['interessato', 'contattato', 'da richiamare'].includes(status)) {
+        existingContact.status = status;
+      }
+      if (properties && typeof properties === 'object') {
+        for (const [k, v] of Object.entries(properties)) {
+          existingContact.setProperty(k, v);
+        }
+      }
+      existingContact.lastModifiedBy = owner._id;
+      await existingContact.save();
+
+      return res.json({
+        success: true,
+        contact_id: existingContact._id,
+        is_new: false,
+      });
+    }
+
+    // Crea nuovo contatto
+    const contactData = {
+      email: email.toLowerCase().trim(),
+      name: name.trim(),
+      owner: owner._id,
+      createdBy: owner._id,
+      source: source || 'smartlead_outbound',
+      status: status || 'interessato',
+      properties: {},
+    };
+    if (phone) contactData.phone = phone;
+    if (city) contactData.properties.city = city;
+    if (properties && typeof properties === 'object') {
+      Object.assign(contactData.properties, properties);
+    }
+
+    const newContact = await Contact.create(contactData);
+
+    return res.status(201).json({
+      success: true,
+      contact_id: newContact._id,
+      is_new: true,
+    });
+
+  } catch (error) {
+    console.error('❌ POST /api/internal/contacts/upsert:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
