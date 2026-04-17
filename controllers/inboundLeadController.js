@@ -29,6 +29,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       reportLinks, // Legacy: supporto vecchio formato
       // 🆕 Dati qualificazione diretti
       hasDigitalMenu,
+      willingToAdoptMenu,
       dailyCovers,
       estimatedMonthlyReviews,
       // 🆕 Metadata
@@ -77,7 +78,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       hasDigitalMenu: hasDigitalMenu ?? qualificationData?.hasDigitalMenu ?? null,
       dailyCovers: dailyCovers ?? qualificationData?.dailyCovers ?? null,
       estimatedMonthlyReviews: estimatedMonthlyReviews ?? qualificationData?.estimatedMonthlyReviews ?? null,
-      willingToAdoptMenu: qualificationData?.willingToAdoptMenu ?? null,
+      willingToAdoptMenu: willingToAdoptMenu ?? qualificationData?.willingToAdoptMenu ?? null,
       qualifiedAt: qualificationData?.qualifiedAt || (hasDigitalMenu !== undefined ? new Date() : null)
     };
     
