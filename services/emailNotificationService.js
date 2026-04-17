@@ -5,11 +5,6 @@ import { Resend } from 'resend';
  * Usato per notificare quando un lead Smartlead risponde positivamente
  */
 
-// ══════════════════════════════════════════════════════════════════════
-// DISABILITATO: Tutte le email di notifica sono spente.
-// Per riattivare, rimuovere EMAIL_DISABLED e decommentare resend/fromEmail.
-// ══════════════════════════════════════════════════════════════════════
-const EMAIL_DISABLED = true;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 const fromEmail = process.env.RESEND_FROM_EMAIL || process.env.FROM_EMAIL || 'noreply@menuchat.com';
 
@@ -18,10 +13,6 @@ const fromEmail = process.env.RESEND_FROM_EMAIL || process.env.FROM_EMAIL || 'no
  */
 export const sendSmartleadInterestedNotification = async (data) => {
   try {
-    if (EMAIL_DISABLED) {
-      console.log('ℹ️  Email DISABILITATA: skip sendSmartleadInterestedNotification');
-      return { success: false, error: 'Email disabilitata' };
-    }
     if (!resend) {
       console.warn('⚠️ Resend non configurato, skip notifica');
       return { success: false, error: 'Resend non configurato' };
@@ -114,10 +105,6 @@ export const sendSmartleadInterestedNotification = async (data) => {
  */
 export const sendAgentHumanReviewEmail = async (data) => {
   try {
-    if (EMAIL_DISABLED) {
-      console.log('ℹ️  Email DISABILITATA: skip sendAgentHumanReviewEmail');
-      return { success: false, error: 'Email disabilitata' };
-    }
     if (!resend) {
       console.warn('⚠️ Resend non configurato, skip email review');
       return { success: false, error: 'Resend non configurato' };
@@ -196,7 +183,6 @@ export const sendAgentHumanReviewEmail = async (data) => {
  */
 export const sendAgentActivityReport = async ({ action, contactName, contactEmail, contactPhone, agentName, leadMessage, agentReply, toolsUsed, category, confidence, conversationId, source }) => {
   try {
-    if (EMAIL_DISABLED) return;
     if (!resend) return;
 
     const actionLabels = {
@@ -272,7 +258,6 @@ export const sendAgentActivityReport = async ({ action, contactName, contactEmai
  */
 export const sendSalesManagerBriefing = async (briefing, performance = {}) => {
   try {
-    if (EMAIL_DISABLED) return;
     if (!resend) return;
 
     const highlights = (briefing.highlights || []).map(h => `<li style="color:#16a34a">${h}</li>`).join('');
