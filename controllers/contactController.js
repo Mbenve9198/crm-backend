@@ -2109,7 +2109,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     );
 
     // 4) Eventi di ingresso stati per la coorte entro outcome window (60 giorni dalla coorte)
-    const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won'];
+    const stageStatuses = ['qr code inviato', 'free trial iniziato', 'won', 'bad_data', 'non_qualificato'];
     const maxOutcomeTo = new Date(dateTo.getTime() + outcomeWindowMs);
     const statusEvents = await Activity.find({
       contact: { $in: cohortIds },
@@ -2133,7 +2133,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       if (!st) continue;
       const m = stageTimesByContact.get(id) || {};
       const key =
-        st === 'qr code inviato' ? 'qr' : st === 'free trial iniziato' ? 'ft' : st === 'won' ? 'won' : null;
+        st === 'qr code inviato' ? 'qr' : st === 'free trial iniziato' ? 'ft' : st === 'won' ? 'won' : (st === 'bad_data' || st === 'non_qualificato') ? 'bd' : null;
       if (!key) continue;
       const t = ev.createdAt;
       // Considera solo eventi dopo l'inizio coorte e entro la finestra di outcome
@@ -2153,7 +2153,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         notTouched: { count: 0, contacts: [] },
         qrCodeSent: { count: 0, contacts: [] },
         freeTrialStarted: { count: 0, contacts: [] },
-        won: { count: 0, contacts: [] }
+        won: { count: 0, contacts: [] },
+        badData: { count: 0, contacts: [] }
       }
     });
 
@@ -2201,6 +2202,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       const hasWon = !!times.won;
       const hasFt = !!times.ft || hasWon;
       const hasQr = !!times.qr || hasFt;
+      const hasBd = !!times.bd;
 
       const base = {
         id: String(c._id),
@@ -2241,6 +2243,12 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
           enteredAt: times.won
         });
       }
+      if (hasBd) {
+        resultBySource[src].steps.badData.contacts.push({
+          ...base,
+          enteredAt: times.bd
+        });
+      }
     }
 
     // Sorting (più recenti prima)
@@ -2261,11 +2269,13 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       obj.steps.qrCodeSent.contacts.sort(sortByEnteredDesc);
       obj.steps.freeTrialStarted.contacts.sort(sortByEnteredDesc);
       obj.steps.won.contacts.sort(sortByEnteredDesc);
+      obj.steps.badData.contacts.sort(sortByEnteredDesc);
 
       obj.steps.notTouched.count = obj.steps.notTouched.contacts.length;
       obj.steps.qrCodeSent.count = obj.steps.qrCodeSent.contacts.length;
       obj.steps.freeTrialStarted.count = obj.steps.freeTrialStarted.contacts.length;
       obj.steps.won.count = obj.steps.won.contacts.length;
+      obj.steps.badData.count = obj.steps.badData.contacts.length;
     });
 
     res.json({
