@@ -76,9 +76,15 @@ export function addOperationalFlagsPipeline() {
         isActiveStatus: { $in: ['$status', DASHBOARD_DEFAULTS.activeStatuses] },
         isNotTouched: {
           $cond: [
-            { $eq: ['$source', 'smartlead_outbound'] },
-            { $lte: ['$activitiesCount', 1] },
-            { $eq: ['$activitiesCount', 0] }
+            { $in: ['$source', ['smartlead_outbound', 'inbound_rank_checker', 'inbound_menu_landing']] },
+            {
+              $cond: [
+                { $eq: ['$source', 'smartlead_outbound'] },
+                { $lte: ['$activitiesCount', 1] },
+                { $eq: ['$activitiesCount', 0] }
+              ]
+            },
+            false
           ]
         }
       }
