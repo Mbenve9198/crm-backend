@@ -69,6 +69,9 @@ export function buildContactsWithActivityStatsPipeline({ ownerObjectId } = {}) {
   ];
 }
 
+const STALLED_SOURCES = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_menu_landing'];
+const STALLED_STATUSES = ['da contattare', 'interessato'];
+
 export function addOperationalFlagsPipeline() {
   return [
     {
@@ -76,12 +79,32 @@ export function addOperationalFlagsPipeline() {
         isActiveStatus: { $in: ['$status', DASHBOARD_DEFAULTS.activeStatuses] },
         isNotTouched: {
           $cond: [
-            { $in: ['$source', ['smartlead_outbound', 'inbound_rank_checker', 'inbound_menu_landing']] },
+            { $in: ['$source', STALLED_SOURCES] },
             {
               $cond: [
                 { $eq: ['$source', 'smartlead_outbound'] },
                 { $lte: ['$activitiesCount', 1] },
                 { $eq: ['$activitiesCount', 0] }
+              ]
+            },
+            false
+          ]
+        },
+        // "In stallo": stessa sorgente di untouched, status non esitato,
+        // ma già toccato (smartlead >= 2 activity, altri >= 1)
+        isStalled: {
+          $cond: [
+            {
+              $and: [
+                { $in: ['$status', STALLED_STATUSES] },
+                { $in: ['$source', STALLED_SOURCES] }
+              ]
+            },
+            {
+              $cond: [
+                { $eq: ['$source', 'smartlead_outbound'] },
+                { $gte: ['$activitiesCount', 2] },
+                { $gte: ['$activitiesCount', 1] }
               ]
             },
             false

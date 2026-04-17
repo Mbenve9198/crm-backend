@@ -88,10 +88,11 @@ export const getDashboard = async (req, res) => {
       {
         $group: {
           _id: null,
-          notTouched: { $sum: { $cond: [{ $and: ['$isNotTouched', '$isActiveStatus'] }, 1, 0] } }
+          notTouched: { $sum: { $cond: [{ $and: ['$isNotTouched', '$isActiveStatus'] }, 1, 0] } },
+          stalled: { $sum: { $cond: ['$isStalled', 1, 0] } }
         }
       },
-      { $project: { _id: 0, notTouched: 1 } }
+      { $project: { _id: 0, notTouched: 1, stalled: 1 } }
     ]);
 
     // Callback KPIs
@@ -204,6 +205,12 @@ export const getDashboard = async (req, res) => {
             { $sort: { updatedAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
+          ],
+          stalled: [
+            { $match: { isStalled: true } },
+            { $sort: { lastActivityAt: 1, createdAt: 1 } },
+            { $limit: parsedLimit },
+            { $project: projectListFields }
           ]
         }
       }
@@ -219,14 +226,15 @@ export const getDashboard = async (req, res) => {
       lost: 0,
       pipelinePotentialEur: 0
     };
-    const operational = opKpiRes?.[0] || { notTouched: 0 };
+    const operational = opKpiRes?.[0] || { notTouched: 0, stalled: 0 };
     const cbKpis = cbKpiRes?.[0] || { callbackOverdue: 0, callbackToday: 0, callbackNext7Days: 0, callbackNoDate: 0 };
     const lists = listsRes?.[0] || {
       notTouched: [],
       callback: [],
       freeTrial: [],
       qrFollowUp: [],
-      won: []
+      won: [],
+      stalled: []
     };
 
     return res.json({
@@ -236,6 +244,7 @@ export const getDashboard = async (req, res) => {
         kpis: {
           ...kpis,
           notTouched: operational.notTouched,
+          stalled: operational.stalled,
           ...cbKpis
         },
         lists
