@@ -208,7 +208,7 @@ export const getDashboard = async (req, res) => {
           ],
           stalled: [
             { $match: { isStalled: true } },
-            { $sort: { lastActivityAt: 1, createdAt: 1 } },
+            { $sort: { lastActivityAt: -1, createdAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
           ]
