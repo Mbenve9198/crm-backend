@@ -78,9 +78,7 @@ export function addOperationalFlagsPipeline() {
           $cond: [
             { $eq: ['$source', 'smartlead_outbound'] },
             { $lte: ['$activitiesCount', 1] },
-            {
-              $cond: [{ $eq: ['$source', 'inbound_rank_checker'] }, { $eq: ['$activitiesCount', 0] }, false]
-            }
+            { $eq: ['$activitiesCount', 0] }
           ]
         }
       }
