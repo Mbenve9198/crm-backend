@@ -507,6 +507,7 @@ router.post('/contacts/upsert', async (req, res) => {
       createdBy: owner._id,
       source: source || 'smartlead_outbound',
       status: status || 'interessato',
+      mrr: 0,
       properties: {},
     };
     if (phone) contactData.phone = phone;
