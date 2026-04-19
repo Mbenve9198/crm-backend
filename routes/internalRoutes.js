@@ -11,6 +11,7 @@ import AgentTask from '../models/agentTaskModel.js';
 import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
+import { sendOutboundReplyNotification, sendOutboundAgentReplyNotification } from '../services/emailNotificationService.js';
 
 const router = express.Router();
 
@@ -581,6 +582,34 @@ router.post('/contacts/:contactId/activity', async (req, res) => {
     console.error('❌ POST /api/internal/contacts/:id/activity:', error.message);
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * POST /api/internal/notify/outbound-reply
+ * Notifica interna: reply outbound ricevuta. Auth: X-Internal-Secret.
+ * Body: { leadEmail, replyBody, intent, score, interactionId }
+ */
+router.post('/notify/outbound-reply', async (req, res) => {
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret && req.headers['x-internal-secret'] !== secret) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const result = await sendOutboundReplyNotification(req.body);
+  res.json(result);
+});
+
+/**
+ * POST /api/internal/notify/outbound-agent-replied
+ * Notifica interna: agente ha risposto a un lead. Auth: X-Internal-Secret.
+ * Body: { leadEmail, agentReply, intent, interactionId }
+ */
+router.post('/notify/outbound-agent-replied', async (req, res) => {
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret && req.headers['x-internal-secret'] !== secret) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const result = await sendOutboundAgentReplyNotification(req.body);
+  res.json(result);
 });
 
 export default router;

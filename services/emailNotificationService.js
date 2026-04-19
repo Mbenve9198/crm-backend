@@ -293,4 +293,94 @@ export const sendSalesManagerBriefing = async (briefing, performance = {}) => {
   }
 };
 
-export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail, sendAgentActivityReport, sendSalesManagerBriefing };
+/**
+ * Notifica interna: arrivata reply da un lead della campagna outbound.
+ */
+export const sendOutboundReplyNotification = async ({ leadEmail, replyBody, intent, score, interactionId }) => {
+  try {
+    if (!resend) return { success: false, error: 'Resend non configurato' };
+
+    const intentEmoji = {
+      INTERESTED_WITH_PHONE: '🟢', INTERESTED_NO_PHONE: '🟡',
+      INFO_REQUEST: '🔵', OBJECTION_SOFT: '🟠',
+      OBJECTION_FIRM: '🔴', NOT_INTERESTED: '🔴',
+      UNSUBSCRIBE: '⛔', OOO: '⏸️',
+    }[intent] || '⚪';
+
+    const intentColors = {
+      INTERESTED_WITH_PHONE: '#10b981', INTERESTED_NO_PHONE: '#f59e0b',
+      INFO_REQUEST: '#3b82f6', OBJECTION_SOFT: '#f97316',
+      OBJECTION_FIRM: '#ef4444', NOT_INTERESTED: '#ef4444',
+    };
+    const color = intentColors[intent] || '#6b7280';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.5;color:#333;margin:0;padding:0;background:#f4f4f4">
+<div style="max-width:600px;margin:15px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+<div style="background:${color};color:white;padding:15px 20px">
+  <h2 style="margin:0;font-size:17px">${intentEmoji} Nuova reply outbound</h2>
+  <p style="margin:4px 0 0;font-size:13px;opacity:0.9">${leadEmail}</p>
+</div>
+<div style="padding:15px 20px;font-size:13px">
+  <table style="width:100%;border-collapse:collapse;margin-bottom:12px">
+    <tr><td style="padding:3px 8px 3px 0;color:#6b7280;width:80px">Da</td><td><strong>${leadEmail}</strong></td></tr>
+    <tr><td style="padding:3px 8px 3px 0;color:#6b7280">Intent</td><td><strong>${intent}</strong> — score ${score}/10</td></tr>
+  </table>
+  <div style="padding:12px;background:#f3f4f6;border-left:3px solid ${color};border-radius:4px">
+    <div style="font-size:11px;color:#6b7280;margin-bottom:6px">Testo reply</div>
+    <div style="white-space:pre-wrap">${(replyBody || '').substring(0, 2000).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+  </div>
+  <div style="margin-top:10px;font-size:10px;color:#9ca3af;text-align:right">${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })} · ${interactionId}</div>
+</div></div></body></html>`;
+
+    const result = await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      bcc: ['federico@midachat.com'],
+      subject: `${intentEmoji} Reply da ${leadEmail} — ${intent} (${score}/10)`,
+      html,
+    });
+    return { success: true, resendId: result.data?.id };
+  } catch (error) {
+    console.error('❌ sendOutboundReplyNotification:', error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Notifica interna: l'agente outbound ha inviato una risposta.
+ */
+export const sendOutboundAgentReplyNotification = async ({ leadEmail, agentReply, intent, interactionId }) => {
+  try {
+    if (!resend) return { success: false, error: 'Resend non configurato' };
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;line-height:1.5;color:#333;margin:0;padding:0;background:#f4f4f4">
+<div style="max-width:600px;margin:15px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1)">
+<div style="background:linear-gradient(135deg,#7c3aed,#6d28d9);color:white;padding:15px 20px">
+  <h2 style="margin:0;font-size:17px">🤖 Agente ha risposto</h2>
+  <p style="margin:4px 0 0;font-size:13px;opacity:0.9">${leadEmail} · ${intent}</p>
+</div>
+<div style="padding:15px 20px;font-size:13px">
+  <div style="border-left:4px solid #7c3aed;padding:12px 16px;background:#f9f7ff;border-radius:0 6px 6px 0">
+    <div style="font-size:11px;color:#7c3aed;margin-bottom:6px;font-weight:bold">Risposta inviata</div>
+    <div style="white-space:pre-wrap">${(agentReply || '').substring(0, 2000).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+  </div>
+  <div style="margin-top:10px;font-size:10px;color:#9ca3af;text-align:right">${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })} · ${interactionId}</div>
+</div></div></body></html>`;
+
+    const result = await resend.emails.send({
+      from: fromEmail,
+      to: ['marco@midachat.com'],
+      bcc: ['federico@midachat.com'],
+      subject: `🤖 Agente ha risposto a ${leadEmail}`,
+      html,
+    });
+    return { success: true, resendId: result.data?.id };
+  } catch (error) {
+    console.error('❌ sendOutboundAgentReplyNotification:', error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+export default { sendSmartleadInterestedNotification, sendAgentHumanReviewEmail, sendAgentActivityReport, sendSalesManagerBriefing, sendOutboundReplyNotification, sendOutboundAgentReplyNotification };
