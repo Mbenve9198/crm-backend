@@ -10,6 +10,7 @@ import AgentFeedback from '../models/agentFeedbackModel.js';
 import AgentTask from '../models/agentTaskModel.js';
 import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import Call from '../models/callModel.js';
+import Activity from '../models/activityModel.js';
 
 const router = express.Router();
 
@@ -481,7 +482,7 @@ router.post('/contacts/upsert', async (req, res) => {
       // Aggiorna campi se forniti
       if (phone && !existingContact.phone) existingContact.phone = phone;
       if (city) existingContact.setProperty('city', city);
-      if (status && ['interessato', 'contattato', 'da richiamare'].includes(status)) {
+      if (status) {
         existingContact.status = status;
       }
       if (properties && typeof properties === 'object') {
@@ -526,6 +527,58 @@ router.post('/contacts/upsert', async (req, res) => {
 
   } catch (error) {
     console.error('❌ POST /api/internal/contacts/upsert:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /api/internal/contacts/:contactId/activity
+ * Aggiunge un'activity alla timeline di un contatto (es. da outbound agent).
+ * Auth: X-Internal-Secret
+ *
+ * Body: { type, title, description, data? }
+ * type: 'ai_agent' | 'email' | 'note' | ecc.
+ */
+router.post('/contacts/:contactId/activity', async (req, res) => {
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret) {
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== secret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { contactId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(contactId)) {
+      return res.status(400).json({ error: 'Invalid contactId' });
+    }
+
+    const contact = await Contact.findById(contactId).lean();
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    const User = (await import('../models/userModel.js')).default;
+    let systemUser = await User.findOne({ email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL?.toLowerCase() }).lean();
+    if (!systemUser) {
+      systemUser = await User.findOne({ role: { $in: ['admin', 'manager'] }, isActive: true }).sort({ createdAt: 1 }).lean();
+    }
+
+    const { type = 'ai_agent', title, description, data } = req.body;
+
+    const activity = await Activity.create({
+      contact: contactId,
+      type,
+      title: title || `Agente AI — ${type}`,
+      description,
+      data,
+      createdBy: systemUser?._id,
+      status: 'completed',
+      priority: 'medium',
+    });
+
+    return res.status(201).json({ success: true, activity_id: activity._id });
+  } catch (error) {
+    console.error('❌ POST /api/internal/contacts/:id/activity:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
