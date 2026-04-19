@@ -39,6 +39,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       callRequested,
       callPreference,
       callRequestedAt,
+      callNote,
       // Dati menu landing (arrivano dal secondo sync dopo creazione menu)
       menuPreviewUrl,
       menuId,
@@ -201,7 +202,8 @@ export const receiveRankCheckerLead = async (req, res) => {
         ...(callRequested && {
           callRequested: true,
           callPreference: callPreference || null,
-          callRequestedAt: callRequestedAt || new Date().toISOString()
+          callRequestedAt: callRequestedAt || new Date().toISOString(),
+          callNote: callNote || null
         }),
         // 🆕 Link singolo al report (accesso rapido dal CRM)
         rankCheckerReport: finalReportLink,
