@@ -234,15 +234,17 @@ export const receiveRankCheckerLead = async (req, res) => {
       
       // Aggiorna sempre i dati rank checker (più recenti)
       contact.rankCheckerData = leadData.rankCheckerData;
-      
+      contact.markModified('rankCheckerData');
+
       // Merge properties
       contact.properties = {
         ...contact.properties,
         ...leadData.properties
       };
-      
+      contact.markModified('properties');
+
       contact.lastModifiedBy = defaultOwner._id;
-      
+
       await contact.save();
       
       console.log(`✅ Contatto aggiornato: ${contact.name} (${contact.email})`);
