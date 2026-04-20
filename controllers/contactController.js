@@ -1394,7 +1394,7 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       dateTo = new Date();
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'manual', 'csv_import', 'referral'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'manual', 'csv_import', 'referral'];
     const pipeline = [
       {
         $match: {
@@ -1601,7 +1601,7 @@ export const getFunnelStatusEvents = async (req, res) => {
       resultBySource[src].uniqueLeadsByStatus[status] = row.contacts.length;
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'manual', 'csv_import', 'referral'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'manual', 'csv_import', 'referral'];
     sourcesOfInterest.forEach((src) => {
       if (!resultBySource[src]) {
         resultBySource[src] = {
@@ -1904,7 +1904,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       ownerId = new mongoose.Types.ObjectId(owner);
     }
 
-    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'manual', 'csv_import', 'referral'];
+    const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'manual', 'csv_import', 'referral'];
     const SILENCE_DAYS = 40;
     const silenceMs = SILENCE_DAYS * 24 * 60 * 60 * 1000;
     const OUTCOME_WINDOW_DAYS = 60;
@@ -2335,7 +2335,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       if (!isNaN(p.getTime())) { p.setHours(23, 59, 59, 999); closeDateToD = p; }
     }
 
-    const allSources = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'manual', 'csv_import', 'referral'];
+    const allSources = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'manual', 'csv_import', 'referral'];
     const sourcesOfInterest = source && source !== 'all'
       ? source.split(',').filter(s => allSources.includes(s))
       : allSources;
