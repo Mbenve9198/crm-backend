@@ -1,19 +1,21 @@
 import mongoose from 'mongoose';
 
+const SOURCE_ENUM = [
+  'inbound_rank_checker',
+  'inbound_acquisition',
+  'inbound_prova_gratuita',
+  'inbound_menu_landing',
+  'inbound_social_proof',
+  'inbound_qr_recensioni',
+  'smartlead_outbound',
+  'referral',
+];
+
 const sourceRuleSchema = new mongoose.Schema({
-  source: {
+  sources: [{
     type: String,
-    required: true,
-    enum: [
-      'inbound_rank_checker',
-      'inbound_acquisition',
-      'inbound_prova_gratuita',
-      'inbound_form',
-      'inbound_api',
-      'smartlead_outbound',
-      'referral',
-    ],
-  },
+    enum: SOURCE_ENUM,
+  }],
   strategy: {
     type: String,
     required: true,

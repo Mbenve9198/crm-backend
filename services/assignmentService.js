@@ -53,8 +53,10 @@ export const resolveOwnerForSource = async (source, defaultOwner) => {
       return await runRoundRobin([], 'smartlead_round_robin') || defaultOwner;
     }
 
-    // Check for a source-specific rule
-    const rule = config.sourceRules?.find(r => r.source === source);
+    // Check for a source-specific rule (supports both new `sources` array and legacy `source` string)
+    const rule = config.sourceRules?.find(r =>
+      (Array.isArray(r.sources) ? r.sources.includes(source) : r.source === source)
+    );
 
     if (rule) {
       if (rule.strategy === 'specific' && rule.userId) {
@@ -66,7 +68,8 @@ export const resolveOwnerForSource = async (source, defaultOwner) => {
       }
 
       if (rule.strategy === 'round_robin' && rule.userIds?.length > 0) {
-        const stateKey = `source_rr_${source}`;
+        const ruleSources = Array.isArray(rule.sources) ? [...rule.sources].sort().join('+') : source;
+        const stateKey = `source_rr_${ruleSources}`;
         const user = await runRoundRobin(rule.userIds, stateKey);
         if (user) {
           console.log(`🎯 Assignment [${source}] round-robin → ${user.email}`);
