@@ -533,6 +533,84 @@ router.post('/contacts/upsert', async (req, res) => {
 });
 
 /**
+ * GET /api/internal/contacts/:contactId/activities
+ * Lista le activity di un contatto (read-only, per diagnostica agente).
+ * Auth: X-Internal-Secret
+ */
+router.get('/contacts/:contactId/activities', async (req, res) => {
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret) {
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== secret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const { contactId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(contactId)) {
+      return res.status(400).json({ error: 'Invalid contactId' });
+    }
+    const activities = await Activity.find({ contact: contactId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    return res.json({
+      success: true,
+      count: activities.length,
+      activities: activities.map(a => ({
+        _id: a._id,
+        type: a.type,
+        title: a.title,
+        description: a.description,
+        data: a.data,
+        status: a.status,
+        createdAt: a.createdAt,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/internal/contacts/by-email/:email
+ * Lookup contatto per email (read-only, per diagnostica agente).
+ * Auth: X-Internal-Secret
+ */
+router.get('/contacts/by-email/:email', async (req, res) => {
+  const secret = process.env.OUTBOUND_AGENT_SECRET;
+  if (secret) {
+    const provided = req.headers['x-internal-secret'];
+    if (provided !== secret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
+
+  try {
+    const email = decodeURIComponent(req.params.email).toLowerCase().trim();
+    const contact = await Contact.findOne({ email }).lean();
+    if (!contact) return res.status(404).json({ found: false });
+    return res.json({
+      success: true,
+      found: true,
+      contact: {
+        _id: contact._id,
+        email: contact.email,
+        name: contact.name,
+        phone: contact.phone,
+        status: contact.status,
+        source: contact.source,
+        createdAt: contact.createdAt,
+        properties: contact.properties,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/internal/contacts/:contactId/activity
  * Aggiunge un'activity alla timeline di un contatto (es. da outbound agent).
  * Auth: X-Internal-Secret
