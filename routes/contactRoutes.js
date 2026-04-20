@@ -26,7 +26,8 @@ import {
   updateContactStatus,
   updateContactCallback,
   bulkChangeOwner,
-  generateCallScript
+  generateCallScript,
+  getCallbacksDue
 } from '../controllers/contactController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -142,6 +143,7 @@ router.put('/:id/status', restrictTo('agent', 'manager', 'admin'), updateContact
 
 // Aggiorna dati callback/richiamo (prima di /:id per evitare conflitti)
 router.put('/:id/callback', restrictTo('agent', 'manager', 'admin'), updateContactCallback);
+router.get('/callbacks/due', getCallbacksDue);
 
 // 📞 Genera script di chiamata personalizzato con AI (prima di /:id per evitare conflitti)
 router.get('/:id/call-script', restrictTo('agent', 'manager', 'admin'), generateCallScript);

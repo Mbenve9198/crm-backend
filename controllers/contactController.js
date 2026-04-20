@@ -3412,3 +3412,28 @@ export const generateCallScript = async (req, res) => {
     });
   }
 }; 
+export const getCallbacksDue = async (req, res) => {
+  try {
+    const now = new Date();
+    const in15 = new Date(now.getTime() + 15 * 60 * 1000);
+    const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const contacts = await Contact.find({
+      owner: req.user._id,
+      status: 'da richiamare',
+      'properties.callbackAt': {
+        $gte: oneDayAgo.toISOString(),
+        $lte: in15.toISOString(),
+      },
+    })
+      .select('_id name phone properties.callbackAt properties.callbackNote')
+      .sort({ 'properties.callbackAt': 1 })
+      .limit(20)
+      .lean();
+
+    res.json({ success: true, data: contacts });
+  } catch (err) {
+    console.error('❌ getCallbacksDue:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
