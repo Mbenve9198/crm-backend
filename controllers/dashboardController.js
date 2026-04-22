@@ -97,7 +97,7 @@ export const getDashboard = async (req, res) => {
 
     // Callback KPIs
     const callbackKpiAgg = Contact.aggregate([
-      { $match: { ...baseMatch, status: 'da richiamare' } },
+      { $match: { ...baseMatch, 'properties.callbackAt': { $exists: true, $ne: null } } },
       {
         $addFields: {
           _cbAt: '$properties.callbackAt'
@@ -178,7 +178,7 @@ export const getDashboard = async (req, res) => {
             { $project: projectListFields }
           ],
           callback: [
-            { $match: { status: 'da richiamare' } },
+            { $match: { 'properties.callbackAt': { $exists: true, $ne: null } } },
             {
               $addFields: {
                 _sortableCbAt: {

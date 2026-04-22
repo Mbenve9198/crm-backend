@@ -43,9 +43,25 @@ export function buildContactsWithActivityStatsPipeline({ ownerObjectId } = {}) {
     {
       $lookup: {
         from: 'activities',
-        let: { contactId: '$_id' },
+        let: { contactId: '$_id', reactivatedAt: '$reactivatedAt' },
         pipeline: [
-          { $match: { $expr: { $eq: ['$contact', '$$contactId'] }, 'data.kind': { $ne: 'reactivation' } } },
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ['$contact', '$$contactId'] },
+                  { $ne: ['$data.kind', 'reactivation'] },
+                  // Se reactivatedAt è impostato, conta solo le activity successive
+                  {
+                    $or: [
+                      { $eq: ['$$reactivatedAt', null] },
+                      { $gte: ['$createdAt', '$$reactivatedAt'] }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           { $sort: { createdAt: -1 } },
           {
             $group: {

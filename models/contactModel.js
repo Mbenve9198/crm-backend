@@ -122,7 +122,11 @@ const contactSchema = new mongoose.Schema({
 
   // Dati specifici per lead WhatsApp Acquisition (source = inbound_acquisition)
   acquisitionData: mongoose.Schema.Types.Mixed,
-  
+
+  // Data dell'ultima riattivazione automatica (rank checker, smartlead, ecc.)
+  // Usata per contare solo le activity successive a questa data nei flag "not touched" / "stalled"
+  reactivatedAt: { type: Date, default: null },
+
   // Dati Stripe
   stripeCustomerId: {
     type: String,

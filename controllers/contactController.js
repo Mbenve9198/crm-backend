@@ -235,8 +235,8 @@ export const getContacts = async (req, res) => {
     }
 
     // Costruisce l'ordinamento
-    // Default: updatedAt per far risalire in cima i lead che ricevono interazioni inbound
-    let sortOptions = { updatedAt: -1 };
+    // Default: createdAt DESC (lead più recenti in cima)
+    let sortOptions = { createdAt: -1 };
     if (sort_by && sort_direction) {
       const sortField = mapColumnToField(sort_by);
       const sortDir = sort_direction === 'desc' ? -1 : 1;
@@ -1924,13 +1924,47 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       createdContacts.map((c) => [String(c._id), { ...c, cohortStartAt: c.createdAt }])
     );
 
-    // 2) COORTE "RIATTIVATI" (prima activity nel periodo + gap >= 40gg rispetto alla precedente)
-    // Pipeline su Activity per trovare firstActivityAt nel periodo per contatto.
-    // ESCLUSIONE NEGATIVI: la prima activity del periodo non deve essere "negativa" (es. NON INTERESSATO / DO NOT CONTACT).
+    // 2a) COORTE "RIATTIVATI DA CAMPAGNA" (activity con data.kind='reactivation' nel periodo)
+    // Non serve il check 40gg: il kind stesso certifica che è una riattivazione automatica.
+    const reactivatedCampaignAgg = await Activity.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: dateFrom, $lte: dateTo },
+          'data.kind': 'reactivation'
+        }
+      },
+      { $group: { _id: '$contact', firstActivityAt: { $min: '$createdAt' } } },
+      {
+        $lookup: { from: 'contacts', localField: '_id', foreignField: '_id', as: 'contact' }
+      },
+      { $unwind: '$contact' },
+      {
+        $match: {
+          'contact.source': { $in: sourcesOfInterest },
+          'contact.createdAt': { $lt: dateFrom },
+          'contact.status': { $nin: ['lost before free trial', 'do_not_contact'] },
+          ...(ownerId ? { 'contact.owner': ownerId } : {})
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          firstActivityAt: 1,
+          contact: {
+            _id: '$contact._id', name: '$contact.name', email: '$contact.email',
+            mrr: '$contact.mrr', source: '$contact.source', createdAt: '$contact.createdAt'
+          }
+        }
+      }
+    ]);
+
+    // 2b) COORTE "RIATTIVATI MANUALMENTE" (prima activity manuale nel periodo + gap >= 40gg)
+    // Esclude le activity di campagna (data.kind='reactivation') per non duplicare.
     const reactivatedAgg = await Activity.aggregate([
       {
         $match: {
-          createdAt: { $gte: dateFrom, $lte: dateTo }
+          createdAt: { $gte: dateFrom, $lte: dateTo },
+          'data.kind': { $ne: 'reactivation' }
         }
       },
       {
@@ -2080,19 +2114,32 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       }
     ]);
 
-    // Escludi dai "riattivati" quelli creati nel periodo (precedenza: creati)
-    const reactivatedContacts = reactivatedAgg
+    // Escludi dai riattivati da campagna quelli già nella coorte creati
+    const campaignReactivatedContacts = reactivatedCampaignAgg
       .filter((row) => !createdById.has(String(row._id)))
       .map((row) => ({
         ...row.contact,
         cohortStartAt: row.firstActivityAt,
         reactivatedAt: row.firstActivityAt,
-        previousActivityAt: row.prevActivityAt || null
+        reactivationKind: 'campaign'
+      }));
+    const campaignReactivatedIds = new Set(campaignReactivatedContacts.map((c) => String(c._id)));
+
+    // Escludi dai riattivati manuali: creati nel periodo + già riattivati da campagna
+    const manualReactivatedContacts = reactivatedAgg
+      .filter((row) => !createdById.has(String(row._id)) && !campaignReactivatedIds.has(String(row._id)))
+      .map((row) => ({
+        ...row.contact,
+        cohortStartAt: row.firstActivityAt,
+        reactivatedAt: row.firstActivityAt,
+        previousActivityAt: row.prevActivityAt || null,
+        reactivationKind: 'manual'
       }));
 
-    const reactivatedById = new Map(
-      reactivatedContacts.map((c) => [String(c._id), c])
-    );
+    const reactivatedById = new Map([
+      ...campaignReactivatedContacts.map((c) => [String(c._id), c]),
+      ...manualReactivatedContacts.map((c) => [String(c._id), c])
+    ]);
 
     // 3) Unione coorte (id -> info contatto + cohortStartAt)
     const cohortById = new Map([...createdById.entries(), ...reactivatedById.entries()]);
@@ -2146,7 +2193,11 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const initSource = () => ({
       cohort: {
         created: { count: 0, contacts: [] },
-        reactivated: { count: 0, contacts: [] },
+        reactivated: {
+          campaign: { count: 0, contacts: [] },
+          manual: { count: 0, contacts: [] },
+          total: { count: 0 }
+        },
         total: { count: 0 }
       },
       steps: {
@@ -2179,17 +2230,24 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       if (!resultBySource[src]) resultBySource[src] = initSource();
       resultBySource[src].cohort.created.contacts.push(toPublicContact({ ...c, cohortStartAt: c.createdAt }));
     }
-    for (const c of reactivatedContacts) {
+    for (const c of campaignReactivatedContacts) {
       const src = c.source;
       if (!resultBySource[src]) resultBySource[src] = initSource();
-      resultBySource[src].cohort.reactivated.contacts.push(toPublicContact(c));
+      resultBySource[src].cohort.reactivated.campaign.contacts.push(toPublicContact(c));
+    }
+    for (const c of manualReactivatedContacts) {
+      const src = c.source;
+      if (!resultBySource[src]) resultBySource[src] = initSource();
+      resultBySource[src].cohort.reactivated.manual.contacts.push(toPublicContact(c));
     }
 
     // Conta totali coorte per sorgente
     Object.values(resultBySource).forEach((srcObj) => {
       srcObj.cohort.created.count = srcObj.cohort.created.contacts.length;
-      srcObj.cohort.reactivated.count = srcObj.cohort.reactivated.contacts.length;
-      srcObj.cohort.total.count = srcObj.cohort.created.count + srcObj.cohort.reactivated.count;
+      srcObj.cohort.reactivated.campaign.count = srcObj.cohort.reactivated.campaign.contacts.length;
+      srcObj.cohort.reactivated.manual.count = srcObj.cohort.reactivated.manual.contacts.length;
+      srcObj.cohort.reactivated.total.count = srcObj.cohort.reactivated.campaign.count + srcObj.cohort.reactivated.manual.count;
+      srcObj.cohort.total.count = srcObj.cohort.created.count + srcObj.cohort.reactivated.total.count;
     });
 
     // Funnel cumulativo: won ⊆ freeTrial ⊆ qr
@@ -2263,7 +2321,8 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     sourcesOfInterest.forEach((src) => {
       const obj = resultBySource[src];
       obj.cohort.created.contacts.sort(sortByCohortStartDesc);
-      obj.cohort.reactivated.contacts.sort(sortByCohortStartDesc);
+      obj.cohort.reactivated.campaign.contacts.sort(sortByCohortStartDesc);
+      obj.cohort.reactivated.manual.contacts.sort(sortByCohortStartDesc);
 
       obj.steps.notTouched.contacts.sort(sortByEnteredDesc);
       obj.steps.qrCodeSent.contacts.sort(sortByEnteredDesc);
@@ -3420,13 +3479,12 @@ export const getCallbacksDue = async (req, res) => {
 
     const contacts = await Contact.find({
       owner: req.user._id,
-      status: 'da richiamare',
       'properties.callbackAt': {
         $gte: oneDayAgo.toISOString(),
         $lte: in15.toISOString(),
       },
     })
-      .select('_id name phone properties.callbackAt properties.callbackNote')
+      .select('_id name phone status properties.callbackAt properties.callbackNote')
       .sort({ 'properties.callbackAt': 1 })
       .limit(20)
       .lean();

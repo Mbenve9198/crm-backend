@@ -4,6 +4,16 @@ import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
 
+// Statuses that must NOT be reset to 'da contattare' on reactivation
+const REACTIVATION_PROTECTED_STATUSES = [
+  'won',
+  'qr code inviato',
+  'free trial iniziato',
+  'lost after free trial',
+  'do_not_contact',
+  'bad_data'
+];
+
 /**
  * Controller per la gestione dei lead inbound da MenuChat
  * Endpoint PUBBLICO (senza autenticazione) per webhook
@@ -231,7 +241,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       if (contact.source === 'manual') {
         contact.source = crmSource;
       }
-      
+
       // Aggiorna sempre i dati rank checker (più recenti)
       contact.rankCheckerData = leadData.rankCheckerData;
       contact.markModified('rankCheckerData');
@@ -243,61 +253,47 @@ export const receiveRankCheckerLead = async (req, res) => {
       };
       contact.markModified('properties');
 
+      // ♻️ Riattivazione: reset status a "da contattare" (salvo status protetti)
+      // e imposta reactivatedAt per azzerare il contatore activity nel dashboard
+      const previousStatus = contact.status;
+      if (!REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
+        contact.status = 'da contattare';
+        contact.reactivatedAt = new Date();
+      }
+
       contact.lastModifiedBy = defaultOwner._id;
 
       await contact.save();
-      
-      console.log(`✅ Contatto aggiornato: ${contact.name} (${contact.email})`);
 
-      // ♻️ "Riattivazione" (opzione B): crea un'activity solo se non ci sono activity da >= 40 giorni
-      // Usiamo type esistente ("email") e distinguiamo via data.kind/origin per poter filtrare lato analytics.
+      console.log(`✅ Contatto riattivato: ${contact.name} (${contact.email}), status: ${previousStatus} → ${contact.status}`);
+
+      // Crea sempre l'activity di riattivazione
       try {
-        const REACTIVATION_SILENCE_DAYS = 40;
-        const silenceMs = REACTIVATION_SILENCE_DAYS * 24 * 60 * 60 * 1000;
-
-        const lastActivity = await Activity.findOne({ contact: contact._id })
-          .sort({ createdAt: -1 })
-          .select('createdAt type title');
-
-        const now = new Date();
-        const lastAt = lastActivity?.createdAt ? new Date(lastActivity.createdAt) : null;
-        const isSilentLongEnough = !lastAt || now.getTime() - lastAt.getTime() >= silenceMs;
-
-        if (isSilentLongEnough) {
-          const activity = new Activity({
-            contact: contact._id,
-            type: 'email',
-            title: '♻️ Lead riattivato (Rank Checker)',
-            description: `Lead Rank Checker ricevuto su contatto già esistente. Ultima activity: ${
-              lastAt ? lastAt.toISOString() : 'mai'
-            }`,
-            data: {
-              kind: 'reactivation',
-              origin: 'rank_checker',
-              meta: {
-                receivedAt: new Date().toISOString(),
-                silenceDaysThreshold: REACTIVATION_SILENCE_DAYS,
-                lastActivityAt: lastAt ? lastAt.toISOString() : null,
-                rankChecker: {
-                  placeId,
-                  keyword,
-                  leadType: leadType || 'INBOUND',
-                  leadSource: leadSource || 'organic'
-                }
+        const activity = new Activity({
+          contact: contact._id,
+          type: 'email',
+          title: '♻️ Lead riattivato (Rank Checker)',
+          description: `Lead Rank Checker ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
+          data: {
+            kind: 'reactivation',
+            origin: 'rank_checker',
+            meta: {
+              receivedAt: new Date().toISOString(),
+              previousStatus,
+              rankChecker: {
+                placeId,
+                keyword,
+                leadType: leadType || 'INBOUND',
+                leadSource: leadSource || 'organic'
               }
-            },
-            createdBy: defaultOwner._id
-          });
+            }
+          },
+          createdBy: defaultOwner._id
+        });
 
-          await activity.save();
-          console.log(`📝 Activity riattivazione creata: ${activity._id}`);
-        } else {
-          console.log(
-            `ℹ️ Nessuna riattivazione: ultima activity troppo recente (${lastAt?.toISOString()})`
-          );
-        }
+        await activity.save();
+        console.log(`📝 Activity riattivazione creata: ${activity._id}`);
       } catch (activityErr) {
-        // Non bloccare il flusso se l'activity fallisce
         console.warn('⚠️ Errore creazione activity riattivazione Rank Checker:', activityErr.message);
       }
       
@@ -577,47 +573,45 @@ export const receiveSmartleadLead = async (req, res) => {
         contact.phone = phone;
       }
       
-      // Aggiorna status se fornito (es. 'interessato' da Smartlead)
-      // Ma solo se non è già in uno stato più avanzato
-      const statusHierarchy = [
-        'da contattare',
-        'contattato',
-        'da richiamare',
-        'interessato',
-        'ghosted/bad timing',
-        'qr code inviato',
-        'free trial iniziato',
-        'won',
-        'lost before free trial',
-        'lost after free trial',
-        'bad_data',
-        'non_qualificato',
-        'do_not_contact'
-      ];
-      const currentStatusIndex = statusHierarchy.indexOf(contact.status);
-      const newStatusIndex = statusHierarchy.indexOf(status);
-      
-      if (newStatusIndex > currentStatusIndex) {
-        contact.status = status;
-        
-        // Imposta MRR se necessario
-        if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status)) {
-          if (contact.mrr === undefined || contact.mrr === null) {
-            contact.mrr = mrr;
-          }
-        }
+      // ♻️ Riattivazione: reset status a "da contattare" (salvo status protetti)
+      const previousStatus = contact.status;
+      if (!REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
+        contact.status = 'da contattare';
+        contact.reactivatedAt = new Date();
       }
-      
+
       // Merge properties (conserva quelli esistenti + nuovi)
       contact.properties = {
         ...contact.properties,
         ...properties
       };
-      
+
       contact.lastModifiedBy = defaultOwner._id;
       await contact.save();
-      
-      console.log(`✅ Contatto aggiornato: ${contact.name}`);
+
+      // Crea sempre l'activity di riattivazione
+      try {
+        const activity = new Activity({
+          contact: contact._id,
+          type: 'email',
+          title: '♻️ Lead riattivato (Smartlead)',
+          description: `Lead Smartlead ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
+          data: {
+            kind: 'reactivation',
+            origin: 'smartlead',
+            meta: {
+              receivedAt: new Date().toISOString(),
+              previousStatus
+            }
+          },
+          createdBy: defaultOwner._id
+        });
+        await activity.save();
+      } catch (activityErr) {
+        console.warn('⚠️ Errore creazione activity riattivazione Smartlead:', activityErr.message);
+      }
+
+      console.log(`✅ Contatto riattivato: ${contact.name}, status: ${previousStatus} → ${contact.status}`);
       
     } else {
       // Safety: non creare nuovi contatti se l'esito è di "non contattare / non interessato"

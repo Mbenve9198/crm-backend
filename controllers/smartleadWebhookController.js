@@ -4,6 +4,15 @@ import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
+
+const REACTIVATION_PROTECTED_STATUSES = [
+  'won',
+  'qr code inviato',
+  'free trial iniziato',
+  'lost after free trial',
+  'do_not_contact',
+  'bad_data'
+];
 import { classifyReply } from '../services/replyClassifierService.js';
 import { updateLeadCategory, resumeLead, fetchLeadByEmail, fetchMessageHistory, mapAiCategoryToSmartlead, extractLeadId, stripHtml } from '../services/smartleadApiService.js';
 import { sendSmartleadInterestedNotification } from '../services/emailNotificationService.js';
@@ -208,6 +217,7 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
 
   let contact = await Contact.findOne({ email });
   let isNew = false;
+  let previousStatus = null;
 
   if (contact) {
     console.log(`🔄 Contatto esistente: ${contact.name} (${email})`);
@@ -223,29 +233,11 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
     // Aggiorna telefono se mancante
     if (!contact.phone && phone) contact.phone = phone;
 
-  // Aggiorna status: solo se il nuovo è "più avanzato"
-  const hierarchy = [
-    'da contattare',
-    'contattato',
-    'da richiamare',
-    'interessato',
-    'ghosted/bad timing',
-    'qr code inviato',
-    'free trial iniziato',
-    'won',
-    'lost before free trial',
-    'lost after free trial',
-    'bad_data',
-    'non_qualificato',
-    'do_not_contact'
-  ];
-    const currentIdx = hierarchy.indexOf(contact.status);
-    const newIdx = hierarchy.indexOf(status);
-    if (newIdx > currentIdx) {
-      contact.status = status;
-      if (['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status)) {
-        if (contact.mrr === undefined || contact.mrr === null) contact.mrr = 0;
-      }
+    // ♻️ Riattivazione: reset status a "da contattare" (salvo status protetti)
+    previousStatus = contact.status;
+    if (!REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
+      contact.status = 'da contattare';
+      contact.reactivatedAt = new Date();
     }
 
     // Merge properties
@@ -281,6 +273,27 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
 
     await defaultOwner.updateStats({ newContact: true });
     await defaultOwner.save();
+  }
+
+  // Crea activity di riattivazione se il contatto esisteva ed è stato riattivato
+  if (!isNew && contact.reactivatedAt) {
+    try {
+      const reactivationActivity = new Activity({
+        contact: contact._id,
+        type: 'email',
+        title: '♻️ Lead riattivato (Smartlead Webhook)',
+        description: `Lead Smartlead ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
+        data: {
+          kind: 'reactivation',
+          origin: 'smartlead_webhook',
+          meta: { receivedAt: new Date().toISOString(), previousStatus }
+        },
+        createdBy: defaultOwner._id
+      });
+      await reactivationActivity.save();
+    } catch (err) {
+      console.warn('⚠️ Errore activity riattivazione Smartlead webhook:', err.message);
+    }
   }
 
   // Crea attività se fornita
