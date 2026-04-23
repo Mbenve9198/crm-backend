@@ -149,7 +149,8 @@ const callSchema = new mongoose.Schema({
       'wrong-number',   // Numero sbagliato
       'meeting-set',    // Appuntamento fissato
       'sale-made',      // Vendita conclusa
-      'no-answer'       // Nessuna risposta
+      'no-answer',      // Nessuna risposta
+      'not-logged'      // Chiamata non loggata (finestra chiusa senza esito)
     ]
   },
   
