@@ -10,6 +10,14 @@ import claudeService from '../services/claudeService.js'; // Per generazione scr
 const readFile = promisify(fs.readFile);
 const unlinkFile = promisify(fs.unlink);
 
+// Interpreta una stringa YYYY-MM-DD come mezzanotte nel fuso orario italiano (Europe/Rome)
+function parseItalianDate(dateStr, endOfDay = false) {
+  const iso = endOfDay ? `${dateStr}T23:59:59` : `${dateStr}T00:00:00`;
+  const date = new Date(iso);
+  const tzDate = new Date(date.toLocaleString('en-US', { timeZone: 'Europe/Rome' }));
+  return new Date(date.getTime() + (date - tzDate));
+}
+
 /**
  * Controller per la gestione dei contatti in MenuChatCRM
  * Include operazioni CRUD e importazione CSV con mappatura dinamica
@@ -1170,12 +1178,12 @@ export const importCsvFile = async (req, res) => {
             } else if (duplicateStrategy === 'update') {
               // Aggiorna il contatto esistente
               Object.assign(existingContact, contactData);
-              
+
               // 📋 Aggiungi targetList anche al contatto esistente
               if (parsedTargetList && !existingContact.lists.includes(parsedTargetList)) {
                 existingContact.lists.push(parsedTargetList);
               }
-              
+
               await existingContact.save();
               updatedCount++;
               return;
@@ -1185,7 +1193,10 @@ export const importCsvFile = async (req, res) => {
           // Crea nuovo contatto con owner
           contactData.owner = req.user._id;
           contactData.createdBy = req.user._id;
-          
+          if (!contactData.source) {
+            contactData.source = 'csv_import';
+          }
+
           const contact = new Contact(contactData);
           await contact.save();
           createdCount++;
@@ -1364,7 +1375,7 @@ export const getLeadFunnelAnalytics = async (req, res) => {
     let dateTo;
 
     if (from) {
-      const parsedFrom = new Date(from);
+      const parsedFrom = parseItalianDate(from, false);
       if (isNaN(parsedFrom.getTime())) {
         return res.status(400).json({
           success: false,
@@ -1373,25 +1384,21 @@ export const getLeadFunnelAnalytics = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
-      // Default: dal primo giorno del mese corrente
-      dateFrom = new Date();
+      dateFrom = parseItalianDate(new Date().toISOString().slice(0, 10), false);
       dateFrom.setDate(1);
-      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
-      const parsedTo = new Date(to);
+      const parsedTo = parseItalianDate(to, true);
       if (isNaN(parsedTo.getTime())) {
         return res.status(400).json({
           success: false,
           message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
         });
       }
-      // Include tutta la giornata "to"
-      parsedTo.setHours(23, 59, 59, 999);
       dateTo = parsedTo;
     } else {
-      dateTo = new Date();
+      dateTo = parseItalianDate(new Date().toISOString().slice(0, 10), true);
     }
 
     const sourcesOfInterest = ['smartlead_outbound', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'manual', 'csv_import', 'referral'];
@@ -1515,7 +1522,7 @@ export const getFunnelStatusEvents = async (req, res) => {
     let dateTo;
 
     if (from) {
-      const parsedFrom = new Date(from);
+      const parsedFrom = parseItalianDate(from, false);
       if (isNaN(parsedFrom.getTime())) {
         return res.status(400).json({
           success: false,
@@ -1524,24 +1531,21 @@ export const getFunnelStatusEvents = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
-      // Default: dal primo giorno del mese corrente
-      dateFrom = new Date();
+      dateFrom = parseItalianDate(new Date().toISOString().slice(0, 10), false);
       dateFrom.setDate(1);
-      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
-      const parsedTo = new Date(to);
+      const parsedTo = parseItalianDate(to, true);
       if (isNaN(parsedTo.getTime())) {
         return res.status(400).json({
           success: false,
           message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
         });
       }
-      parsedTo.setHours(23, 59, 59, 999);
       dateTo = parsedTo;
     } else {
-      dateTo = new Date();
+      dateTo = parseItalianDate(new Date().toISOString().slice(0, 10), true);
     }
 
     const baseMatch = {
@@ -1751,7 +1755,7 @@ export const getWonContactsBySource = async (req, res) => {
     let dateTo;
 
     if (from) {
-      const parsedFrom = new Date(from);
+      const parsedFrom = parseItalianDate(from, false);
       if (isNaN(parsedFrom.getTime())) {
         return res.status(400).json({
           success: false,
@@ -1760,24 +1764,21 @@ export const getWonContactsBySource = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
-      // Default: dal primo giorno del mese corrente
-      dateFrom = new Date();
+      dateFrom = parseItalianDate(new Date().toISOString().slice(0, 10), false);
       dateFrom.setDate(1);
-      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
-      const parsedTo = new Date(to);
+      const parsedTo = parseItalianDate(to, true);
       if (isNaN(parsedTo.getTime())) {
         return res.status(400).json({
           success: false,
           message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
         });
       }
-      parsedTo.setHours(23, 59, 59, 999);
       dateTo = parsedTo;
     } else {
-      dateTo = new Date();
+      dateTo = parseItalianDate(new Date().toISOString().slice(0, 10), true);
     }
 
     const pipeline = [
@@ -1866,7 +1867,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     let ownerId = null;
 
     if (from) {
-      const parsedFrom = new Date(from);
+      const parsedFrom = parseItalianDate(from, false);
       if (isNaN(parsedFrom.getTime())) {
         return res.status(400).json({
           success: false,
@@ -1875,23 +1876,21 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       }
       dateFrom = parsedFrom;
     } else {
-      dateFrom = new Date();
+      dateFrom = parseItalianDate(new Date().toISOString().slice(0, 10), false);
       dateFrom.setDate(1);
-      dateFrom.setHours(0, 0, 0, 0);
     }
 
     if (to) {
-      const parsedTo = new Date(to);
+      const parsedTo = parseItalianDate(to, true);
       if (isNaN(parsedTo.getTime())) {
         return res.status(400).json({
           success: false,
           message: 'Parametro "to" non valido (usa formato YYYY-MM-DD)'
         });
       }
-      parsedTo.setHours(23, 59, 59, 999);
       dateTo = parsedTo;
     } else {
-      dateTo = new Date();
+      dateTo = parseItalianDate(new Date().toISOString().slice(0, 10), true);
     }
 
     if (owner && owner !== 'all') {
@@ -2367,21 +2366,19 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     let dateFrom, dateTo;
     if (from) {
-      const p = new Date(from);
+      const p = parseItalianDate(from, false);
       if (isNaN(p.getTime())) return res.status(400).json({ success: false, message: '"from" non valido' });
       dateFrom = p;
     } else {
-      dateFrom = new Date();
+      dateFrom = parseItalianDate(new Date().toISOString().slice(0, 10), false);
       dateFrom.setDate(1);
-      dateFrom.setHours(0, 0, 0, 0);
     }
     if (to) {
-      const p = new Date(to);
+      const p = parseItalianDate(to, true);
       if (isNaN(p.getTime())) return res.status(400).json({ success: false, message: '"to" non valido' });
-      p.setHours(23, 59, 59, 999);
       dateTo = p;
     } else {
-      dateTo = new Date();
+      dateTo = parseItalianDate(new Date().toISOString().slice(0, 10), true);
     }
 
     let closeDateFromD = dateFrom, closeDateToD = dateTo;

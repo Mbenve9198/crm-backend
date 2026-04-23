@@ -54,7 +54,8 @@ export const receiveRankCheckerLead = async (req, res) => {
       menuPreviewUrl,
       menuId,
       restaurantId,
-      eventType
+      eventType,
+      isQualificationUpdate
     } = req.body;
 
     // Validazione base
@@ -253,10 +254,9 @@ export const receiveRankCheckerLead = async (req, res) => {
       };
       contact.markModified('properties');
 
-      // ♻️ Riattivazione: reset status a "da contattare" (salvo status protetti)
-      // e imposta reactivatedAt per azzerare il contatore activity nel dashboard
       const previousStatus = contact.status;
-      if (!REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
+
+      if (!isQualificationUpdate && !REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
         contact.status = 'da contattare';
         contact.reactivatedAt = new Date();
       }
@@ -265,36 +265,43 @@ export const receiveRankCheckerLead = async (req, res) => {
 
       await contact.save();
 
-      console.log(`✅ Contatto riattivato: ${contact.name} (${contact.email}), status: ${previousStatus} → ${contact.status}`);
-
-      // Crea sempre l'activity di riattivazione
-      try {
-        const activity = new Activity({
-          contact: contact._id,
-          type: 'email',
-          title: '♻️ Lead riattivato (Rank Checker)',
-          description: `Lead Rank Checker ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
-          data: {
-            kind: 'reactivation',
-            origin: 'rank_checker',
-            meta: {
-              receivedAt: new Date().toISOString(),
-              previousStatus,
-              rankChecker: {
-                placeId,
-                keyword,
-                leadType: leadType || 'INBOUND',
-                leadSource: leadSource || 'organic'
+      if (isQualificationUpdate) {
+        console.log(`ℹ️ Aggiornamento qualificazione per ${contact.name}, nessuna activity di riattivazione creata`);
+      } else {
+        try {
+          const sourceLabel = {
+            'menu-digitale-landing': 'Google Ads Menu',
+            'prova-gratuita': 'Prova Gratuita',
+            'social-proof': 'Meta Social Proof',
+            'qr-recensioni': 'Google Ads QR Recensioni',
+          }[leadSource] || 'Rank Checker';
+          const activity = new Activity({
+            contact: contact._id,
+            type: 'email',
+            title: `♻️ Lead riattivato (${sourceLabel})`,
+            description: `Lead ${sourceLabel} ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
+            data: {
+              kind: 'reactivation',
+              origin: leadSource || 'rank_checker',
+              meta: {
+                receivedAt: new Date().toISOString(),
+                previousStatus,
+                rankChecker: {
+                  placeId,
+                  keyword,
+                  leadType: leadType || 'INBOUND',
+                  leadSource: leadSource || 'organic'
+                }
               }
-            }
-          },
-          createdBy: defaultOwner._id
-        });
+            },
+            createdBy: defaultOwner._id
+          });
 
-        await activity.save();
-        console.log(`📝 Activity riattivazione creata: ${activity._id}`);
-      } catch (activityErr) {
-        console.warn('⚠️ Errore creazione activity riattivazione Rank Checker:', activityErr.message);
+          await activity.save();
+          console.log(`📝 Activity riattivazione creata: ${activity._id}`);
+        } catch (activityErr) {
+          console.warn('⚠️ Errore creazione activity riattivazione:', activityErr.message);
+        }
       }
       
       return res.status(200).json({
