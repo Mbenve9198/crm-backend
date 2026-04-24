@@ -12,6 +12,7 @@ import ConversationOutcome from '../models/conversationOutcomeModel.js';
 import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 import { sendOutboundReplyNotification, sendOutboundAgentReplyNotification } from '../services/emailNotificationService.js';
+import { resolveOwnerForSource } from '../services/assignmentService.js';
 
 const router = express.Router();
 
@@ -501,13 +502,15 @@ router.post('/contacts/upsert', async (req, res) => {
       });
     }
 
-    // Crea nuovo contatto
+    // Crea nuovo contatto — usa round robin per assegnare l'owner
+    const contactSource = source || 'smartlead_outbound';
+    const assignedOwner = await resolveOwnerForSource(contactSource, owner);
     const contactData = {
       email: email.toLowerCase().trim(),
       name: name.trim(),
-      owner: owner._id,
-      createdBy: owner._id,
-      source: source || 'smartlead_outbound',
+      owner: assignedOwner._id,
+      createdBy: assignedOwner._id,
+      source: contactSource,
       status: status || 'interessato',
       mrr: 0,
       properties: {},
