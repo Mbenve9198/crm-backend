@@ -25,6 +25,7 @@ import {
   removeContactsFromListBulk,
   updateContactStatus,
   updateContactCallback,
+  updateActualCloseDate,
   bulkChangeOwner,
   generateCallScript,
   getCallbacksDue
@@ -140,6 +141,9 @@ router.delete('/delete-all', restrictTo('manager', 'admin'), deleteAllContacts);
 
 // Aggiorna status contatto (prima di /:id per evitare conflitti)
 router.put('/:id/status', restrictTo('agent', 'manager', 'admin'), updateContactStatus);
+
+// Aggiorna data chiusura effettiva del deal (prima di /:id per evitare conflitti)
+router.patch('/:id/actual-close-date', restrictTo('agent', 'manager', 'admin'), updateActualCloseDate);
 
 // Aggiorna dati callback/richiamo (prima di /:id per evitare conflitti)
 router.put('/:id/callback', restrictTo('agent', 'manager', 'admin'), updateContactCallback);

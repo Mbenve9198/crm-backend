@@ -2083,14 +2083,9 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
       {
         $addFields: {
           isReactivated: {
-            $or: [
-              { $eq: ['$prevActivityAt', null] },
-              {
-                $gte: [
-                  { $subtract: ['$firstActivityAt', '$prevActivityAt'] },
-                  silenceMs
-                ]
-              }
+            $gte: [
+              { $subtract: ['$firstActivityAt', '$prevActivityAt'] },
+              silenceMs
             ]
           }
         }
@@ -2470,10 +2465,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         {
           $addFields: {
             isReactivated: {
-              $or: [
-                { $eq: ['$prevActivityAt', null] },
-                { $gte: [{ $subtract: ['$firstActivityAt', '$prevActivityAt'] }, silenceMs] }
-              ]
+              $gte: [{ $subtract: ['$firstActivityAt', '$prevActivityAt'] }, silenceMs]
             }
           }
         },
@@ -2745,26 +2737,40 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       });
     }
 
-    // Override won data if wonFrom/wonTo are provided (filter by close date, not cohort date)
+    // Override won data if wonFrom/wonTo are provided (filter by actual close date, not cohort date)
     if (wonFrom || wonTo) {
       let wFrom = dateFrom, wTo = dateTo;
       if (wonFrom) { const p = new Date(wonFrom); if (!isNaN(p.getTime())) wFrom = p; }
       if (wonTo) { const p = new Date(wonTo); if (!isNaN(p.getTime())) { p.setHours(23, 59, 59, 999); wTo = p; } }
 
-      const wonEvents = await Activity.find({
+      // Fetch all won activity events (no date filter) to use as fallback date
+      const allWonEvents = await Activity.find({
         type: 'status_change',
         'data.statusChange.newStatus': 'won',
-        createdAt: { $gte: wFrom, $lte: wTo }
       }).select('contact createdAt').lean();
 
-      const wonContactIds = [...new Set(wonEvents.map(e => String(e.contact)))];
-      const wonContacts = wonContactIds.length > 0
-        ? await Contact.find({ _id: { $in: wonContactIds.map(id => new mongoose.Types.ObjectId(id)) }, ...(sourcesOfInterest.length < 4 ? { source: { $in: sourcesOfInterest } } : {}) })
-            .select('_id name email mrr owner source').lean()
+      // contactId → earliest won Activity timestamp (fallback when actualCloseDate not set)
+      const wonActivityDateById = new Map();
+      for (const ev of allWonEvents) {
+        const cid = String(ev.contact);
+        const existing = wonActivityDateById.get(cid);
+        if (!existing || ev.createdAt < existing) wonActivityDateById.set(cid, ev.createdAt);
+      }
+
+      const allWonContactIds = [...wonActivityDateById.keys()];
+      const wonContacts = allWonContactIds.length > 0
+        ? await Contact.find({ _id: { $in: allWonContactIds.map(id => new mongoose.Types.ObjectId(id)) }, ...(sourcesOfInterest.length < 4 ? { source: { $in: sourcesOfInterest } } : {}) })
+            .select('_id name email mrr owner source properties').lean()
         : [];
 
       const wonByOwner = new Map();
       for (const c of wonContacts) {
+        // Use actualCloseDate if manually/Stripe-set, otherwise fall back to Activity timestamp
+        const effectiveDate = c.properties?.actualCloseDate
+          ? new Date(c.properties.actualCloseDate)
+          : wonActivityDateById.get(String(c._id));
+        if (!effectiveDate || effectiveDate < wFrom || effectiveDate > wTo) continue;
+
         const oid = c.owner ? String(c.owner) : 'unassigned';
         if (!wonByOwner.has(oid)) wonByOwner.set(oid, { count: 0, mrr: 0, contacts: [] });
         const entry = wonByOwner.get(oid);
@@ -3489,6 +3495,35 @@ export const getCallbacksDue = async (req, res) => {
     res.json({ success: true, data: contacts });
   } catch (err) {
     console.error('❌ getCallbacksDue:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * PATCH /contacts/:id/actual-close-date
+ * Imposta manualmente la data di chiusura effettiva del deal (solo per contatti won).
+ */
+export const updateActualCloseDate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { actualCloseDate } = req.body;
+
+    const contact = await Contact.findById(id);
+    if (!contact) return res.status(404).json({ success: false, message: 'Contatto non trovato' });
+
+    if (req.user.role === 'agent' && contact.owner?.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Non hai i permessi per modificare questo contatto' });
+    }
+
+    if (!contact.properties) contact.properties = {};
+    contact.properties.actualCloseDate = actualCloseDate ? new Date(actualCloseDate).toISOString() : null;
+    contact.markModified('properties');
+    contact.lastModifiedBy = req.user._id;
+    await contact.save();
+
+    res.json({ success: true, data: contact });
+  } catch (err) {
+    console.error('❌ updateActualCloseDate:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };

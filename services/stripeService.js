@@ -209,10 +209,11 @@ async function syncContactWithStripe(contact) {
   const invoice = await getLatestInvoice(customer.id, subscription?.id);
   const stripeData = extractStripeData(subscription, invoice, customer);
 
-  await Contact.findByIdAndUpdate(contact._id, {
-    stripeCustomerId: customer.id,
-    stripeData,
-  });
+  const updatePayload = { stripeCustomerId: customer.id, stripeData };
+  if (stripeData.subscriptionStartDate) {
+    updatePayload['properties.actualCloseDate'] = stripeData.subscriptionStartDate;
+  }
+  await Contact.findByIdAndUpdate(contact._id, updatePayload);
 
   return { synced: true, stripeCustomerId: customer.id, stripeData };
 }
@@ -348,10 +349,11 @@ async function handleSubscriptionChange(event) {
 
   const stripeData = extractStripeData(fullSub, invoice, null);
 
-  await Contact.findByIdAndUpdate(contact._id, {
-    stripeCustomerId: customerId,
-    stripeData,
-  });
+  const webhookPayload = { stripeCustomerId: customerId, stripeData };
+  if (stripeData.subscriptionStartDate && !contact.properties?.actualCloseDate) {
+    webhookPayload['properties.actualCloseDate'] = stripeData.subscriptionStartDate;
+  }
+  await Contact.findByIdAndUpdate(contact._id, webhookPayload);
 
   console.log(`[Stripe Webhook] Updated contact ${contact._id} (${contact.name}) — status: ${stripeData.subscriptionStatus}`);
   return { handled: true, contactId: contact._id, status: stripeData.subscriptionStatus };
@@ -504,9 +506,13 @@ async function linkCustomerToContact(contactId, stripeCustomerId) {
   const invoice = await getLatestInvoice(stripeCustomerId, subscription?.id);
   const stripeData = extractStripeData(subscription, invoice, customer);
 
+  const linkPayload = { stripeCustomerId, stripeData };
+  if (stripeData.subscriptionStartDate) {
+    linkPayload['properties.actualCloseDate'] = stripeData.subscriptionStartDate;
+  }
   const updated = await Contact.findByIdAndUpdate(
     contactId,
-    { stripeCustomerId, stripeData },
+    linkPayload,
     { new: true }
   )
     .populate('owner', 'firstName lastName email role')
