@@ -178,7 +178,14 @@ export const getDashboard = async (req, res) => {
             { $project: projectListFields }
           ],
           callback: [
-            { $match: { 'properties.callbackAt': { $exists: true, $ne: null } } },
+            {
+              $match: {
+                $or: [
+                  { 'properties.callbackAt': { $exists: true, $ne: null, $lt: todayEndIso } },
+                  { status: 'da richiamare', $or: [{ 'properties.callbackAt': { $exists: false } }, { 'properties.callbackAt': null }] }
+                ]
+              }
+            },
             {
               $addFields: {
                 _sortableCbAt: {
@@ -189,6 +196,18 @@ export const getDashboard = async (req, res) => {
             { $sort: { _sortableCbAt: 1, lastActivityAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectCallbackListFields }
+          ],
+          daContattare: [
+            { $match: { status: 'da contattare' } },
+            { $sort: { createdAt: -1 } },
+            { $limit: parsedLimit },
+            { $project: projectListFields }
+          ],
+          interessato: [
+            { $match: { status: 'interessato' } },
+            { $sort: { lastActivityAt: 1, createdAt: -1 } },
+            { $limit: parsedLimit },
+            { $project: projectListFields }
           ],
           freeTrial: [
             { $match: { status: 'free trial iniziato' } },
@@ -203,12 +222,6 @@ export const getDashboard = async (req, res) => {
           won: [
             { $match: { status: 'won' } },
             { $sort: { updatedAt: -1 } },
-            { $limit: parsedLimit },
-            { $project: projectListFields }
-          ],
-          stalled: [
-            { $match: { isStalled: true } },
-            { $sort: { lastActivityAt: -1, createdAt: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
           ]
@@ -229,12 +242,12 @@ export const getDashboard = async (req, res) => {
     const operational = opKpiRes?.[0] || { notTouched: 0, stalled: 0 };
     const cbKpis = cbKpiRes?.[0] || { callbackOverdue: 0, callbackToday: 0, callbackNext7Days: 0, callbackNoDate: 0 };
     const lists = listsRes?.[0] || {
-      notTouched: [],
       callback: [],
+      daContattare: [],
+      interessato: [],
       freeTrial: [],
       qrFollowUp: [],
-      won: [],
-      stalled: []
+      won: []
     };
 
     return res.json({
