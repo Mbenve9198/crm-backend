@@ -1860,7 +1860,7 @@ export const getWonContactsBySource = async (req, res) => {
  */
 export const getLeadCohortFunnelAnalytics = async (req, res) => {
   try {
-    const { from, to, owner } = req.query;
+    const { from, to, owner, cohortTypes } = req.query;
 
     let dateFrom;
     let dateTo;
@@ -2130,13 +2130,20 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         reactivationKind: 'manual'
       }));
 
+    const allowedCohortTypes = cohortTypes
+      ? cohortTypes.split(',').map(s => s.trim())
+      : ['created', 'reactivated_campaign', 'reactivated_manual'];
+
     const reactivatedById = new Map([
-      ...campaignReactivatedContacts.map((c) => [String(c._id), c]),
-      ...manualReactivatedContacts.map((c) => [String(c._id), c])
+      ...(allowedCohortTypes.includes('reactivated_campaign') ? campaignReactivatedContacts.map((c) => [String(c._id), c]) : []),
+      ...(allowedCohortTypes.includes('reactivated_manual') ? manualReactivatedContacts.map((c) => [String(c._id), c]) : [])
     ]);
 
     // 3) Unione coorte (id -> info contatto + cohortStartAt)
-    const cohortById = new Map([...createdById.entries(), ...reactivatedById.entries()]);
+    const cohortById = new Map([
+      ...(allowedCohortTypes.includes('created') ? createdById.entries() : []),
+      ...reactivatedById.entries()
+    ]);
     const cohortIds = Array.from(cohortById.keys()).map((id) => new mongoose.Types.ObjectId(id));
 
     // 3b) Conteggio activity totali per contatto nella coorte (per "Not touched")
@@ -2357,7 +2364,7 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
  */
 export const getOwnerPerformanceAnalytics = async (req, res) => {
   try {
-    const { from, to, source, closeDateFrom, closeDateTo, wonFrom, wonTo } = req.query;
+    const { from, to, source, closeDateFrom, closeDateTo, wonFrom, wonTo, cohortTypes } = req.query;
 
     let dateFrom, dateTo;
     if (from) {
@@ -2413,9 +2420,29 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         createdContacts.map(c => [String(c._id), { ...c, cohortStartAt: c.createdAt }])
       );
 
-      // 2) COHORT "REACTIVATED"
-      const reactivatedAgg = await Activity.aggregate([
-        { $match: { createdAt: { $gte: pFrom, $lte: pTo } } },
+      // 2a) COHORT "REACTIVATED BY CAMPAIGN"
+      const reactivatedCampaignAgg = await Activity.aggregate([
+        { $match: { createdAt: { $gte: pFrom, $lte: pTo }, 'data.kind': 'reactivation' } },
+        { $group: { _id: '$contact', firstActivityAt: { $min: '$createdAt' } } },
+        { $lookup: { from: 'contacts', localField: '_id', foreignField: '_id', as: 'contact' } },
+        { $unwind: '$contact' },
+        {
+          $match: {
+            'contact.source': { $in: sourcesOfInterest },
+            'contact.createdAt': { $lt: pFrom }
+          }
+        },
+        {
+          $project: {
+            _id: 1, firstActivityAt: 1,
+            contact: { _id: '$contact._id', name: '$contact.name', email: '$contact.email', mrr: '$contact.mrr', source: '$contact.source', createdAt: '$contact.createdAt', owner: '$contact.owner' }
+          }
+        }
+      ]);
+
+      // 2b) COHORT "REACTIVATED MANUALLY"
+      const reactivatedManualAgg = await Activity.aggregate([
+        { $match: { createdAt: { $gte: pFrom, $lte: pTo }, 'data.kind': { $ne: 'reactivation' } } },
         { $group: { _id: '$contact', firstActivityAt: { $min: '$createdAt' } } },
         {
           $lookup: {
@@ -2464,9 +2491,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         { $addFields: { prevActivityAt: { $arrayElemAt: ['$prevActivity.createdAt', 0] } } },
         {
           $addFields: {
-            isReactivated: {
-              $gte: [{ $subtract: ['$firstActivityAt', '$prevActivityAt'] }, silenceMs]
-            }
+            isReactivated: { $gte: [{ $subtract: ['$firstActivityAt', '$prevActivityAt'] }, silenceMs] }
           }
         },
         { $match: { isReactivated: true } },
@@ -2478,12 +2503,25 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
         }
       ]);
 
-      const reactivatedContacts = reactivatedAgg
-        .filter(row => !createdById.has(String(row._id)))
-        .map(row => ({ ...row.contact, cohortStartAt: row.firstActivityAt, reactivatedAt: row.firstActivityAt }));
+      const allowedCohortTypes = cohortTypes
+        ? cohortTypes.split(',').map(s => s.trim())
+        : ['created', 'reactivated_campaign', 'reactivated_manual'];
 
-      // 3) Union cohort
-      const cohortById = new Map([...createdById.entries(), ...reactivatedContacts.map(c => [String(c._id), c])]);
+      const campaignContacts = reactivatedCampaignAgg
+        .filter(row => !createdById.has(String(row._id)))
+        .map(row => ({ ...row.contact, cohortStartAt: row.firstActivityAt, reactivatedAt: row.firstActivityAt, reactivationKind: 'campaign' }));
+      const campaignIds = new Set(campaignContacts.map(c => String(c._id)));
+
+      const manualContacts = reactivatedManualAgg
+        .filter(row => !createdById.has(String(row._id)) && !campaignIds.has(String(row._id)))
+        .map(row => ({ ...row.contact, cohortStartAt: row.firstActivityAt, reactivatedAt: row.firstActivityAt, reactivationKind: 'manual' }));
+
+      // 3) Union cohort filtered by cohortTypes
+      const cohortById = new Map([
+        ...(allowedCohortTypes.includes('created') ? createdById.entries() : []),
+        ...(allowedCohortTypes.includes('reactivated_campaign') ? campaignContacts.map(c => [String(c._id), c]) : []),
+        ...(allowedCohortTypes.includes('reactivated_manual') ? manualContacts.map(c => [String(c._id), c]) : [])
+      ]);
       const cohortIds = Array.from(cohortById.keys()).map(id => new mongoose.Types.ObjectId(id));
 
       // 3b) Activity counts for "Not touched"
