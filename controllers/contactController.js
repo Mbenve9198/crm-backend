@@ -1913,7 +1913,6 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
     const createdContacts = await Contact.find({
       source: { $in: sourcesOfInterest },
       createdAt: { $gte: dateFrom, $lte: dateTo },
-      status: { $nin: ['lost before free trial', 'do_not_contact'] },
       ...(ownerId ? { owner: ownerId } : {})
     })
       .select('_id name email mrr source createdAt')
@@ -1941,7 +1940,6 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         $match: {
           'contact.source': { $in: sourcesOfInterest },
           'contact.createdAt': { $lt: dateFrom },
-          'contact.status': { $nin: ['lost before free trial', 'do_not_contact'] },
           ...(ownerId ? { 'contact.owner': ownerId } : {})
         }
       },
@@ -2017,7 +2015,6 @@ export const getLeadCohortFunnelAnalytics = async (req, res) => {
         $match: {
           'contact.source': { $in: sourcesOfInterest },
           'contact.createdAt': { $lt: dateFrom },
-          'contact.status': { $nin: ['lost before free trial', 'do_not_contact'] },
           ...(ownerId ? { 'contact.owner': ownerId } : {})
         }
       },
