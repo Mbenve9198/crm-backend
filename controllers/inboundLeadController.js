@@ -319,8 +319,8 @@ export const receiveRankCheckerLead = async (req, res) => {
 
       const ownerForNewContact = await resolveOwnerForSource(crmSource, defaultOwner);
 
-      leadData.owner = ownerForNewContact._id;
-      leadData.createdBy = ownerForNewContact._id;
+      leadData.owner = ownerForNewContact?._id ?? null;
+      leadData.createdBy = ownerForNewContact?._id ?? defaultOwner._id;
       
       contact = new Contact(leadData);
       await contact.save();

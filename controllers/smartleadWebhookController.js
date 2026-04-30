@@ -266,8 +266,8 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
       mrr: ['interessato', 'qr code inviato', 'free trial iniziato', 'won', 'lost before free trial', 'lost after free trial'].includes(status) ? 0 : undefined,
       source: 'smartlead_outbound',
       properties,
-      owner: ownerForNewContact._id,
-      createdBy: ownerForNewContact._id
+      owner: ownerForNewContact?._id ?? null,
+      createdBy: ownerForNewContact?._id ?? defaultOwner._id
     });
     await contact.save();
 

@@ -86,6 +86,10 @@ export const resolveOwnerForSource = async (source, defaultOwner) => {
         return user;
       }
     }
+
+    // Config esiste ma pool globale vuoto → nessun assegnatario
+    console.log(`🎯 Assignment [${source}] → nessun assegnatario (pool globale vuoto)`);
+    return null;
   } catch (err) {
     console.error('⚠️ assignmentService error, falling back to defaultOwner:', err.message);
   }

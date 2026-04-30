@@ -164,7 +164,7 @@ const contactSchema = new mongoose.Schema({
   owner: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: [true, 'Il contatto deve avere un proprietario']
+    default: null
   },
   
   // Utente che ha creato il contatto

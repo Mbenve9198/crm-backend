@@ -508,8 +508,8 @@ router.post('/contacts/upsert', async (req, res) => {
     const contactData = {
       email: email.toLowerCase().trim(),
       name: name.trim(),
-      owner: assignedOwner._id,
-      createdBy: assignedOwner._id,
+      owner: assignedOwner?._id ?? null,
+      createdBy: assignedOwner?._id ?? owner._id,
       source: contactSource,
       status: status || 'interessato',
       mrr: 0,
