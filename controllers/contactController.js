@@ -2832,12 +2832,11 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
 
     owners.sort((a, b) => b.cohort - a.cohort);
 
-    // Prove attive: contatti in "qr code inviato" o "free trial iniziato" con closeDate nel periodo selezionato
-    const DEFAULT_CLOSE_DAYS = 25;
+    // Prove attive: contatti in "free trial iniziato" con closeDate nel periodo selezionato
     const FORECAST_CONV_RATE = 0.5;
 
     const activeTrialContacts = await Contact.find({
-      status: { $in: ['qr code inviato', 'free trial iniziato'] },
+      status: 'free trial iniziato',
       ...(sourcesOfInterest.length < 2 ? { source: { $in: sourcesOfInterest } } : {})
     }).select('_id name email mrr owner source status properties').lean();
 
@@ -2871,12 +2870,7 @@ export const getOwnerPerformanceAnalytics = async (req, res) => {
       const qrEnteredAt = qrEnteredMap.get(String(c._id));
       const ftEnteredAt = ftEnteredMap.get(String(c._id));
 
-      // closeDate: use manual property if set, otherwise QR entry + 25 days
-      let closeDateStr = c.properties?.closeDate || null;
-      if (!closeDateStr && qrEnteredAt) {
-        const auto = new Date(new Date(qrEnteredAt).getTime() + DEFAULT_CLOSE_DAYS * 86400000);
-        closeDateStr = auto.toISOString();
-      }
+      const closeDateStr = c.properties?.closeDate || null;
       if (!closeDateStr) continue;
 
       const closeDateObj = new Date(closeDateStr);
