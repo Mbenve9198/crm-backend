@@ -50,7 +50,7 @@ const activitySchema = new mongoose.Schema({
     // Per le chiamate
     callOutcome: {
       type: String,
-      enum: ['interested', 'not-interested', 'callback', 'voicemail', 'wrong-number', 'meeting-set', 'sale-made', 'no-answer', 'busy'],
+      enum: ['interested', 'not-interested', 'callback', 'voicemail', 'wrong-number', 'meeting-set', 'sale-made', 'no-answer', 'busy', 'first-call', 'follow-up', 'free-trial-sold', 'deal-closed', 'not-logged'],
     },
     callDuration: {
       type: Number, // in secondi

@@ -717,26 +717,27 @@ export const updateCall = async (req, res) => {
     if (notes !== undefined) call.notes = notes;
     if (outcome !== undefined) {
       call.outcome = outcome;
-      
-      // Crea l'activity solo ora che abbiamo l'esito
-      const activity = new Activity({
-        type: 'call',
-        contact: call.contact,
-        createdBy: req.user._id,
-        status: 'completed',
-        description: `Chiamata completata - ${outcome}`,
-        data: {
-          twilioCallSid: call.twilioCallSid,
-          callOutcome: outcome,
-          direction: 'outbound',
-          callDuration: call.duration,
-          ...(call.recordingUrl && { recordingUrl: call.recordingUrl }),
-          ...(call.recordingSid && { recordingSid: call.recordingSid }),
-          ...(call.recordingDuration && { recordingDuration: call.recordingDuration }),
-          ...(notes && { notes })
-        }
-      });
-      await activity.save();
+
+      if (outcome !== 'not-logged') {
+        const activity = new Activity({
+          type: 'call',
+          contact: call.contact,
+          createdBy: req.user._id,
+          status: 'completed',
+          description: `Chiamata completata - ${outcome}`,
+          data: {
+            twilioCallSid: call.twilioCallSid,
+            callOutcome: outcome,
+            direction: 'outbound',
+            callDuration: call.duration,
+            ...(call.recordingUrl && { recordingUrl: call.recordingUrl }),
+            ...(call.recordingSid && { recordingSid: call.recordingSid }),
+            ...(call.recordingDuration && { recordingDuration: call.recordingDuration }),
+            ...(notes && { notes })
+          }
+        });
+        await activity.save();
+      }
     }
 
     await call.save();
