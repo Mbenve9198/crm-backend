@@ -142,15 +142,19 @@ const callSchema = new mongoose.Schema({
   outcome: {
     type: String,
     enum: [
-      'interested',     // Interessato
-      'not-interested', // Non interessato
-      'callback',       // Richiamale
-      'voicemail',     // Segreteria
-      'wrong-number',   // Numero sbagliato
-      'meeting-set',    // Appuntamento fissato
-      'sale-made',      // Vendita conclusa
+      'interested',     // Interessato (legacy)
+      'not-interested', // Non interessato (legacy)
+      'callback',       // Da richiamare
+      'voicemail',      // Segreteria
+      'wrong-number',   // Numero sbagliato (legacy)
+      'meeting-set',    // Appuntamento fissato (legacy)
+      'sale-made',      // Vendita conclusa (legacy)
       'no-answer',      // Nessuna risposta
-      'not-logged'      // Chiamata non loggata (finestra chiusa senza esito)
+      'not-logged',     // Chiamata non loggata (finestra chiusa senza esito)
+      'first-call',     // Prima chiamata
+      'follow-up',      // Follow-up
+      'free-trial-sold',// Free trial venduto
+      'deal-closed'     // Chiusura deal
     ]
   },
   
