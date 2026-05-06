@@ -64,7 +64,20 @@ const activitySchema = new mongoose.Schema({
     recordingDuration: {
       type: Number, // in secondi
     },
-    
+    twilioCallSid: {
+      type: String,
+    },
+    direction: {
+      type: String,
+    },
+    finalStatus: {
+      type: String,
+    },
+    notes: {
+      type: String,
+      maxLength: [2000, 'Le note non possono superare 2000 caratteri']
+    },
+
     // Per WhatsApp e Instagram DM
     messageText: {
       type: String,
