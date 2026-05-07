@@ -2,6 +2,7 @@ import Contact from '../models/contactModel.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
+import Conversation from '../models/conversationModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
 
 // Statuses that must NOT be reset to 'da contattare' on reactivation
@@ -225,7 +226,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         ...(menuId && { menuId }),
         ...(restaurantId && { menuRestaurantId: restaurantId }),
         // Agent session per conversazione WhatsApp
-        ...(req.body.agentSessionId && { agentSessionId: req.body.agentSessionId })
+        ...(req.body.agentSessionId && { agentSessionId: req.body.agentSessionId }),
+        // Interesse recensioni (dal form menu-landing)
+        ...(req.body.reviewInterest && { reviewInterest: req.body.reviewInterest })
       }
     };
 
@@ -727,6 +730,64 @@ export const receiveSmartleadLead = async (req, res) => {
       message: 'Errore interno del server',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
+  }
+};
+
+/**
+ * Riceve messaggi da landingAgentHandler e li salva nella Conversation del contatto
+ * POST /api/inbound/landing-message
+ */
+export const pushLandingMessage = async (req, res) => {
+  try {
+    const { phone, email: directEmail, messages } = req.body;
+    if ((!phone && !directEmail) || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ success: false, message: 'phone o email e messages richiesti' });
+    }
+
+    // Rank checker leads passano la loro email reale; landing leads usano email sintetica da phone
+    const lookupEmail = directEmail
+      ? directEmail.toLowerCase()
+      : `landing-${phone.replace('whatsapp:', '').replace('+', '')}@landing.menuchat.it`;
+
+    const contact = await Contact.findOne({ email: lookupEmail }).lean();
+    if (!contact) {
+      console.warn(`⚠️ [pushLandingMessage] Contact not found for ${lookupEmail}`);
+      return res.status(404).json({ success: false, message: 'Contact not found' });
+    }
+
+    let conv = await Conversation.findOne({ contact: contact._id, channel: 'whatsapp' });
+    if (!conv) {
+      conv = new Conversation({
+        contact: contact._id,
+        channel: 'whatsapp',
+        status: 'active',
+        stage: 'engaged'
+      });
+    }
+
+    const now = new Date();
+    for (const msg of messages) {
+      if (!msg.content) continue;
+      conv.messages.push({
+        role: msg.role,
+        content: msg.content,
+        channel: 'whatsapp',
+        metadata: { wasAutoSent: msg.role === 'agent' },
+        createdAt: msg.createdAt || now
+      });
+      conv.metrics = conv.metrics || {};
+      conv.metrics.messagesCount = (conv.metrics.messagesCount || 0) + 1;
+      if (msg.role === 'agent') {
+        conv.metrics.agentMessagesCount = (conv.metrics.agentMessagesCount || 0) + 1;
+      }
+    }
+
+    await conv.save();
+    console.log(`📝 [pushLandingMessage] Saved ${messages.length} msgs for ${contact.email}`);
+    return res.status(200).json({ success: true, conversationId: conv._id });
+  } catch (error) {
+    console.error('❌ [pushLandingMessage] Error:', error.message);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
