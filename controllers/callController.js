@@ -27,6 +27,104 @@ function createTwilioClient() {
   return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
+const formatCallDuration = (seconds) => {
+  const s = parseInt(seconds, 10) || 0;
+  if (!s) return '';
+  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+};
+
+const mapTwilioStatusToOutcome = (status) => {
+  const map = {
+    completed: 'not-logged',
+    'no-answer': 'no-answer',
+    busy: 'busy',
+    failed: 'not-logged',
+    canceled: 'not-logged',
+  };
+  return map[status] || 'not-logged';
+};
+
+async function findCallByTwilioSid(callSid, parentCallSid) {
+  const ids = [...new Set([callSid, parentCallSid].filter(Boolean))];
+  if (ids.length === 0) return null;
+  if (ids.length === 1) return Call.findOne({ twilioCallSid: ids[0] });
+  return Call.findOne({ twilioCallSid: { $in: ids } });
+}
+
+/**
+ * Crea o aggiorna l'activity timeline del contatto per una chiamata Twilio.
+ * Viene chiamata automaticamente a fine chiamata / arrivo registrazione.
+ */
+async function syncCallActivity(call, {
+  callOutcome,
+  callDuration,
+  recordingUrl,
+  recordingSid,
+  recordingDuration,
+  notes,
+  finalStatus,
+} = {}) {
+  const twilioCallSid = call.twilioCallSid;
+  let activity = await Activity.findOne({ type: 'call', 'data.twilioCallSid': twilioCallSid });
+
+  const duration = callDuration ?? call.duration ?? 0;
+  const resolvedOutcome = callOutcome || mapTwilioStatusToOutcome(finalStatus || call.status);
+
+  const mergeData = (existing = {}) => {
+    const next = {
+      ...existing,
+      twilioCallSid,
+      direction: 'outbound',
+      callDuration: duration,
+    };
+
+    if (callOutcome) {
+      if (callOutcome !== 'not-logged' || !existing.callOutcome || existing.callOutcome === 'not-logged') {
+        next.callOutcome = callOutcome;
+      } else {
+        next.callOutcome = existing.callOutcome;
+      }
+    } else if (existing.callOutcome) {
+      next.callOutcome = existing.callOutcome;
+    } else {
+      next.callOutcome = resolvedOutcome;
+    }
+
+    if (recordingUrl) next.recordingUrl = recordingUrl;
+    if (recordingSid) next.recordingSid = recordingSid;
+    if (recordingDuration !== undefined && recordingDuration !== null) {
+      next.recordingDuration = parseInt(recordingDuration, 10) || 0;
+    }
+    if (finalStatus) next.finalStatus = finalStatus;
+    if (notes) next.notes = notes;
+
+    return next;
+  };
+
+  if (activity) {
+    activity.data = mergeData(activity.data?.toObject?.() || activity.data || {});
+    activity.status = 'completed';
+    activity.description = `Chiamata completata - ${activity.data.callOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
+    await activity.save();
+    console.log(`📝 Activity chiamata aggiornata: ${activity._id}`);
+    return activity;
+  }
+
+  const data = mergeData();
+  activity = new Activity({
+    type: 'call',
+    contact: call.contact,
+    createdBy: call.initiatedBy,
+    status: 'completed',
+    title: 'Chiamata effettuata',
+    description: `Chiamata completata - ${data.callOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`,
+    data,
+  });
+  await activity.save();
+  console.log(`📝 Activity chiamata creata automaticamente: ${activity._id} (${twilioCallSid})`);
+  return activity;
+}
+
 /**
  * Inizia una chiamata verso un contatto
  * POST /api/calls/initiate
@@ -255,9 +353,57 @@ export const answerCall = async (req, res) => {
  */
 export const dialComplete = async (req, res) => {
   try {
+    const {
+      CallSid,
+      DialCallStatus,
+      DialCallDuration,
+      RecordingUrl,
+      RecordingSid,
+      RecordingDuration,
+    } = req.body;
+
     console.log('📞 DIAL COMPLETE ricevuto:', req.body);
+
+    const call = await findCallByTwilioSid(CallSid);
+    if (call) {
+      const dialDuration = DialCallDuration ? parseInt(DialCallDuration, 10) : 0;
+      const dialStatus = DialCallStatus || 'completed';
+
+      await call.updateStatus(dialStatus === 'completed' ? 'completed' : dialStatus, {
+        duration: dialDuration || call.duration,
+      });
+
+      if (dialDuration) call.duration = dialDuration;
+
+      if (RecordingSid && RecordingUrl) {
+        await call.addRecording(
+          RecordingSid,
+          RecordingUrl,
+          RecordingDuration ? parseInt(RecordingDuration, 10) : dialDuration
+        );
+      }
+
+      await syncCallActivity(call, {
+        callOutcome: mapTwilioStatusToOutcome(dialStatus),
+        callDuration: dialDuration,
+        recordingUrl: RecordingUrl,
+        recordingSid: RecordingSid,
+        recordingDuration: RecordingDuration,
+        finalStatus: dialStatus,
+      });
+
+      const recDuration = RecordingDuration ? parseInt(RecordingDuration, 10) : dialDuration;
+      if (recDuration >= 20) {
+        import('../services/callTranscriptionService.js').then(({ transcribeCall }) => {
+          transcribeCall(call._id)
+            .then(() => console.log(`📝 Trascrizione completata per ${call.twilioCallSid}`))
+            .catch(err => console.error(`❌ Trascrizione fallita per ${call.twilioCallSid}:`, err.message));
+        });
+      }
+    } else {
+      console.warn(`⚠️  Chiamata non trovata in dialComplete: ${CallSid}`);
+    }
     
-    // TwiML per terminare la chiamata
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice" language="it-IT">Chiamata terminata</Say>
@@ -313,33 +459,16 @@ export const statusCallback = async (req, res) => {
       recordingDuration: RecordingDuration ? parseInt(RecordingDuration) : undefined
     });
 
-    // Se la chiamata è completata, aggiorna l'attività
+    // Se la chiamata è completata, sincronizza activity timeline
     if (['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(CallStatus)) {
-      const activity = await Activity.findOne({
-        'data.twilioCallSid': CallSid
+      await syncCallActivity(call, {
+        callOutcome: mapTwilioStatusToOutcome(CallStatus),
+        callDuration: CallDuration ? parseInt(CallDuration, 10) : call.duration,
+        recordingUrl: RecordingUrl,
+        recordingSid: RecordingSid,
+        recordingDuration: RecordingDuration,
+        finalStatus: CallStatus,
       });
-
-      if (activity) {
-        // Aggiorna status dell'attività
-        activity.status = 'completed';
-        
-        // Aggiorna descrizione con l'esito
-        activity.description += ` - ${CallStatus.toUpperCase()}`;
-        if (CallDuration) {
-          activity.description += ` (${Math.floor(CallDuration / 60)}:${(CallDuration % 60).toString().padStart(2, '0')})`;
-        }
-        
-        // Aggiorna i dati con l'esito della chiamata
-        activity.data = {
-          ...activity.data,
-          callOutcome: CallStatus, // Mappa lo stato Twilio all'outcome
-          callDuration: CallDuration ? parseInt(CallDuration) : 0,
-          finalStatus: CallStatus,
-          recordingUrl: RecordingUrl
-        };
-        
-        await activity.save();
-      }
     }
 
     res.status(200).send('OK');
@@ -358,6 +487,7 @@ export const recordingStatusCallback = async (req, res) => {
   try {
     const {
       CallSid,
+      ParentCallSid,
       RecordingSid,
       RecordingUrl,
       RecordingStatus,
@@ -367,39 +497,32 @@ export const recordingStatusCallback = async (req, res) => {
     console.log(`🎙️  Callback registrazione: ${RecordingSid} -> ${RecordingStatus}`);
 
     if (RecordingStatus === 'completed') {
-      const call = await Call.findOne({ twilioCallSid: CallSid });
+      const call = await findCallByTwilioSid(CallSid, ParentCallSid);
       if (call) {
         await call.addRecording(
           RecordingSid,
           RecordingUrl,
-          RecordingDuration ? parseInt(RecordingDuration) : 0
+          RecordingDuration ? parseInt(RecordingDuration, 10) : 0
         );
-        console.log(`✅ Registrazione salvata per chiamata: ${CallSid}`);
-        
-        // Aggiorna anche l'Activity correlata se esiste
-        const Activity = (await import('../models/activityModel.js')).default;
-        const activity = await Activity.findOne({ 
-          'data.twilioCallSid': CallSid,
-          type: 'call'
-        });
-        
-        if (activity) {
-          activity.data.recordingUrl = RecordingUrl;
-          activity.data.recordingSid = RecordingSid;
-          activity.data.recordingDuration = RecordingDuration ? parseInt(RecordingDuration) : 0;
-          await activity.save();
-          console.log(`✅ Registrazione aggiunta all'activity: ${activity._id}`);
-        }
+        console.log(`✅ Registrazione salvata per chiamata: ${call.twilioCallSid}`);
 
-        // Trascrizione asincrona (non blocca la risposta al webhook)
-        const duration = RecordingDuration ? parseInt(RecordingDuration) : 0;
+        await syncCallActivity(call, {
+          callDuration: call.duration,
+          recordingUrl: RecordingUrl,
+          recordingSid: RecordingSid,
+          recordingDuration: RecordingDuration,
+        });
+
+        const duration = RecordingDuration ? parseInt(RecordingDuration, 10) : 0;
         if (duration >= 20) {
           import('../services/callTranscriptionService.js').then(({ transcribeCall }) => {
             transcribeCall(call._id)
-              .then(() => console.log(`📝 Trascrizione completata per ${CallSid}`))
-              .catch(err => console.error(`❌ Trascrizione fallita per ${CallSid}:`, err.message));
+              .then(() => console.log(`📝 Trascrizione completata per ${call.twilioCallSid}`))
+              .catch(err => console.error(`❌ Trascrizione fallita per ${call.twilioCallSid}:`, err.message));
           });
         }
+      } else {
+        console.warn(`⚠️  Chiamata non trovata per registrazione: CallSid=${CallSid}, ParentCallSid=${ParentCallSid}`);
       }
     }
 
@@ -718,26 +841,14 @@ export const updateCall = async (req, res) => {
     if (outcome !== undefined) {
       call.outcome = outcome;
 
-      if (outcome !== 'not-logged') {
-        const activity = new Activity({
-          type: 'call',
-          contact: call.contact,
-          createdBy: req.user._id,
-          status: 'completed',
-          description: `Chiamata completata - ${outcome}`,
-          data: {
-            twilioCallSid: call.twilioCallSid,
-            callOutcome: outcome,
-            direction: 'outbound',
-            callDuration: call.duration,
-            ...(call.recordingUrl && { recordingUrl: call.recordingUrl }),
-            ...(call.recordingSid && { recordingSid: call.recordingSid }),
-            ...(call.recordingDuration && { recordingDuration: call.recordingDuration }),
-            ...(notes && { notes })
-          }
-        });
-        await activity.save();
-      }
+      await syncCallActivity(call, {
+        callOutcome: outcome,
+        callDuration: call.duration,
+        recordingUrl: call.recordingUrl,
+        recordingSid: call.recordingSid,
+        recordingDuration: call.recordingDuration,
+        notes,
+      });
     }
 
     await call.save();
