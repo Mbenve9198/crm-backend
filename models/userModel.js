@@ -284,9 +284,11 @@ userSchema.methods.canAccessContact = function(contact) {
   // Admin e manager possono accedere a tutti i contatti
   if (this.hasRole('manager')) return true;
   
-  // Agent può accedere solo ai suoi contatti
+  // Agent può accedere solo ai suoi contatti.
+  // owner può essere un ObjectId oppure un documento popolato: prendi sempre l'_id.
   if (this.role === 'agent') {
-    return contact.owner && contact.owner.toString() === this._id.toString();
+    const ownerId = contact.owner && (contact.owner._id || contact.owner);
+    return !!ownerId && ownerId.toString() === this._id.toString();
   }
   
   // Viewer può solo visualizzare (gestito nel controller)
@@ -305,8 +307,10 @@ userSchema.methods.canModifyContact = function(contact) {
   // Admin e manager possono modificare tutto
   if (this.hasRole('manager')) return true;
   
-  // Agent può modificare solo i suoi contatti
-  return contact.owner && contact.owner.toString() === this._id.toString();
+  // Agent può modificare solo i suoi contatti.
+  // owner può essere un ObjectId oppure un documento popolato: prendi sempre l'_id.
+  const ownerId = contact.owner && (contact.owner._id || contact.owner);
+  return !!ownerId && ownerId.toString() === this._id.toString();
 };
 
 /**
