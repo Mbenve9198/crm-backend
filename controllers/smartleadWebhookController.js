@@ -285,14 +285,14 @@ const createOrUpdateCrmContact = async (mappedData, status, activityData = null)
         description: `Lead Smartlead ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
         data: {
           kind: 'reactivation',
-          origin: 'smartlead_webhook',
-          meta: { receivedAt: new Date().toISOString(), previousStatus }
+          origin: 'smartlead',
+          meta: { receivedAt: new Date().toISOString(), previousStatus, channel: 'smartlead_webhook' }
         },
         createdBy: defaultOwner._id
       });
       await reactivationActivity.save();
     } catch (err) {
-      console.warn('⚠️ Errore activity riattivazione Smartlead webhook:', err.message);
+      console.error('❌ Errore activity riattivazione Smartlead webhook:', err);
     }
   }
 

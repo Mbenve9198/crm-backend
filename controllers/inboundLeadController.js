@@ -285,7 +285,7 @@ export const receiveRankCheckerLead = async (req, res) => {
             description: `Lead ${sourceLabel} ricevuto su contatto già esistente. Status precedente: ${previousStatus}.`,
             data: {
               kind: 'reactivation',
-              origin: leadSource || 'rank_checker',
+              origin: 'rank_checker',
               meta: {
                 receivedAt: new Date().toISOString(),
                 previousStatus,
@@ -303,10 +303,10 @@ export const receiveRankCheckerLead = async (req, res) => {
           await activity.save();
           console.log(`📝 Activity riattivazione creata: ${activity._id}`);
         } catch (activityErr) {
-          console.warn('⚠️ Errore creazione activity riattivazione:', activityErr.message);
+          console.error('❌ Errore creazione activity riattivazione:', activityErr);
         }
       }
-      
+
       return res.status(200).json({
         success: true,
         message: 'Lead ricevuto e contatto aggiornato',
