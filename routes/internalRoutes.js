@@ -464,12 +464,24 @@ router.post('/contacts/upsert', async (req, res) => {
       return res.status(400).json({ error: 'email e name sono obbligatori' });
     }
 
+    const ALWAYS_UPDATE_PROPERTY_KEYS = new Set([
+      'reply_from_email',
+      'smartlead_email',
+      'intent',
+      'score',
+    ]);
+
     const mergeProperties = (contact, incoming) => {
       if (!incoming || typeof incoming !== 'object') return;
       for (const [k, v] of Object.entries(incoming)) {
         if (v === null || v === undefined || v === '') continue;
         const existing = contact.getProperty?.(k) ?? contact.properties?.[k];
-        if (existing === undefined || existing === null || existing === '') {
+        if (
+          ALWAYS_UPDATE_PROPERTY_KEYS.has(k) ||
+          existing === undefined ||
+          existing === null ||
+          existing === ''
+        ) {
           contact.setProperty(k, v);
         }
       }
