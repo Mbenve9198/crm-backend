@@ -443,8 +443,9 @@ router.get('/sm/lead-timeline/:email', async (req, res) => {
  * Crea o aggiorna un contatto da sorgente esterna (es. outbound intelligence agent).
  * No auth richiesta — endpoint interno, non esposto pubblicamente.
  *
- * Body: { email, name, phone?, city?, status?, source?, properties? }
- * Response: { success, contact_id, is_new }
+ * Body: { email, name, phone?, city?, status?, source?, properties?, activity? }
+ * activity: { type?, title, description, data? } — creata in timeline al push CRM
+ * Response: { success, contact_id, is_new, activity_id? }
  */
 router.post('/contacts/upsert', async (req, res) => {
   // Verifica shared secret
@@ -457,11 +458,45 @@ router.post('/contacts/upsert', async (req, res) => {
   }
 
   try {
-    const { email, name, phone, city, status, source, properties } = req.body;
+    const { email, name, phone, city, status, source, properties, activity } = req.body;
 
     if (!email || !name) {
       return res.status(400).json({ error: 'email e name sono obbligatori' });
     }
+
+    const mergeProperties = (contact, incoming) => {
+      if (!incoming || typeof incoming !== 'object') return;
+      for (const [k, v] of Object.entries(incoming)) {
+        if (v === null || v === undefined || v === '') continue;
+        const existing = contact.getProperty?.(k) ?? contact.properties?.[k];
+        if (existing === undefined || existing === null || existing === '') {
+          contact.setProperty(k, v);
+        }
+      }
+    };
+
+    const createTimelineActivity = async (contactId, ownerId) => {
+      if (!activity || typeof activity !== 'object') return null;
+      const User = (await import('../models/userModel.js')).default;
+      let systemUser = await User.findOne({
+        email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL?.toLowerCase()
+      }).lean();
+      if (!systemUser) {
+        systemUser = await User.findOne({ role: { $in: ['admin', 'manager'] }, isActive: true })
+          .sort({ createdAt: 1 }).lean();
+      }
+      const act = await Activity.create({
+        contact: contactId,
+        type: activity.type || 'ai_agent',
+        title: activity.title || 'Agente AI — outbound Smartlead',
+        description: activity.description || '',
+        data: activity.data || {},
+        createdBy: systemUser?._id || ownerId,
+        status: 'completed',
+        priority: 'medium',
+      });
+      return act._id;
+    };
 
     // Trova il default owner
     const User = (await import('../models/userModel.js')).default;
@@ -481,24 +516,20 @@ router.post('/contacts/upsert', async (req, res) => {
     const existingContact = await Contact.findOne({ email: email.toLowerCase().trim() });
 
     if (existingContact) {
-      // Aggiorna campi se forniti
-      if (phone && !existingContact.phone) existingContact.phone = phone;
+      if (phone) existingContact.phone = phone;
       if (city) existingContact.setProperty('city', city);
-      if (status) {
-        existingContact.status = status;
-      }
-      if (properties && typeof properties === 'object') {
-        for (const [k, v] of Object.entries(properties)) {
-          existingContact.setProperty(k, v);
-        }
-      }
+      if (status) existingContact.status = status;
+      mergeProperties(existingContact, properties);
       existingContact.lastModifiedBy = owner._id;
       await existingContact.save();
+
+      const activityId = await createTimelineActivity(existingContact._id, owner._id);
 
       return res.json({
         success: true,
         contact_id: existingContact._id,
         is_new: false,
+        activity_id: activityId,
       });
     }
 
@@ -511,7 +542,7 @@ router.post('/contacts/upsert', async (req, res) => {
       owner: assignedOwner?._id ?? null,
       createdBy: assignedOwner?._id ?? owner._id,
       source: contactSource,
-      status: status || 'interessato',
+      status: status || 'da contattare',
       mrr: 0,
       properties: {},
     };
@@ -522,11 +553,13 @@ router.post('/contacts/upsert', async (req, res) => {
     }
 
     const newContact = await Contact.create(contactData);
+    const activityId = await createTimelineActivity(newContact._id, assignedOwner?._id ?? owner._id);
 
     return res.status(201).json({
       success: true,
       contact_id: newContact._id,
       is_new: true,
+      activity_id: activityId,
     });
 
   } catch (error) {
