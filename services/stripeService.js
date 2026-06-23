@@ -47,10 +47,25 @@ async function getActiveSubscription(customerId) {
   return sorted.length > 0 ? sorted[0] : null;
 }
 
+function isRecurringInvoice(invoice) {
+  if (!invoice) return false;
+  if (invoice.subscription) return true;
+  const recurringReasons = [
+    'subscription_create', 'subscription_cycle', 'subscription_update', 'subscription_threshold',
+  ];
+  if (recurringReasons.includes(invoice.billing_reason)) return true;
+  return (invoice.lines?.data || []).some(
+    line => line.price?.recurring?.interval || line.plan?.interval || line.type === 'subscription'
+  );
+}
+
+function isValidInvoiceAmount(invoice) {
+  return Math.abs(invoice.total || 0) >= 100;
+}
+
 async function getLatestInvoice(customerId, subscriptionId) {
   const stripe = getStripe();
 
-  // First try: invoice tied to this specific subscription
   if (subscriptionId) {
     const subInvs = await stripe.invoices.list({
       customer: customerId,
@@ -59,19 +74,19 @@ async function getLatestInvoice(customerId, subscriptionId) {
       status: 'paid',
       expand: ['data.lines'],
     });
-    // Skip tiny prorated invoices (< €1)
-    const real = subInvs.data.find(inv => Math.abs(inv.total || 0) >= 100);
-    if (real) return real;
+    const recurring = subInvs.data.find(inv => isValidInvoiceAmount(inv) && isRecurringInvoice(inv));
+    if (recurring) return recurring;
+    // Abbonamento attivo ma nessuna fattura ricorrente pagata: usa il prezzo del piano, non one-shot
+    return null;
   }
 
-  // Fallback: any paid invoice > €1
   const invoices = await stripe.invoices.list({
     customer: customerId,
     limit: 5,
     status: 'paid',
     expand: ['data.lines'],
   });
-  return invoices.data.find(inv => Math.abs(inv.total || 0) >= 100) || null;
+  return invoices.data.find(inv => isValidInvoiceAmount(inv)) || null;
 }
 
 function detectInterval(subscription, invoice) {
@@ -142,8 +157,9 @@ function extractStripeData(subscription, invoice, customer) {
     // then strip VAT. If Stripe Tax is configured, use its tax field;
     // otherwise apply configured VAT rate (default 22% Italy).
     const VAT_RATE = Number(process.env.STRIPE_VAT_RATE) || 0.22;
+    const useInvoiceForMrr = invoice && isRecurringInvoice(invoice);
     let invoiceMonthlyCents = 0;
-    if (invoice) {
+    if (useInvoiceForMrr) {
       const grossCents = Math.abs(invoice.total || 0);
       const hasTax = typeof invoice.tax === 'number' && invoice.tax > 0;
       const netCents = hasTax
@@ -153,9 +169,11 @@ function extractStripeData(subscription, invoice, customer) {
 
       console.log(`[Stripe]   Invoice: subtotal=${invoice.subtotal}, tax=${invoice.tax}, total=${invoice.total}, amount_paid=${invoice.amount_paid}`);
       console.log(`[Stripe]   Gross=${grossCents}, VAT ${hasTax ? 'from Stripe' : `${VAT_RATE*100}%`} → net=${netCents} → MRR €${Math.round(invoiceMonthlyCents / 100)}`);
+    } else if (invoice) {
+      console.log(`[Stripe]   Invoice ${invoice.id} ignorata per MRR (one-shot con abbonamento attivo)`);
     }
 
-    const finalMonthlyCents = invoiceMonthlyCents > 0 ? invoiceMonthlyCents : itemsMonthlyCents;
+    const finalMonthlyCents = useInvoiceForMrr && invoiceMonthlyCents > 0 ? invoiceMonthlyCents : itemsMonthlyCents;
 
     const firstItem = items[0];
     const firstPrice = firstItem?.price;
@@ -181,7 +199,7 @@ function extractStripeData(subscription, invoice, customer) {
     console.log(`[Stripe]   FINAL → MRR: €${data.mrrFromStripe}, interval: ${interval}, plan: ${data.planName}`);
   }
 
-  if (invoice) {
+  if (invoice && (!subscription || isRecurringInvoice(invoice))) {
     const paidTs = invoice.status_transitions?.paid_at || invoice.created;
     data.lastPaymentDate = paidTs ? new Date(paidTs * 1000) : null;
     data.lastPaymentAmount = Math.round((invoice.amount_paid || 0) / 100);
