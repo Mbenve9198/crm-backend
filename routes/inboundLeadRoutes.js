@@ -1,5 +1,5 @@
 import express from 'express';
-import { receiveRankCheckerLead, receiveAcquisitionLead, receiveSmartleadLead } from '../controllers/inboundLeadController.js';
+import { receiveRankCheckerLead, receiveAcquisitionLead, receiveSmartleadLead, pushLandingMessage, receiveOnboardingEvent } from '../controllers/inboundLeadController.js';
 import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
 import { handleResendInbound } from '../controllers/resendWebhookController.js';
 
@@ -11,6 +11,7 @@ const router = express.Router();
  */
 
 router.post('/rank-checker-lead', receiveRankCheckerLead);
+router.post('/onboarding-event', receiveOnboardingEvent);
 router.post('/acquisition-lead', receiveAcquisitionLead);
 router.post('/smartlead-lead', receiveSmartleadLead);
 router.post('/smartlead-webhook', handleSmartleadWebhook);
@@ -25,6 +26,7 @@ router.post('/smartlead-webhook', handleSmartleadWebhook);
  * - SOAP Opera reply-to: agent+{leadId}@reply.menuchat.it
  */
 router.post('/resend-webhook', handleResendInbound);
+router.post('/landing-message', pushLandingMessage);
 
 export default router;
 

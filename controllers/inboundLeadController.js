@@ -733,6 +733,143 @@ export const receiveSmartleadLead = async (req, res) => {
   }
 };
 
+const ONBOARDING_STATUS_MAP = Object.freeze({
+  engaged: 'interessato',
+  qr_approved: 'interessato',
+  address_confirmed: 'interessato',
+  payment_pending: 'interessato',
+  paid: 'interessato',
+  qr_shipped: 'qr code inviato',
+  qr_delivered: 'qr code inviato',
+  trial_pending: 'qr code inviato',
+  trial_active: 'free trial iniziato',
+  nurturing: 'free trial iniziato',
+  sales_handoff: 'interessato',
+  won: 'won'
+});
+
+// Ordine funnel: consente solo avanzamenti (mai retrocessioni da eventi onboarding)
+const PIPELINE_RANK = Object.freeze({
+  'da contattare': 0,
+  'contattato': 1,
+  'da richiamare': 2,
+  'ghosted/bad timing': 2,
+  'interessato': 3,
+  'qr code inviato': 4,
+  'free trial iniziato': 5,
+  'won': 6
+});
+
+// Stati che nessun evento onboarding può sovrascrivere
+const ONBOARDING_IMMUTABLE_STATUSES = ['won', 'do_not_contact', 'bad_data'];
+
+function mapOnboardingStatus(fsmValue, previousStatus) {
+  if (fsmValue === 'lost') {
+    return previousStatus === 'free trial iniziato' ? 'lost after free trial' : 'lost before free trial';
+  }
+  return Object.prototype.hasOwnProperty.call(ONBOARDING_STATUS_MAP, fsmValue)
+    ? ONBOARDING_STATUS_MAP[fsmValue]
+    : undefined;
+}
+
+const DEFAULT_ONBOARDING_MRR = 1290;
+
+/**
+ * Riceve eventi FSM onboarding da MenuChat backend
+ * POST /api/inbound/onboarding-event
+ */
+export const receiveOnboardingEvent = async (req, res) => {
+  try {
+    const { leadId, event, status, restaurantName, phone, name, meta = {} } = req.body;
+
+    if (!event) {
+      return res.status(400).json({ success: false, message: 'event obbligatorio' });
+    }
+
+    console.log(`📥 ONBOARDING EVENT: ${event} — ${restaurantName || phone || leadId}`);
+
+    let contact = null;
+    if (phone) {
+      contact = await Contact.findOne({ phone: String(phone).replace(/\s/g, '') });
+    }
+    if (!contact && req.body.email) {
+      contact = await Contact.findOne({ email: String(req.body.email).toLowerCase() });
+    }
+    if (!contact && restaurantName) {
+      contact = await Contact.findOne({ name: restaurantName }).sort({ updatedAt: -1 });
+    }
+
+    if (!contact) {
+      console.warn(`⚠️ ONBOARDING EVENT: contatto non trovato per ${restaurantName || phone}`);
+      return res.status(200).json({ success: true, message: 'Evento ricevuto, contatto non trovato' });
+    }
+
+    const previousStatus = contact.status;
+    const mappedStatus = mapOnboardingStatus(status, previousStatus) || mapOnboardingStatus(event, previousStatus);
+
+    if (mappedStatus && mappedStatus !== previousStatus
+        && !ONBOARDING_IMMUTABLE_STATUSES.includes(previousStatus)) {
+      const isLost = mappedStatus.startsWith('lost');
+      const isForward = (PIPELINE_RANK[mappedStatus] ?? -1) > (PIPELINE_RANK[previousStatus] ?? -1);
+      if (isLost || isForward) {
+        contact.status = mappedStatus;
+        contact.mrr = contact.mrr || DEFAULT_ONBOARDING_MRR;
+      }
+    }
+
+    contact.properties = {
+      ...(contact.properties || {}),
+      onboardingStatus: status || event,
+      onboardingLeadId: leadId || contact.properties?.onboardingLeadId,
+      onboardingLastEvent: event,
+      onboardingLastEventAt: new Date().toISOString()
+    };
+    contact.markModified('properties');
+    await contact.save();
+
+    // Activity.createdBy è required ma contact.owner può essere null (upsert interni)
+    let activityOwner = contact.owner;
+    if (!activityOwner) {
+      const fallbackOwner = await User.findOne({
+        role: { $in: ['admin', 'manager'] },
+        isActive: true
+      }).sort({ createdAt: 1 });
+      activityOwner = fallbackOwner?._id;
+    }
+
+    if (activityOwner) {
+      const activity = new Activity({
+        contact: contact._id,
+        type: 'status_change',
+        title: `Onboarding: ${event}`,
+        description: `Stato onboarding: ${status || event}${meta?.reason ? ` — ${meta.reason}` : ''}`,
+        data: {
+          kind: 'onboarding_event',
+          origin: 'system',
+          meta: { leadId, event, status, ...meta }
+        },
+        createdBy: activityOwner
+      });
+      await activity.save();
+    } else {
+      console.warn(`⚠️ ONBOARDING EVENT: nessun owner disponibile, activity non creata per ${contact._id}`);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Evento onboarding registrato',
+      data: { contactId: contact._id, status: contact.status }
+    });
+  } catch (error) {
+    console.error('❌ Errore onboarding-event:', error.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Errore interno del server',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
 /**
  * Riceve messaggi da landingAgentHandler e li salva nella Conversation del contatto
  * POST /api/inbound/landing-message

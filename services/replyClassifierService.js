@@ -24,6 +24,11 @@ CONTESTO DEL NOSTRO SERVIZIO:
 Offriamo un sistema automatico per raccogliere recensioni Google per ristoranti tramite QR code e WhatsApp.
 Le nostre email presentano dati sulla posizione Google Maps del ristorante, confronto con competitor locali, e propongono una prova gratuita del nostro sistema.
 
+IMPORTANTE — COME LEGGERE L'INPUT:
+Quando disponibile, ti verrà fornita anche l'EMAIL CHE ABBIAMO INVIATO AL PROSPECT, seguita dalla RISPOSTA DEL PROSPECT.
+Usa sempre il contesto dell'email originale per interpretare correttamente la risposta.
+Esempio: se la nostra email chiedeva conferma dati e il prospect risponde "Sì", quella è una risposta neutrale (NEUTRAL), non interesse nel servizio.
+
 CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
 
 1. **INTERESTED** — Il lead mostra un SEGNALE POSITIVO ESPLICITO di engagement.
@@ -49,9 +54,11 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - Risposte tipo "ho visto la mail", "grazie per il suo interessamento", "grazie comunque"
    - Risposte vaghe: "forse più avanti", "ci penso", "non adesso", "non è il momento"
    - Feedback sui dati: "il ristorante che citi è lontano da noi", "quella keyword è sbagliata"
-   - ATTENZIONE: "abbiamo chiuso" DA SOLO è ambiguo — se è chiusura definitiva/cessata attività → NOT_INTERESTED; se è chiusura stagionale/temporanea → NEUTRAL
+   - ATTENZIONE: "abbiamo chiuso" DA SOLO → guarda il contesto. Se è chiusura stagionale/per ferie/settimanale → NEUTRAL. Se sembra definitiva (es. "chiuso il 31 dicembre", "non siamo più aperti", "abbiamo cessato") → NOT_INTERESTED
+   - NON classificare come NEUTRAL se il prospect dice che non ha bisogno del servizio ("stiamo bene", "ci trovano già", "per ora ok") — quello è NOT_INTERESTED
+   - NON classificare come NEUTRAL se il prospect dice di non essere un ristorante/locale di ristorazione — quello è NOT_INTERESTED (target sbagliato)
 
-3. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE, oppure l'attività non è più attiva/raggiungibile.
+3. **NOT_INTERESTED** — Il lead rifiuta ESPLICITAMENTE e CHIARAMENTE, oppure l'attività non è più attiva/raggiungibile o non è un ristorante.
    Classifica come NOT_INTERESTED se:
    - Dice chiaramente "non ci interessa", "non ci serve", "non siamo interessati", "non sono interessato/a"
    - Dice "no mi interessa", "non mi interessava", "non ci interessava" (anche varianti passato)
@@ -61,6 +68,9 @@ CATEGORIE DI CLASSIFICAZIONE (scegli UNA):
    - "Grazie ma non siamo interessati / non ci serve"
    - "Per il momento non sono interessato/a" (rifiuto temporale con "non")
    - Dice che non ha budget / soldi ("non investo", "non abbiamo fondi")
+   - **Dice che non è un ristorante / non opera nella ristorazione**: "non siamo un ristorante", "sono uno studio di yoga", "siamo un mobilificio", "non siamo nel settore alimentare" — target sbagliato, inutile contattare
+   - **Dichiara di non aver bisogno del servizio con soddisfazione**: "siamo già trovati", "ci trovano benissimo", "stiamo bene così", "andiamo bene senza", "per ora siamo ok", "non abbiamo bisogno" — rifiuto implicito ma chiaro
+   - **Chiusura DEFINITIVA del locale** (non stagionale, non feriale): "abbiamo chiuso", "siamo chiusi", "il locale è chiuso" — SE non c'è indicazione di riapertura futura E non sembra chiusura per ferie/settimanale
    - **L'attività è stata VENDUTA o CEDUTA**: "il ristorante è stato venduto", "abbiamo venduto", "ho ceduto l'attività", "è stato ceduto" — il destinatario non è più il proprietario/decisore, quindi è un lead morto
    - **Non è più il proprietario/titolare**: "non sono più il proprietario", "non siamo più i titolari", "ho cambiato attività"
    - **Chiusura DEFINITIVA** (non stagionale): "abbiamo chiuso definitivamente", "il locale è chiuso", "abbiamo cessato l'attività" — senza indicazioni di riapertura
@@ -133,6 +143,16 @@ export const classifyReply = async (replyText, context = {}) => {
 
     const cleanedReply = cleanReplyText(replyText);
 
+    // Se la pulizia ha rimosso tutto il contenuto ma l'originale era un rifiuto quotato ("> No", "> No!")
+    if (cleanedReply.trim().length === 0) {
+      const rawNorm = replyText.replace(/[>\s|!.]/g, '').toLowerCase();
+      if (/^no+$/.test(rawNorm)) {
+        return { category: 'DO_NOT_CONTACT', confidence: 0.93, reason: 'Rifiuto secco in risposta quotata', shouldStopSequence: true, extracted: {} };
+      }
+      // Probabile risposta inline nel testo quotato o solo firma: meglio fermare i follow-up
+      return { category: 'NEUTRAL', confidence: 0.8, reason: 'Risposta vuota dopo pulizia (testo quotato/firma)', shouldStopSequence: true, extracted: {} };
+    }
+
     const quickResult = quickClassify(cleanedReply);
     if (quickResult) {
       console.log(`⚡ Classificazione rapida: ${quickResult.category} (${quickResult.reason})`);
@@ -141,13 +161,19 @@ export const classifyReply = async (replyText, context = {}) => {
 
     const detectedPhones = detectPhonesInBody(cleanedReply);
 
-    let userMessage = `RISPOSTA EMAIL DA CLASSIFICARE:\n\n"${cleanedReply}"`;
+    let userMessage;
+    if (context.originalEmail) {
+      userMessage = `EMAIL CHE ABBIAMO INVIATO AL PROSPECT (alla quale sta rispondendo):\n\n"${context.originalEmail}"\n\n---\n\nRISPOSTA DEL PROSPECT DA CLASSIFICARE:\n\n"${cleanedReply}"`;
+    } else {
+      userMessage = `RISPOSTA EMAIL DA CLASSIFICARE:\n\n"${cleanedReply}"`;
+    }
+
     if (detectedPhones.length > 0) {
       userMessage += `\n\nNUMERI TELEFONO RILEVATI NEL TESTO (da validare — potrebbero essere in firma): ${detectedPhones.join(', ')}`;
     }
     if (context.restaurantName) userMessage += `\n\nCONTESTO:\n- Ristorante: ${context.restaurantName}`;
     if (context.campaignName) userMessage += `\n- Campagna: ${context.campaignName}`;
-    if (context.subject) userMessage += `\n- Oggetto email originale: ${context.subject}`;
+    if (context.subject) userMessage += `\n- Oggetto email: ${context.subject}`;
 
     console.log(`🤖 Classificazione AI della risposta (${cleanedReply.length} caratteri)...`);
 
@@ -223,8 +249,15 @@ const quickClassify = (text) => {
     if (normalized.includes(p)) return { category: 'OUT_OF_OFFICE', confidence: 0.95, reason: 'Risposta automatica / fuori ufficio', shouldStopSequence: false, extracted: {} };
   }
 
+  // Risposta era solo testo quotato (es "> No!") — dopo strip rimane stringa vuota o solo punteggiatura
+  if (normalized.replace(/[^a-z]/g, '').length === 0 && text.trim().startsWith('>')) {
+    return { category: 'DO_NOT_CONTACT', confidence: 0.90, reason: 'Rifiuto secco in risposta quotata', shouldStopSequence: true, extracted: {} };
+  }
+
   // --- DO_NOT_CONTACT: "No" secco, richiesta stop, toni legali ---
-  if (/^no+\b/.test(normalized) && normalized.length < 50) {
+  // Solo "no" secco esatto: le varianti più lunghe ("no grazie per il momento...")
+  // passano ai pattern espliciti o all'AI, per evitare falsi positivi DNC
+  if (/^no+[!.]?\s*$/.test(normalized)) {
     return { category: 'DO_NOT_CONTACT', confidence: 0.97, reason: 'Rifiuto secco (NO)', shouldStopSequence: true, extracted: {} };
   }
 
@@ -246,7 +279,13 @@ const quickClassify = (text) => {
     'no', 'no grazie', 'no, grazie', 'no non mi interessa', 'no, non mi interessa'
   ];
   for (const p of dncPatterns) {
-    if (normalized === p || normalized.startsWith(p + ' ') || normalized.startsWith(p + '.') || normalized.startsWith(p + ',')) {
+    // Match esatto o inizio frase seguito da punteggiatura/spazio — ma solo per pattern brevi ("no", "no grazie")
+    // evita false positives su "no grazie per il momento, forse più avanti"
+    const isShortPattern = p.split(' ').length <= 2;
+    if (normalized === p) {
+      return { category: 'DO_NOT_CONTACT', confidence: 0.97, reason: 'Richiesta stop contatti / rifiuto secco', shouldStopSequence: true, extracted: {} };
+    }
+    if (!isShortPattern && (normalized.startsWith(p + ' ') || normalized.startsWith(p + '.') || normalized.startsWith(p + ','))) {
       return { category: 'DO_NOT_CONTACT', confidence: 0.97, reason: 'Richiesta stop contatti / rifiuto secco', shouldStopSequence: true, extracted: {} };
     }
   }
@@ -285,6 +324,17 @@ const quickClassify = (text) => {
     'per ora non ci interessa', 'per adesso non ci interessa',
     'al momento non investo', 'non investo soldi',
     'non abbiamo fondi', 'non abbiamo budget',
+    // Non sono un ristorante / attività non pertinente (pattern specifici, non ambigui)
+    'non siamo un ristorante', 'non sono un ristorante', 'non ho un ristorante', 'non ho una ristorante',
+    'non abbiamo un ristorante', 'non sono nel settore della ristorazione',
+    'non operiamo nel settore della ristorazione',
+    // Dichiarano di stare bene senza il servizio (pattern specifici, non ambigui)
+    'stiamo bene così', 'andiamo bene così', 'per ora siamo ok', 'per adesso siamo ok',
+    'siamo ok grazie', 'va bene così grazie', 'non abbiamo problemi con le recensioni',
+    'non abbiamo problemi di visibilità',
+    // Chiusura definitiva (frasi specifiche senza ambiguità su stagionalità)
+    'non siamo più aperti', 'il locale è chiuso', 'il ristorante è chiuso',
+    'abbiamo chiuso il locale', 'abbiamo smesso di lavorare', 'non lavoriamo più',
     // Attività venduta / ceduta → lead morto, non è più il decisore
     'è stato venduto', 'e stato venduto',
     'è stata venduta', 'e stata venduta',
@@ -361,11 +411,6 @@ const quickClassify = (text) => {
   ];
   for (const p of posPatterns) {
     if (normalized.includes(p)) return { category: 'INTERESTED', confidence: 0.95, reason: 'Interesse esplicito / richiesta contatto', shouldStopSequence: true, extracted: {} };
-  }
-
-  // --- NEUTRAL: nessun pattern matched, ma testo troppo corto per essere significativo ---
-  if (normalized.length < 30) {
-    return { category: 'NEUTRAL', confidence: 0.80, reason: 'Risposta troppo breve per determinare interesse', shouldStopSequence: true, extracted: {} };
   }
 
   return null;
