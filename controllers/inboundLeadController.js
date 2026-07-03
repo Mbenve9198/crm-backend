@@ -733,19 +733,19 @@ export const receiveSmartleadLead = async (req, res) => {
   }
 };
 
+// Nessun evento onboarding imposta automaticamente "interessato" — lo AE lo fa a mano
+// dopo aver letto la conversazione WhatsApp nel dettaglio contatto.
 const ONBOARDING_STATUS_MAP = Object.freeze({
-  engaged: 'interessato',
-  qr_approved: 'interessato',
-  address_confirmed: 'interessato',
-  payment_pending: 'interessato',
-  paid: 'interessato',
   qr_shipped: 'qr code inviato',
   qr_delivered: 'qr code inviato',
   trial_pending: 'qr code inviato',
   trial_active: 'free trial iniziato',
   nurturing: 'free trial iniziato',
-  sales_handoff: 'interessato',
   won: 'won'
+});
+
+const ONBOARDING_ACTIVITY_TYPE = Object.freeze({
+  engaged: 'whatsapp'
 });
 
 // Ordine funnel: consente solo avanzamenti (mai retrocessioni da eventi onboarding)
@@ -807,6 +807,7 @@ export const receiveOnboardingEvent = async (req, res) => {
     const previousStatus = contact.status;
     const mappedStatus = mapOnboardingStatus(status, previousStatus) || mapOnboardingStatus(event, previousStatus);
 
+    let statusChanged = false;
     if (mappedStatus && mappedStatus !== previousStatus
         && !ONBOARDING_IMMUTABLE_STATUSES.includes(previousStatus)) {
       const isLost = mappedStatus.startsWith('lost');
@@ -814,6 +815,7 @@ export const receiveOnboardingEvent = async (req, res) => {
       if (isLost || isForward) {
         contact.status = mappedStatus;
         contact.mrr = contact.mrr || DEFAULT_ONBOARDING_MRR;
+        statusChanged = true;
       }
     }
 
@@ -876,19 +878,24 @@ export const receiveOnboardingEvent = async (req, res) => {
  */
 export const pushLandingMessage = async (req, res) => {
   try {
-    const { phone, email: directEmail, messages } = req.body;
+    const { phone, email: directEmail, messages, replace = false } = req.body;
     if ((!phone && !directEmail) || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: 'phone o email e messages richiesti' });
     }
+
+    const normalizePhone = (p) => String(p || '').replace(/\s/g, '');
 
     // Rank checker leads passano la loro email reale; landing leads usano email sintetica da phone
     const lookupEmail = directEmail
       ? directEmail.toLowerCase()
       : `landing-${phone.replace('whatsapp:', '').replace('+', '')}@landing.menuchat.it`;
 
-    const contact = await Contact.findOne({ email: lookupEmail }).lean();
+    let contact = await Contact.findOne({ email: lookupEmail }).lean();
+    if (!contact && phone) {
+      contact = await Contact.findOne({ phone: normalizePhone(phone) }).lean();
+    }
     if (!contact) {
-      console.warn(`⚠️ [pushLandingMessage] Contact not found for ${lookupEmail}`);
+      console.warn(`⚠️ [pushLandingMessage] Contact not found for ${lookupEmail}${phone ? ` / ${phone}` : ''}`);
       return res.status(404).json({ success: false, message: 'Contact not found' });
     }
 
@@ -903,24 +910,37 @@ export const pushLandingMessage = async (req, res) => {
     }
 
     const now = new Date();
-    for (const msg of messages) {
-      if (!msg.content) continue;
-      conv.messages.push({
-        role: msg.role,
-        content: msg.content,
+    const roleMap = { user: 'lead', assistant: 'agent', lead: 'lead', agent: 'agent', human: 'human' };
+    const normalized = messages
+      .filter((msg) => msg.content)
+      .map((msg) => ({
+        role: roleMap[msg.role] || msg.role,
+        content: String(msg.content).slice(0, 4000),
         channel: 'whatsapp',
-        metadata: { wasAutoSent: msg.role === 'agent' },
-        createdAt: msg.createdAt || now
-      });
-      conv.metrics = conv.metrics || {};
-      conv.metrics.messagesCount = (conv.metrics.messagesCount || 0) + 1;
-      if (msg.role === 'agent') {
-        conv.metrics.agentMessagesCount = (conv.metrics.agentMessagesCount || 0) + 1;
+        metadata: { wasAutoSent: (roleMap[msg.role] || msg.role) === 'agent' },
+        createdAt: msg.createdAt ? new Date(msg.createdAt) : now
+      }));
+
+    if (replace) {
+      conv.messages = normalized;
+      conv.metrics = {
+        messagesCount: normalized.length,
+        agentMessagesCount: normalized.filter((m) => m.role === 'agent').length,
+        humanInterventions: conv.metrics?.humanInterventions || 0
+      };
+    } else {
+      for (const msg of normalized) {
+        conv.messages.push(msg);
+        conv.metrics = conv.metrics || {};
+        conv.metrics.messagesCount = (conv.metrics.messagesCount || 0) + 1;
+        if (msg.role === 'agent') {
+          conv.metrics.agentMessagesCount = (conv.metrics.agentMessagesCount || 0) + 1;
+        }
       }
     }
 
     await conv.save();
-    console.log(`📝 [pushLandingMessage] Saved ${messages.length} msgs for ${contact.email}`);
+    console.log(`📝 [pushLandingMessage] Saved ${normalized.length} msgs for ${contact.email}${replace ? ' (replace)' : ''}`);
     return res.status(200).json({ success: true, conversationId: conv._id });
   } catch (error) {
     console.error('❌ [pushLandingMessage] Error:', error.message);
