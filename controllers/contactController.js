@@ -118,6 +118,40 @@ const mapColumnToField = (column) => {
 };
 
 /**
+ * Lista contatti con ordinamento default: ultima attività (riattivazione o creazione) in cima.
+ */
+async function fetchContactsWithRecencySort(filter, skip, limit) {
+  return Contact.aggregate([
+    { $match: filter },
+    { $addFields: { sortDate: { $max: ['$reactivatedAt', '$createdAt'] } } },
+    { $sort: { sortDate: -1 } },
+    { $skip: skip },
+    { $limit: limit },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'owner',
+        foreignField: '_id',
+        as: 'owner',
+        pipeline: [{ $project: { firstName: 1, lastName: 1, email: 1, role: 1 } }]
+      }
+    },
+    { $unwind: { path: '$owner', preserveNullAndEmptyArrays: true } },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'createdBy',
+        foreignField: '_id',
+        as: 'createdBy',
+        pipeline: [{ $project: { firstName: 1, lastName: 1, email: 1 } }]
+      }
+    },
+    { $unwind: { path: '$createdBy', preserveNullAndEmptyArrays: true } },
+    { $project: { sortDate: 0 } }
+  ]);
+}
+
+/**
  * Costruisce un filtro MongoDB da un filtro di colonna frontend
  */
 const buildMongoFilter = (column, columnFilter) => {
@@ -243,22 +277,24 @@ export const getContacts = async (req, res) => {
     }
 
     // Costruisce l'ordinamento
-    // Default: createdAt DESC (lead più recenti in cima)
-    let sortOptions = { createdAt: -1 };
-    if (sort_by && sort_direction) {
+    // Default: max(reactivatedAt, createdAt) DESC — riattivati e nuovi in cima
+    const useRecencySort = !sort_by || !sort_direction;
+    let sortOptions = { sortDate: -1 };
+    if (!useRecencySort) {
       const sortField = mapColumnToField(sort_by);
       const sortDir = sort_direction === 'desc' ? -1 : 1;
       sortOptions = { [sortField]: sortDir };
     }
 
-    // Esegue la query con paginazione e popolamento
-    const contacts = await Contact.find(filter)
-      .select('+properties') // Forza l'inclusione del campo properties
-      .populate('owner', 'firstName lastName email role')
-      .populate('createdBy', 'firstName lastName email')
-      .skip(skip)
-      .limit(parseInt(limit))
-      .sort(sortOptions);
+    const contacts = useRecencySort
+      ? await fetchContactsWithRecencySort(filter, skip, parseInt(limit))
+      : await Contact.find(filter)
+          .select('+properties')
+          .populate('owner', 'firstName lastName email role')
+          .populate('createdBy', 'firstName lastName email')
+          .skip(skip)
+          .limit(parseInt(limit))
+          .sort(sortOptions);
 
     const total = await Contact.countDocuments(filter);
 
