@@ -745,7 +745,19 @@ const ONBOARDING_STATUS_MAP = Object.freeze({
 });
 
 const ONBOARDING_ACTIVITY_TYPE = Object.freeze({
-  engaged: 'whatsapp'
+  engaged: 'whatsapp',
+  autoresponder_detected: 'whatsapp'
+});
+
+const ONBOARDING_ACTIVITY_COPY = Object.freeze({
+  engaged: {
+    title: 'Risposta WhatsApp del lead',
+    description: 'Il lead ha risposto su WhatsApp — verifica la conversazione e valuta manualmente lo status.'
+  },
+  autoresponder_detected: {
+    title: 'Risposta automatica WhatsApp (non conteggiata come interesse)',
+    description: 'Auto-risposta del business WhatsApp — non implica interesse reale. Nessun cambio status.'
+  }
 });
 
 // Ordine funnel: consente solo avanzamenti (mai retrocessioni da eventi onboarding)
@@ -840,11 +852,14 @@ export const receiveOnboardingEvent = async (req, res) => {
     }
 
     if (activityOwner) {
+      const copy = ONBOARDING_ACTIVITY_COPY[event];
+      const activityType = ONBOARDING_ACTIVITY_TYPE[event] || 'status_change';
       const activity = new Activity({
         contact: contact._id,
-        type: 'status_change',
-        title: `Onboarding: ${event}`,
-        description: `Stato onboarding: ${status || event}${meta?.reason ? ` — ${meta.reason}` : ''}`,
+        type: activityType,
+        title: copy?.title || `Onboarding: ${event}`,
+        description: copy?.description
+          || `Stato onboarding: ${status || event}${meta?.reason ? ` — ${meta.reason}` : ''}`,
         data: {
           kind: 'onboarding_event',
           origin: 'system',
@@ -913,13 +928,21 @@ export const pushLandingMessage = async (req, res) => {
     const roleMap = { user: 'lead', assistant: 'agent', lead: 'lead', agent: 'agent', human: 'human' };
     const normalized = messages
       .filter((msg) => msg.content)
-      .map((msg) => ({
-        role: roleMap[msg.role] || msg.role,
-        content: String(msg.content).slice(0, 4000),
-        channel: 'whatsapp',
-        metadata: { wasAutoSent: (roleMap[msg.role] || msg.role) === 'agent' },
-        createdAt: msg.createdAt ? new Date(msg.createdAt) : now
-      }));
+      .map((msg) => {
+        const role = roleMap[msg.role] || msg.role;
+        const metadata = {
+          wasAutoSent: role === 'agent',
+          ...(msg.metadata?.source ? { source: msg.metadata.source } : {}),
+          ...(msg.metadata?.isAutoresponder ? { isAutoresponder: true } : {})
+        };
+        return {
+          role,
+          content: String(msg.content).slice(0, 4000),
+          channel: 'whatsapp',
+          metadata,
+          createdAt: msg.createdAt ? new Date(msg.createdAt) : now
+        };
+      });
 
     if (replace) {
       conv.messages = normalized;

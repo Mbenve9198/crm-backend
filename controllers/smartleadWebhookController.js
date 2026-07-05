@@ -26,10 +26,9 @@ const isDuplicate = async (key) => {
   if (redisManager.isAvailable()) {
     try {
       const redisKey = `webhook_dedup:${key}`;
-      const exists = await redisManager.getClient().get(redisKey);
-      if (exists) return true;
-      await redisManager.getClient().set(redisKey, '1', 'PX', DEDUP_TTL_MS);
-      return false;
+      // Atomic dedup: SET NX returns null if key already exists (no GET+SET race).
+      const acquired = await redisManager.getClient().set(redisKey, '1', 'PX', DEDUP_TTL_MS, 'NX');
+      return acquired !== 'OK';
     } catch {
       // fallback in-memory
     }
