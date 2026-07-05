@@ -893,7 +893,7 @@ export const receiveOnboardingEvent = async (req, res) => {
  */
 export const pushLandingMessage = async (req, res) => {
   try {
-    const { phone, email: directEmail, messages, replace = false } = req.body;
+    const { phone, email: directEmail, messages, replace = false, summary } = req.body;
     if ((!phone && !directEmail) || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: 'phone o email e messages richiesti' });
     }
@@ -905,9 +905,9 @@ export const pushLandingMessage = async (req, res) => {
       ? directEmail.toLowerCase()
       : `landing-${phone.replace('whatsapp:', '').replace('+', '')}@landing.menuchat.it`;
 
-    let contact = await Contact.findOne({ email: lookupEmail }).lean();
+    let contact = await Contact.findOne({ email: lookupEmail });
     if (!contact && phone) {
-      contact = await Contact.findOne({ phone: normalizePhone(phone) }).lean();
+      contact = await Contact.findOne({ phone: normalizePhone(phone) });
     }
     if (!contact) {
       console.warn(`⚠️ [pushLandingMessage] Contact not found for ${lookupEmail}${phone ? ` / ${phone}` : ''}`);
@@ -944,11 +944,14 @@ export const pushLandingMessage = async (req, res) => {
         };
       });
 
+    const leadMessagesCount = normalized.filter((m) => m.role === 'lead' && !m.metadata?.isAutoresponder).length;
+
     if (replace) {
       conv.messages = normalized;
       conv.metrics = {
         messagesCount: normalized.length,
         agentMessagesCount: normalized.filter((m) => m.role === 'agent').length,
+        leadMessagesCount,
         humanInterventions: conv.metrics?.humanInterventions || 0
       };
     } else {
@@ -959,10 +962,30 @@ export const pushLandingMessage = async (req, res) => {
         if (msg.role === 'agent') {
           conv.metrics.agentMessagesCount = (conv.metrics.agentMessagesCount || 0) + 1;
         }
+        if (msg.role === 'lead' && !msg.metadata?.isAutoresponder) {
+          conv.metrics.leadMessagesCount = (conv.metrics.leadMessagesCount || 0) + 1;
+        }
       }
     }
 
     await conv.save();
+
+    if (summary && typeof summary === 'object') {
+      contact.properties = {
+        ...(contact.properties || {}),
+        waLeadMessageCount: summary.leadMessageCount ?? leadMessagesCount,
+        waEngagementStatus: summary.waEngagementStatus || null,
+        waLastSyncedAt: new Date().toISOString()
+      };
+      if ((summary.leadMessageCount ?? leadMessagesCount) > 0) {
+        contact.lastActivityAt = summary.lastMessageAt
+          ? new Date(summary.lastMessageAt)
+          : new Date();
+      }
+      contact.markModified('properties');
+      await contact.save();
+    }
+
     console.log(`📝 [pushLandingMessage] Saved ${normalized.length} msgs for ${contact.email}${replace ? ' (replace)' : ''}`);
     return res.status(200).json({ success: true, conversationId: conv._id });
   } catch (error) {
