@@ -527,12 +527,19 @@ router.post('/contacts/upsert', async (req, res) => {
     // Upsert contatto per email
     const existingContact = await Contact.findOne({ email: email.toLowerCase().trim() });
 
+    const REACTIVATION_PROTECTED_STATUSES = ['won', 'qr code inviato', 'free trial iniziato'];
+
     if (existingContact) {
       if (phone) existingContact.phone = phone;
       if (city) existingContact.setProperty('city', city);
       if (status) existingContact.status = status;
       mergeProperties(existingContact, properties);
       existingContact.lastModifiedBy = owner._id;
+
+      if (!REACTIVATION_PROTECTED_STATUSES.includes(existingContact.status)) {
+        existingContact.reactivatedAt = new Date();
+      }
+
       await existingContact.save();
 
       const activityId = await createTimelineActivity(existingContact._id, owner._id);
@@ -681,8 +688,14 @@ router.post('/contacts/:contactId/activity', async (req, res) => {
       return res.status(400).json({ error: 'Invalid contactId' });
     }
 
-    const contact = await Contact.findById(contactId).lean();
+    const contact = await Contact.findById(contactId);
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
+
+    const REACTIVATION_PROTECTED = ['won', 'qr code inviato', 'free trial iniziato'];
+    if (!REACTIVATION_PROTECTED.includes(contact.status)) {
+      contact.reactivatedAt = new Date();
+      await contact.save();
+    }
 
     const User = (await import('../models/userModel.js')).default;
     let systemUser = await User.findOne({ email: process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL?.toLowerCase() }).lean();

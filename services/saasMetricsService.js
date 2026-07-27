@@ -45,13 +45,14 @@ export async function computeCurrentSnapshot() {
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const previousMonth = getPreviousMonth(month);
-  const prevSnapshot = await MrrSnapshot.findOne({ month: previousMonth }).lean();
 
-  const activeContacts = await findAllActiveCustomers();
+  const allContacts = await findCustomersForMetrics();
+  const activeContacts = filterContactsActiveInMonth(allContacts, month);
 
-  const prevContactMap = await buildPrevContactMap(previousMonth);
+  // Chain from previous month so classification stays consistent with MRR overview
+  const prevContactMap = await buildChainedPrevContactMap(allContacts, previousMonth);
 
-  return classifyMovements(month, now, activeContacts, prevContactMap, prevSnapshot);
+  return classifyMovements(month, now, activeContacts, prevContactMap, null);
 }
 
 /**
@@ -239,9 +240,24 @@ export async function backfillFromStripe(startMonth = null) {
     for (const [custId, curr] of Object.entries(currentCustomerMrr)) {
       const prev = prevCustomerMrr[custId];
       const contact = contactByCustomer[custId];
+      const subCreatedInMonth = customerSubHistory[custId]?.some(
+        s => s.created >= monthStartTs && s.created <= monthEndTs
+      );
 
-      if (!prev) {
-        // Check if this customer existed in any earlier month (reactivation vs new)
+      if (subCreatedInMonth) {
+        newMrr += curr.mrr;
+        newCustomers++;
+        movements.push({
+          contactId: contact?._id,
+          contactName: contact?.name,
+          contactEmail: contact?.email,
+          type: 'new',
+          previousMrr: prev?.mrr || 0,
+          currentMrr: curr.mrr,
+          delta: curr.mrr,
+          planName: curr.planName,
+        });
+      } else if (!prev) {
         const sub = customerSubHistory[custId]?.find(s => s.created <= monthEndTs);
         const wasEverActive = sub && sub.created < monthStartTs;
 
@@ -372,20 +388,24 @@ export async function backfillFromStripe(startMonth = null) {
  */
 export async function getOverview() {
   const currentMonth = getCurrentMonth();
-  const months = [];
+  const monthList = [];
   for (let i = 5; i >= 0; i--) {
-    months.push(getMonthOffset(currentMonth, -i));
+    monthList.push(getMonthOffset(currentMonth, -i));
   }
 
-  const snapshots = await MrrSnapshot.find({ month: { $in: months } })
-    .sort({ month: 1 }).lean();
+  const allContacts = await findCustomersForMetrics();
+  const snapshots = [];
+  let prevContactMap = {};
 
-  // Current month: use live data if no snapshot yet
-  let currentSnap = snapshots.find(s => s.month === currentMonth);
-  if (!currentSnap) {
-    currentSnap = await computeCurrentSnapshot();
+  for (const monthStr of monthList) {
+    const { monthEnd } = getMonthBounds(monthStr);
+    const contactsForMonth = filterContactsActiveInMonth(allContacts, monthStr);
+    const snapshot = classifyMovements(monthStr, monthEnd, contactsForMonth, prevContactMap, null);
+    snapshots.push(snapshot);
+    prevContactMap = buildPrevMapFromContacts(contactsForMonth);
   }
 
+  const currentSnap = snapshots.find(s => s.month === currentMonth) || null;
   const prevMonth = getPreviousMonth(currentMonth);
   const prevSnap = snapshots.find(s => s.month === prevMonth) || null;
 
@@ -434,20 +454,23 @@ export async function getOverview() {
  */
 export async function getMrrOverview(numMonths = 12) {
   const currentMonth = getCurrentMonth();
-  const months = [];
+  const monthList = [];
   for (let i = numMonths - 1; i >= 0; i--) {
-    months.push(getMonthOffset(currentMonth, -i));
+    monthList.push(getMonthOffset(currentMonth, -i));
   }
 
-  const snapshots = await MrrSnapshot.find({ month: { $in: months } })
-    .sort({ month: 1 })
-    .select('-movements')
-    .lean();
+  const allContacts = await findCustomersForMetrics();
+  const snapshots = [];
+  let prevContactMap = {};
 
-  // If current month is missing, compute live
-  if (!snapshots.find(s => s.month === currentMonth)) {
-    const live = await computeCurrentSnapshot();
-    snapshots.push(live);
+  for (const monthStr of monthList) {
+    const { monthEnd } = getMonthBounds(monthStr);
+    const contactsForMonth = filterContactsActiveInMonth(allContacts, monthStr);
+    const snapshot = classifyMovements(monthStr, monthEnd, contactsForMonth, prevContactMap, null);
+    // Omit movements from API response (large payload)
+    const { movements, ...rest } = snapshot;
+    snapshots.push(rest);
+    prevContactMap = buildPrevMapFromContacts(contactsForMonth);
   }
 
   return { months: snapshots };
@@ -694,25 +717,22 @@ function classifyMovements(month, snapshotDate, activeContacts, prevContactMap, 
     currentIds.add(custId);
 
     const prev = prevContactMap[custId];
+    const subStart = c.stripeData?.subscriptionStartDate;
+
+    // New customer = subscription started in this month (regardless of prev map)
+    if (isSubscriptionInMonth(subStart, month)) {
+      newMrr += mrr;
+      newCustomers++;
+      movements.push({ contactId: c._id, contactName: c.name, contactEmail: c.email,
+        type: 'new', previousMrr: prev?.mrr || 0, currentMrr: mrr, delta: mrr, planName });
+      continue;
+    }
 
     if (!prev) {
-      // Could be new or reactivation
-      const subStart = c.stripeData?.subscriptionStartDate;
-      const [y, m] = month.split('-').map(Number);
-      const monthStart = new Date(y, m - 1, 1);
-      const isNew = !subStart || subStart >= monthStart;
-
-      if (isNew) {
-        newMrr += mrr;
-        newCustomers++;
-        movements.push({ contactId: c._id, contactName: c.name, contactEmail: c.email,
-          type: 'new', previousMrr: 0, currentMrr: mrr, delta: mrr, planName });
-      } else {
-        reactivationMrr += mrr;
-        reactivatedCustomers++;
-        movements.push({ contactId: c._id, contactName: c.name, contactEmail: c.email,
-          type: 'reactivation', previousMrr: 0, currentMrr: mrr, delta: mrr, planName });
-      }
+      reactivationMrr += mrr;
+      reactivatedCustomers++;
+      movements.push({ contactId: c._id, contactName: c.name, contactEmail: c.email,
+        type: 'reactivation', previousMrr: 0, currentMrr: mrr, delta: mrr, planName });
     } else if (mrr > prev.mrr) {
       expansionMrr += (mrr - prev.mrr);
       existingMrr += prev.mrr;
@@ -729,14 +749,12 @@ function classifyMovements(month, snapshotDate, activeContacts, prevContactMap, 
   }
 
   // Churned: in prev but not current
-  if (prevSnapshot) {
-    for (const [custId, prev] of Object.entries(prevContactMap)) {
-      if (!currentIds.has(custId)) {
-        churnedCustomers++;
-        voluntaryChurnMrr += prev.mrr;
-        movements.push({ contactId: prev.contactId, contactName: prev.name, contactEmail: prev.email,
-          type: 'voluntary_churn', previousMrr: prev.mrr, currentMrr: 0, delta: -prev.mrr, planName: prev.planName });
-      }
+  for (const [custId, prev] of Object.entries(prevContactMap)) {
+    if (!currentIds.has(custId)) {
+      churnedCustomers++;
+      voluntaryChurnMrr += prev.mrr;
+      movements.push({ contactId: prev.contactId, contactName: prev.name, contactEmail: prev.email,
+        type: 'voluntary_churn', previousMrr: prev.mrr, currentMrr: 0, delta: -prev.mrr, planName: prev.planName });
     }
   }
 
@@ -829,6 +847,101 @@ export async function buildPrevContactMap(prevMonth) {
   }
 
   return map;
+}
+
+function getMonthBounds(monthStr) {
+  const [y, m] = monthStr.split('-').map(Number);
+  return {
+    monthStart: new Date(y, m - 1, 1, 0, 0, 0, 0),
+    monthEnd: new Date(y, m, 0, 23, 59, 59, 999),
+  };
+}
+
+function isSubscriptionInMonth(subStart, monthStr) {
+  if (!subStart) return false;
+  const date = subStart instanceof Date ? subStart : new Date(subStart);
+  const { monthStart, monthEnd } = getMonthBounds(monthStr);
+  return date >= monthStart && date <= monthEnd;
+}
+
+/** Active + churned contacts with Stripe history (for historical month reconstruction). */
+async function findCustomersForMetrics() {
+  const selectFields = '_id name firstName lastName email stripeData stripeCustomerId mrr';
+  const [active, churned] = await Promise.all([
+    findAllActiveCustomers(selectFields),
+    Contact.find({
+      stripeCustomerId: { $exists: true, $ne: null },
+      'stripeData.subscriptionStartDate': { $exists: true },
+      'stripeData.mrrFromStripe': { $gt: 0 },
+      'stripeData.subscriptionStatus': { $nin: ['active', 'trialing'] },
+    }).select(selectFields).lean(),
+  ]);
+
+  const seen = new Set();
+  const merged = [];
+  for (const c of [...active, ...churned]) {
+    const id = c._id.toString();
+    if (!seen.has(id)) {
+      seen.add(id);
+      merged.push(c);
+    }
+  }
+  return merged;
+}
+
+function filterContactsActiveInMonth(contacts, monthStr) {
+  const { monthStart, monthEnd } = getMonthBounds(monthStr);
+  return contacts.filter(c => {
+    const subStart = c.stripeData?.subscriptionStartDate;
+    if (!subStart) return monthStr === getCurrentMonth();
+    const start = new Date(subStart);
+    if (start > monthEnd) return false;
+    const canceledAt = c.stripeData?.canceledAt;
+    if (canceledAt && new Date(canceledAt) < monthStart) return false;
+    return true;
+  });
+}
+
+function buildPrevMapFromContacts(contacts) {
+  const map = {};
+  for (const c of contacts) {
+    const custId = c.stripeCustomerId;
+    if (!custId) continue;
+    map[custId] = {
+      mrr: c.stripeData?.mrrFromStripe || 0,
+      planName: c.stripeData?.planName || 'Unknown',
+      contactId: c._id,
+      name: c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email,
+      email: c.email,
+    };
+  }
+  return map;
+}
+
+/** Rebuild prev-month map by chaining month-by-month up to targetMonth (inclusive). */
+async function buildChainedPrevContactMap(allContacts, targetMonth) {
+  const currentMonth = getCurrentMonth();
+  if (targetMonth >= currentMonth) return {};
+
+  let earliest = targetMonth;
+  for (const c of allContacts) {
+    const subStart = c.stripeData?.subscriptionStartDate;
+    if (subStart) {
+      const d = new Date(subStart);
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (m < earliest) earliest = m;
+    }
+  }
+
+  const months = generateMonthRange(earliest, targetMonth);
+  let prevContactMap = {};
+  for (const monthStr of months) {
+    const { monthEnd } = getMonthBounds(monthStr);
+    const contactsForMonth = filterContactsActiveInMonth(allContacts, monthStr);
+    classifyMovements(monthStr, monthEnd, contactsForMonth, prevContactMap, null);
+    prevContactMap = buildPrevMapFromContacts(contactsForMonth);
+  }
+  return prevContactMap;
 }
 
 function getCurrentMonth() {
