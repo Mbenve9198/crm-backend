@@ -198,8 +198,19 @@ export const getDashboard = async (req, res) => {
             { $project: projectCallbackListFields }
           ],
           daContattare: [
-            { $match: { status: 'da contattare' } },
-            { $sort: { createdAt: -1 } },
+            {
+              $match: {
+                status: 'da contattare',
+                'properties.prospector_cold_call': { $exists: false },
+                lists: { $nin: ['Cold Call - Vicini Clienti'] }
+              }
+            },
+            {
+              $addFields: {
+                sortDate: { $max: ['$reactivatedAt', '$createdAt'] }
+              }
+            },
+            { $sort: { sortDate: -1 } },
             { $limit: parsedLimit },
             { $project: projectListFields }
           ],
