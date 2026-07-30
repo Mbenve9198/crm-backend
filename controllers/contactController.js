@@ -152,9 +152,117 @@ async function fetchContactsWithRecencySort(filter, skip, limit) {
 }
 
 /**
+ * Parsa una data in formato DD/MM/YYYY (it-IT) in un intervallo giornaliero
+ */
+function parseItalianDisplayDate(dateStr) {
+  const parts = dateStr.split('/');
+  if (parts.length !== 3) return null;
+  const [day, month, year] = parts;
+  const isoDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  return {
+    start: parseItalianDate(isoDate),
+    end: parseItalianDate(isoDate, true),
+  };
+}
+
+/**
+ * Costruisce filtro MongoDB per la colonna Created (date in formato it-IT)
+ */
+const buildCreatedColumnFilter = (columnFilter) => {
+  if (columnFilter.type === 'value' && columnFilter.values?.length > 0) {
+    const ranges = columnFilter.values
+      .map(parseItalianDisplayDate)
+      .filter(Boolean)
+      .map(({ start, end }) => ({ createdAt: { $gte: start, $lte: end } }));
+
+    if (ranges.length === 0) return null;
+    if (ranges.length === 1) return ranges[0];
+    return { $or: ranges };
+  }
+
+  if (columnFilter.type === 'condition' && columnFilter.condition) {
+    const { type, value } = columnFilter.condition;
+    if (type === 'equals' && value) {
+      const range = parseItalianDisplayDate(String(value));
+      if (range) return { createdAt: { $gte: range.start, $lte: range.end } };
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Risolve nomi visualizzati proprietario → filtro MongoDB su campo owner (ObjectId)
+ */
+async function buildOwnerColumnFilter(columnFilter) {
+  if (columnFilter.type === 'value' && columnFilter.values?.length > 0) {
+    const conditions = [];
+
+    if (columnFilter.values.includes('Non assegnato')) {
+      conditions.push({
+        $or: [{ owner: null }, { owner: { $exists: false } }],
+      });
+    }
+
+    const names = columnFilter.values.filter((v) => v !== 'Non assegnato');
+    if (names.length > 0) {
+      const ownerIds = [];
+      for (const name of names) {
+        const parts = name.trim().split(/\s+/);
+        const firstName = parts[0];
+        const lastName = parts.slice(1).join(' ');
+        const query = lastName ? { firstName, lastName } : { firstName };
+        const users = await User.find(query).select('_id');
+        ownerIds.push(...users.map((u) => u._id));
+      }
+      if (ownerIds.length > 0) {
+        conditions.push({ owner: { $in: ownerIds } });
+      }
+    }
+
+    if (conditions.length === 0) return null;
+    if (conditions.length === 1) return conditions[0];
+    return { $or: conditions };
+  }
+
+  if (columnFilter.type === 'condition' && columnFilter.condition) {
+    const { type, value } = columnFilter.condition;
+    if (!value) return null;
+
+    const parts = String(value).trim().split(/\s+/);
+    const firstName = parts[0];
+    const lastName = parts.slice(1).join(' ');
+    const nameQuery = lastName ? { firstName, lastName } : { firstName };
+
+    if (type === 'equals') {
+      const users = await User.find(nameQuery).select('_id');
+      if (users.length === 0) return { owner: { $in: [] } };
+      return { owner: { $in: users.map((u) => u._id) } };
+    }
+
+    if (type === 'contains') {
+      const users = await User.find({
+        $or: [
+          { firstName: { $regex: value, $options: 'i' } },
+          { lastName: { $regex: value, $options: 'i' } },
+        ],
+      }).select('_id');
+      if (users.length === 0) return { owner: { $in: [] } };
+      return { owner: { $in: users.map((u) => u._id) } };
+    }
+  }
+
+  return null;
+};
+
+/**
  * Costruisce un filtro MongoDB da un filtro di colonna frontend
  */
 const buildMongoFilter = (column, columnFilter) => {
+  if (column === 'Owner' || column === 'Created') {
+    return null; // gestiti separatamente in getContacts
+  }
+
   const field = mapColumnToField(column);
   
   if (columnFilter.type === 'value') {
@@ -239,7 +347,9 @@ export const getContacts = async (req, res) => {
     } else if (req.user.role === 'manager' || req.user.role === 'admin') {
       // Manager e admin possono filtrare per owner specifico O vedere tutti
       if (owner && owner !== 'all') {
-        filter.owner = owner;
+        if (mongoose.Types.ObjectId.isValid(owner)) {
+          filter.owner = new mongoose.Types.ObjectId(owner);
+        }
       }
       // Se owner è 'all' o undefined, non aggiungere filtro owner (vedono tutti)
     } else {
@@ -266,7 +376,18 @@ export const getContacts = async (req, res) => {
           : column_filters;
 
         for (const [column, columnFilter] of Object.entries(columnFilters)) {
-          const mongoFilter = buildMongoFilter(column, columnFilter);
+          // Salta filtro colonna Owner se già attivo il dropdown proprietario
+          if (column === 'Owner' && owner && owner !== 'all') continue;
+
+          let mongoFilter = null;
+          if (column === 'Owner') {
+            mongoFilter = await buildOwnerColumnFilter(columnFilter);
+          } else if (column === 'Created') {
+            mongoFilter = buildCreatedColumnFilter(columnFilter);
+          } else {
+            mongoFilter = buildMongoFilter(column, columnFilter);
+          }
+
           if (mongoFilter) {
             Object.assign(filter, mongoFilter);
           }
