@@ -89,6 +89,20 @@ async function getLatestInvoice(customerId, subscriptionId) {
   return invoices.data.find(inv => isValidInvoiceAmount(inv)) || null;
 }
 
+function getSubscriptionPeriodEnd(sub) {
+  if (!sub) return null;
+  if (sub.current_period_end) return sub.current_period_end;
+  const ends = (sub.items?.data || []).map(i => i.current_period_end).filter(Boolean);
+  return ends.length ? Math.min(...ends) : null;
+}
+
+function getSubscriptionPeriodStart(sub) {
+  if (!sub) return null;
+  if (sub.current_period_start) return sub.current_period_start;
+  const starts = (sub.items?.data || []).map(i => i.current_period_start).filter(Boolean);
+  return starts.length ? Math.min(...starts) : null;
+}
+
 function detectInterval(subscription, invoice) {
   // 1. From subscription items
   const items = subscription?.items?.data || [];
@@ -114,8 +128,10 @@ function detectInterval(subscription, invoice) {
   }
 
   // 4. Heuristic: compare subscription period length
-  if (subscription?.current_period_start && subscription?.current_period_end) {
-    const days = (subscription.current_period_end - subscription.current_period_start) / 86400;
+  const periodStart = getSubscriptionPeriodStart(subscription);
+  const periodEnd = getSubscriptionPeriodEnd(subscription);
+  if (periodStart && periodEnd) {
+    const days = (periodEnd - periodStart) / 86400;
     if (days > 300) return { interval: 'year', intervalCount: 1 };
     if (days > 25) return { interval: 'month', intervalCount: 1 };
     if (days > 5) return { interval: 'week', intervalCount: 1 };
@@ -187,7 +203,7 @@ function extractStripeData(subscription, invoice, customer) {
     data.planIntervalCount = intervalCount;
     data.mrrFromStripe = Math.round(finalMonthlyCents / 100);
     data.subscriptionStartDate = safeDate(subscription.start_date);
-    data.currentPeriodEnd = safeDate(subscription.current_period_end);
+    data.currentPeriodEnd = safeDate(getSubscriptionPeriodEnd(subscription));
     data.canceledAt = safeDate(subscription.canceled_at);
 
     const pm = subscription.default_payment_method;

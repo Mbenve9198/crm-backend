@@ -764,12 +764,12 @@ export async function getUpcomingPayments(numMonths = 6) {
     // Try upcoming invoice for the next charge (includes discounts/tax)
     let amountEur = Math.round(periodCents * (1 + VAT_RATE) / 100);
     try {
-      const upcoming = await stripe.invoices.retrieveUpcoming({ subscription: sub.id });
+      const upcoming = await stripe.invoices.createPreview({ subscription: sub.id });
       if (upcoming?.total) {
         amountEur = Math.round(Math.abs(upcoming.total) / 100);
       }
     } catch {
-      // No upcoming invoice (e.g. trial) — keep estimate
+      // No preview available (e.g. trial) — keep estimate
     }
 
     const firstItem = items[0];
@@ -785,11 +785,14 @@ export async function getUpcomingPayments(numMonths = 6) {
       ? (contact.name || [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || '–')
       : customerObj?.name || customerObj?.email || custId;
 
+    const periodEnd = getSubscriptionPeriodEnd(sub);
     const nextTs = (sub.status === 'trialing' && sub.trial_end)
       ? sub.trial_end
-      : sub.current_period_end;
+      : periodEnd;
+    if (!nextTs) continue;
 
     let nextDate = new Date(nextTs * 1000);
+    if (Number.isNaN(nextDate.getTime())) continue;
     const stopAfterFirst = sub.cancel_at_period_end;
     const maxDate = stopAfterFirst ? nextDate : horizon;
 
@@ -839,7 +842,7 @@ export async function getUpcomingPayments(numMonths = 6) {
     const name = c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
 
     while (nextDate <= horizon) {
-      if (nextDate >= now) {
+      if (toRomeDateString(nextDate) >= todayRome) {
         allPayments.push({
           date: nextDate.toISOString(),
           amount: amountEur,
@@ -1210,14 +1213,29 @@ function detectIntervalFromSub(sub) {
     if (item.plan?.interval) return { interval: item.plan.interval, intervalCount: item.plan.interval_count || 1 };
   }
   if (sub.plan?.interval) return { interval: sub.plan.interval, intervalCount: sub.plan.interval_count || 1 };
-  if (sub.current_period_start && sub.current_period_end) {
-    const days = (sub.current_period_end - sub.current_period_start) / 86400;
+  const periodStart = getSubscriptionPeriodStart(sub);
+  const periodEnd = getSubscriptionPeriodEnd(sub);
+  if (periodStart && periodEnd) {
+    const days = (periodEnd - periodStart) / 86400;
     if (days > 300) return { interval: 'year', intervalCount: 1 };
     if (days > 150) return { interval: 'month', intervalCount: 6 };
     if (days > 80) return { interval: 'month', intervalCount: 3 };
     if (days > 25) return { interval: 'month', intervalCount: 1 };
   }
   return { interval: 'month', intervalCount: 1 };
+}
+
+/** Stripe API 2025+: billing period lives on subscription items, not the subscription root. */
+function getSubscriptionPeriodEnd(sub) {
+  if (sub.current_period_end) return sub.current_period_end;
+  const ends = (sub.items?.data || []).map(i => i.current_period_end).filter(Boolean);
+  return ends.length ? Math.min(...ends) : null;
+}
+
+function getSubscriptionPeriodStart(sub) {
+  if (sub.current_period_start) return sub.current_period_start;
+  const starts = (sub.items?.data || []).map(i => i.current_period_start).filter(Boolean);
+  return starts.length ? Math.min(...starts) : null;
 }
 
 function centsToMonthly(cents, interval, intervalCount) {
