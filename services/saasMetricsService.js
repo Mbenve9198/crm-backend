@@ -734,8 +734,8 @@ export async function getUpcomingPayments(numMonths = 6) {
     }
   }
 
+  const todayRome = toRomeDateString(new Date());
   const now = new Date();
-  now.setHours(0, 0, 0, 0);
   const horizon = new Date(now.getFullYear(), now.getMonth() + numMonths + 1, 0, 23, 59, 59);
 
   const intervalLabels = {
@@ -794,7 +794,7 @@ export async function getUpcomingPayments(numMonths = 6) {
     const maxDate = stopAfterFirst ? nextDate : horizon;
 
     while (nextDate <= maxDate) {
-      if (nextDate >= now) {
+      if (toRomeDateString(nextDate) >= todayRome) {
         allPayments.push({
           date: nextDate.toISOString(),
           amount: amountEur,
@@ -833,7 +833,7 @@ export async function getUpcomingPayments(numMonths = 6) {
     const renewalDate = props.manualRenewalDate ? new Date(props.manualRenewalDate) : null;
     const startDate = props.manualSubscriptionStart ? new Date(props.manualSubscriptionStart) : null;
 
-    let nextDate = renewalDate || inferNextBonificoDate(startDate, interval, intervalCount, now);
+    let nextDate = renewalDate || inferNextBonificoDate(startDate, interval, intervalCount, new Date());
     if (!nextDate) continue;
 
     const name = c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
@@ -858,8 +858,7 @@ export async function getUpcomingPayments(numMonths = 6) {
 
   const monthMap = {};
   for (const p of allPayments) {
-    const d = new Date(p.date);
-    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const monthKey = toMonthKey(new Date(p.date));
     if (!monthMap[monthKey]) {
       monthMap[monthKey] = { month: monthKey, totalAmount: 0, paymentCount: 0, payments: [] };
     }
@@ -868,15 +867,22 @@ export async function getUpcomingPayments(numMonths = 6) {
     monthMap[monthKey].payments.push(p);
   }
 
-  const months = Object.values(monthMap)
-    .sort((a, b) => a.month.localeCompare(b.month))
-    .map(m => ({
-      ...m,
-      payments: m.payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
-    }));
+  const currentMonth = getCurrentMonthRome();
+  const months = getUpcomingMonthRange(numMonths, currentMonth).map(monthKey => {
+    const entry = monthMap[monthKey];
+    return {
+      month: monthKey,
+      totalAmount: entry?.totalAmount || 0,
+      paymentCount: entry?.paymentCount || 0,
+      payments: (entry?.payments || []).sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      ),
+    };
+  });
 
   return {
     months,
+    currentMonth,
     grandTotal: months.reduce((s, m) => s + m.totalAmount, 0),
     subscriptionCount: allSubs.length,
     bonificoCount: bonificoContacts.length,
@@ -1126,6 +1132,44 @@ async function buildChainedPrevContactMap(allContacts, targetMonth) {
     prevContactMap = buildPrevMapFromContacts(contactsForMonth);
   }
   return prevContactMap;
+}
+
+const ROME_TZ = 'Europe/Rome';
+
+function getRomeDateParts(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ROME_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const [y, m, d] = fmt.format(date).split('-').map(Number);
+  return { y, m, d };
+}
+
+function toRomeDateString(date) {
+  const { y, m, d } = getRomeDateParts(date);
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function toMonthKey(date) {
+  const { y, m } = getRomeDateParts(date);
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
+function getCurrentMonthRome() {
+  return toMonthKey(new Date());
+}
+
+function getUpcomingMonthRange(numMonths, startMonth) {
+  const months = [];
+  let [y, m] = startMonth.split('-').map(Number);
+  for (let i = 0; i < numMonths; i++) {
+    months.push(`${y}-${String(m).padStart(2, '0')}`);
+    m++;
+    if (m > 12) { m = 1; y++; }
+  }
+  return months;
 }
 
 function getCurrentMonth() {
