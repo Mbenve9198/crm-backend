@@ -5,6 +5,7 @@ import {
   getPlansTrend,
   getPlansFromContacts,
   getCustomersList,
+  getUpcomingPayments,
   generateSnapshot,
   backfillFromStripe,
 } from '../services/saasMetricsService.js';
@@ -68,6 +69,17 @@ export async function plansFromContacts(req, res) {
     res.json({ success: true, data });
   } catch (error) {
     console.error('❌ SaaS Metrics plans-from-contacts error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+export async function upcomingPayments(req, res) {
+  try {
+    const months = parseInt(req.query.months) || 6;
+    const data = await getUpcomingPayments(months);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('❌ SaaS Metrics upcoming payments error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 }

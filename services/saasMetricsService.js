@@ -699,6 +699,190 @@ export async function getCustomersList({ search, sort, order } = {}) {
   return { customers, totalMrr, totalCustomers: activeContacts.length };
 }
 
+/**
+ * Forecast upcoming subscription payments grouped by month.
+ * Uses Stripe subscriptions (current_period_end + billing interval).
+ */
+export async function getUpcomingPayments(numMonths = 6) {
+  const stripe = getStripe();
+  const VAT_RATE = Number(process.env.STRIPE_VAT_RATE) || 0.22;
+
+  const contacts = await Contact.find({
+    stripeCustomerId: { $exists: true, $ne: null },
+  }).select('_id name firstName lastName email stripeCustomerId stripeData').lean();
+
+  const contactByCustomer = {};
+  for (const c of contacts) {
+    contactByCustomer[c.stripeCustomerId] = c;
+  }
+
+  const allSubs = [];
+  for (const status of ['active', 'trialing']) {
+    let hasMore = true;
+    let startingAfter;
+    while (hasMore) {
+      const batch = await stripe.subscriptions.list({
+        status,
+        limit: 100,
+        expand: ['data.items.data.price', 'data.customer'],
+        ...(startingAfter && { starting_after: startingAfter }),
+      });
+      allSubs.push(...batch.data);
+      hasMore = batch.has_more;
+      if (batch.data.length) startingAfter = batch.data[batch.data.length - 1].id;
+      if (hasMore) await delay(50);
+    }
+  }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const horizon = new Date(now.getFullYear(), now.getMonth() + numMonths + 1, 0, 23, 59, 59);
+
+  const intervalLabels = {
+    'year-1': 'Annuale',
+    'month-1': 'Mensile',
+    'month-2': 'Bimestrale',
+    'month-3': 'Trimestrale',
+    'month-4': 'Quadrimestrale',
+    'month-6': 'Semestrale',
+  };
+
+  const allPayments = [];
+
+  for (const sub of allSubs) {
+    const custId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+    const contact = contactByCustomer[custId];
+    const customerObj = typeof sub.customer === 'object' ? sub.customer : null;
+    const { interval, intervalCount } = detectIntervalFromSub(sub);
+
+    const items = sub.items?.data || [];
+    let periodCents = 0;
+    for (const item of items) {
+      periodCents += (item.price?.unit_amount || item.plan?.amount || 0) * (item.quantity || 1);
+    }
+
+    // Try upcoming invoice for the next charge (includes discounts/tax)
+    let amountEur = Math.round(periodCents * (1 + VAT_RATE) / 100);
+    try {
+      const upcoming = await stripe.invoices.retrieveUpcoming({ subscription: sub.id });
+      if (upcoming?.total) {
+        amountEur = Math.round(Math.abs(upcoming.total) / 100);
+      }
+    } catch {
+      // No upcoming invoice (e.g. trial) — keep estimate
+    }
+
+    const firstItem = items[0];
+    const planName = firstItem?.price?.nickname
+      || (typeof firstItem?.price?.product === 'object' ? firstItem.price.product.name : null)
+      || contact?.stripeData?.planName
+      || 'Unknown';
+
+    const iKey = `${interval}-${intervalCount}`;
+    const billingLabel = intervalLabels[iKey] || interval;
+
+    const name = contact
+      ? (contact.name || [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || '–')
+      : customerObj?.name || customerObj?.email || custId;
+
+    const nextTs = (sub.status === 'trialing' && sub.trial_end)
+      ? sub.trial_end
+      : sub.current_period_end;
+
+    let nextDate = new Date(nextTs * 1000);
+    const stopAfterFirst = sub.cancel_at_period_end;
+    const maxDate = stopAfterFirst ? nextDate : horizon;
+
+    while (nextDate <= maxDate) {
+      if (nextDate >= now) {
+        allPayments.push({
+          date: nextDate.toISOString(),
+          amount: amountEur,
+          contactId: contact?._id?.toString() || null,
+          contactName: name,
+          planName,
+          billingLabel,
+          subscriptionId: sub.id,
+          status: sub.status,
+          source: 'stripe',
+        });
+      }
+      if (stopAfterFirst) break;
+      nextDate = addBillingInterval(nextDate, interval, intervalCount);
+    }
+
+    await delay(30);
+  }
+
+  // Bonifico bancario contacts
+  const bonificoContacts = await Contact.find({
+    'properties.paymentMethod': 'bonifico_bancario',
+    status: 'won',
+    'properties.manualMrr': { $gt: 0 },
+  }).select('_id name firstName lastName email properties').lean();
+
+  for (const c of bonificoContacts) {
+    const props = c.properties || {};
+    const mrr = props.manualMrr || 0;
+    if (mrr <= 0) continue;
+
+    const planName = props.manualPlanName || 'Bonifico Bancario';
+    const { interval, intervalCount, periodMonths, billingLabel } = bonificoPlanToInterval(planName);
+    const amountEur = Math.round(mrr * periodMonths);
+
+    const renewalDate = props.manualRenewalDate ? new Date(props.manualRenewalDate) : null;
+    const startDate = props.manualSubscriptionStart ? new Date(props.manualSubscriptionStart) : null;
+
+    let nextDate = renewalDate || inferNextBonificoDate(startDate, interval, intervalCount, now);
+    if (!nextDate) continue;
+
+    const name = c.name || [c.firstName, c.lastName].filter(Boolean).join(' ') || c.email || '–';
+
+    while (nextDate <= horizon) {
+      if (nextDate >= now) {
+        allPayments.push({
+          date: nextDate.toISOString(),
+          amount: amountEur,
+          contactId: c._id.toString(),
+          contactName: name,
+          planName,
+          billingLabel,
+          subscriptionId: null,
+          status: 'active',
+          source: 'bonifico',
+        });
+      }
+      nextDate = addBillingInterval(nextDate, interval, intervalCount);
+    }
+  }
+
+  const monthMap = {};
+  for (const p of allPayments) {
+    const d = new Date(p.date);
+    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!monthMap[monthKey]) {
+      monthMap[monthKey] = { month: monthKey, totalAmount: 0, paymentCount: 0, payments: [] };
+    }
+    monthMap[monthKey].totalAmount += p.amount;
+    monthMap[monthKey].paymentCount += 1;
+    monthMap[monthKey].payments.push(p);
+  }
+
+  const months = Object.values(monthMap)
+    .sort((a, b) => a.month.localeCompare(b.month))
+    .map(m => ({
+      ...m,
+      payments: m.payments.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()),
+    }));
+
+  return {
+    months,
+    grandTotal: months.reduce((s, m) => s + m.totalAmount, 0),
+    subscriptionCount: allSubs.length,
+    bonificoCount: bonificoContacts.length,
+  };
+}
+
 // ─── Helpers ────────────────────────────────────────────────
 
 function classifyMovements(month, snapshotDate, activeContacts, prevContactMap, prevSnapshot) {
@@ -1001,4 +1185,52 @@ function centsToMonthly(cents, interval, intervalCount) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function addBillingInterval(date, interval, intervalCount) {
+  const d = new Date(date);
+  if (interval === 'year') {
+    d.setFullYear(d.getFullYear() + intervalCount);
+  } else if (interval === 'month') {
+    d.setMonth(d.getMonth() + intervalCount);
+  } else if (interval === 'week') {
+    d.setDate(d.getDate() + 7 * intervalCount);
+  } else {
+    d.setDate(d.getDate() + intervalCount);
+  }
+  return d;
+}
+
+function bonificoPlanToInterval(planName) {
+  const p = (planName || '').toLowerCase();
+  if (p.includes('mensile')) {
+    return { interval: 'month', intervalCount: 1, periodMonths: 1, billingLabel: 'Mensile' };
+  }
+  if (p.includes('bimestrale')) {
+    return { interval: 'month', intervalCount: 2, periodMonths: 2, billingLabel: 'Bimestrale' };
+  }
+  if (p.includes('trimestrale')) {
+    return { interval: 'month', intervalCount: 3, periodMonths: 3, billingLabel: 'Trimestrale' };
+  }
+  if (p.includes('quadrimestrale')) {
+    return { interval: 'month', intervalCount: 4, periodMonths: 4, billingLabel: 'Quadrimestrale' };
+  }
+  if (p.includes('semestrale')) {
+    return { interval: 'month', intervalCount: 6, periodMonths: 6, billingLabel: 'Semestrale' };
+  }
+  return { interval: 'year', intervalCount: 1, periodMonths: 12, billingLabel: 'Annuale' };
+}
+
+function inferNextBonificoDate(startDate, interval, intervalCount, now) {
+  if (!startDate) return null;
+  let d = new Date(startDate);
+  d.setHours(0, 0, 0, 0);
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  let guard = 0;
+  while (d < today && guard < 120) {
+    d = addBillingInterval(d, interval, intervalCount);
+    guard++;
+  }
+  return d;
 }
