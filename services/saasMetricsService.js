@@ -762,16 +762,14 @@ export async function getUpcomingPayments(numMonths = 6) {
       periodCents += (item.price?.unit_amount || item.plan?.amount || 0) * (item.quantity || 1);
     }
 
-    // Importo lordo: preview Stripe (IVA incl.) o stima da listino + IVA
-    let amountEur = grossFromNet(Math.round(periodCents / 100));
+    // Netto (+ lordo calcolato) da preview Stripe o stima listino
+    let upcoming = null;
     try {
-      const upcoming = await stripe.invoices.createPreview({ subscription: sub.id });
-      if (upcoming?.total) {
-        amountEur = Math.round(Math.abs(upcoming.total) / 100);
-      }
+      upcoming = await stripe.invoices.createPreview({ subscription: sub.id });
     } catch {
-      // Es. abbonamento in cancellazione — usa stima lorda
+      // Es. abbonamento in cancellazione — usa stima da listino
     }
+    const { amountNet, amountGross } = computePaymentAmounts({ periodCents, upcoming, vatRate: VAT_RATE });
 
     const firstItem = items[0];
     const planName = firstItem?.price?.nickname
@@ -801,7 +799,8 @@ export async function getUpcomingPayments(numMonths = 6) {
       if (toRomeDateString(nextDate) >= todayRome) {
         allPayments.push({
           date: nextDate.toISOString(),
-          amount: amountEur,
+          amount: amountNet,
+          amountGross,
           contactId: contact?._id?.toString() || null,
           contactName: name,
           planName,
@@ -832,7 +831,8 @@ export async function getUpcomingPayments(numMonths = 6) {
 
     const planName = props.manualPlanName || 'Bonifico Bancario';
     const { interval, intervalCount, periodMonths, billingLabel } = bonificoPlanToInterval(planName);
-    const amountEur = grossFromNet(Math.round(mrr * periodMonths));
+    const amountNet = Math.round(mrr * periodMonths);
+    const amountGross = grossFromNet(amountNet);
 
     const renewalDate = props.manualRenewalDate ? new Date(props.manualRenewalDate) : null;
     const startDate = props.manualSubscriptionStart ? new Date(props.manualSubscriptionStart) : null;
@@ -846,7 +846,8 @@ export async function getUpcomingPayments(numMonths = 6) {
       if (toRomeDateString(nextDate) >= todayRome) {
         allPayments.push({
           date: nextDate.toISOString(),
-          amount: amountEur,
+          amount: amountNet,
+          amountGross,
           contactId: c._id.toString(),
           contactName: name,
           planName,
@@ -864,9 +865,10 @@ export async function getUpcomingPayments(numMonths = 6) {
   for (const p of allPayments) {
     const monthKey = toMonthKey(new Date(p.date));
     if (!monthMap[monthKey]) {
-      monthMap[monthKey] = { month: monthKey, totalAmount: 0, paymentCount: 0, payments: [] };
+      monthMap[monthKey] = { month: monthKey, totalAmount: 0, totalAmountGross: 0, paymentCount: 0, payments: [] };
     }
     monthMap[monthKey].totalAmount += p.amount;
+    monthMap[monthKey].totalAmountGross += p.amountGross;
     monthMap[monthKey].paymentCount += 1;
     monthMap[monthKey].payments.push(p);
   }
@@ -877,6 +879,7 @@ export async function getUpcomingPayments(numMonths = 6) {
     return {
       month: monthKey,
       totalAmount: entry?.totalAmount || 0,
+      totalAmountGross: entry?.totalAmountGross || 0,
       paymentCount: entry?.paymentCount || 0,
       payments: (entry?.payments || []).sort(
         (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
@@ -887,8 +890,9 @@ export async function getUpcomingPayments(numMonths = 6) {
   return {
     months,
     currentMonth,
-    amountsIncludeVat: true,
+    amountsIncludeVat: false,
     grandTotal: months.reduce((s, m) => s + m.totalAmount, 0),
+    grandTotalGross: months.reduce((s, m) => s + m.totalAmountGross, 0),
     subscriptionCount: allSubs.length,
     bonificoCount: bonificoContacts.length,
   };
@@ -1297,4 +1301,25 @@ function inferNextBonificoDate(startDate, interval, intervalCount, now) {
     guard++;
   }
   return d;
+}
+
+function computePaymentAmounts({ periodCents, upcoming, vatRate }) {
+  const grossFromNetLocal = (net) => Math.round(net * (1 + vatRate));
+  const netFromGrossLocal = (gross) => Math.round(gross / (1 + vatRate));
+
+  let amountNet = Math.round(periodCents / 100);
+  let amountGross = grossFromNetLocal(amountNet);
+
+  if (upcoming?.total) {
+    amountGross = Math.round(Math.abs(upcoming.total) / 100);
+    if (typeof upcoming.tax === 'number' && upcoming.tax > 0) {
+      amountNet = Math.round((Math.abs(upcoming.total) - upcoming.tax) / 100);
+    } else if (typeof upcoming.subtotal_excluding_tax === 'number' && upcoming.subtotal_excluding_tax > 0) {
+      amountNet = Math.round(Math.abs(upcoming.subtotal_excluding_tax) / 100);
+    } else {
+      amountNet = netFromGrossLocal(amountGross);
+    }
+  }
+
+  return { amountNet, amountGross };
 }
