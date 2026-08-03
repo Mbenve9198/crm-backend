@@ -706,6 +706,7 @@ export async function getCustomersList({ search, sort, order } = {}) {
 export async function getUpcomingPayments(numMonths = 6) {
   const stripe = getStripe();
   const VAT_RATE = Number(process.env.STRIPE_VAT_RATE) || 0.22;
+  const grossFromNet = (netEur) => Math.round(netEur * (1 + VAT_RATE));
 
   const contacts = await Contact.find({
     stripeCustomerId: { $exists: true, $ne: null },
@@ -761,15 +762,15 @@ export async function getUpcomingPayments(numMonths = 6) {
       periodCents += (item.price?.unit_amount || item.plan?.amount || 0) * (item.quantity || 1);
     }
 
-    // Try upcoming invoice for the next charge (includes discounts/tax)
-    let amountEur = Math.round(periodCents * (1 + VAT_RATE) / 100);
+    // Importo lordo: preview Stripe (IVA incl.) o stima da listino + IVA
+    let amountEur = grossFromNet(Math.round(periodCents / 100));
     try {
       const upcoming = await stripe.invoices.createPreview({ subscription: sub.id });
       if (upcoming?.total) {
         amountEur = Math.round(Math.abs(upcoming.total) / 100);
       }
     } catch {
-      // No preview available (e.g. trial) — keep estimate
+      // Es. abbonamento in cancellazione — usa stima lorda
     }
 
     const firstItem = items[0];
@@ -831,7 +832,7 @@ export async function getUpcomingPayments(numMonths = 6) {
 
     const planName = props.manualPlanName || 'Bonifico Bancario';
     const { interval, intervalCount, periodMonths, billingLabel } = bonificoPlanToInterval(planName);
-    const amountEur = Math.round(mrr * periodMonths);
+    const amountEur = grossFromNet(Math.round(mrr * periodMonths));
 
     const renewalDate = props.manualRenewalDate ? new Date(props.manualRenewalDate) : null;
     const startDate = props.manualSubscriptionStart ? new Date(props.manualSubscriptionStart) : null;
@@ -886,6 +887,7 @@ export async function getUpcomingPayments(numMonths = 6) {
   return {
     months,
     currentMonth,
+    amountsIncludeVat: true,
     grandTotal: months.reduce((s, m) => s + m.totalAmount, 0),
     subscriptionCount: allSubs.length,
     bonificoCount: bonificoContacts.length,
