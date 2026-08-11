@@ -241,6 +241,18 @@ function buildDiscovery(slots) {
       ...(slots.reviews != null ? { knownFact: `${slots.reviews} rec Maps` } : {}),
     },
     {
+      id: 'q1b_decision',
+      label: 'Chi decide',
+      mode: 'ask',
+      line:
+        'Su menu e cose nuove in sala, la decisione la prendi tu o c’è anche un socio/titolare da coinvolgere?',
+      choiceOptions: [
+        { id: 'me', label: 'Decido io' },
+        { id: 'with_partner', label: 'Con socio/titolare' },
+        { id: 'other', label: 'Altra persona' },
+      ],
+    },
+    {
       id: 'q2_covers',
       label: 'Coperti / settimana',
       mode: 'ask',
@@ -302,27 +314,104 @@ function buildTrialSteps(slots) {
           'Bene, ti spiego come funziona: mettiamo dei QR code sui tavoli e quando il cliente scannerizza per vedere il menu digitale si apre una chat WhatsApp che invia in automatico il menu. Dopo che ha finito di mangiare, quando l’esperienza è ancora calda, riceve un messaggio WhatsApp con la richiesta di recensione e link diretto a Google. Puoi aspettarti che ogni 100 persone che vedono il menu, circa 10 mettano la recensione. Ti è chiaro fin qui?',
       },
       {
+        id: 'start_timing',
+        title: 'Partenza prova',
+        line:
+          'Se ti torna il conto, la prova di due settimane la apriamo questa settimana — o siete in un momento in cui non toccate nulla?',
+        choiceOptions: [
+          { id: 'this_week', label: 'Questa settimana' },
+          { id: 'later', label: 'Non ora' },
+        ],
+      },
+      {
         id: 'ship_qr',
         title: 'Spedizione QR',
         line:
           'Per iniziare la prova ti inviamo 50 QR code direttamente all’indirizzo che preferisci: ti costano giusto 25€ + IVA per la stampa e la spedizione. Tu dovrai solo mettere i QR sui tavoli e togliere il cartaceo (davvero importante). A che indirizzo posso inviarteli?',
+        fields: [
+          {
+            id: 'trial_ship_address',
+            label: 'Indirizzo spedizione QR',
+            placeholder: 'Via, CAP, città (e eventuale riferimento)',
+          },
+        ],
       },
       {
         id: 'invoice',
         title: 'Fattura setup',
         line:
           'Ok, te li spediamo in giornata. Intanto ti mando la fattura dei 25€ + IVA: basta la paghi entro un paio di giorni. Mi servirebbe P.IVA, ragione sociale, sede legale e codice univoco.',
+        fields: [
+          {
+            id: 'trial_ragione_sociale',
+            label: 'Ragione sociale',
+            placeholder: 'es. Ristorante Rossi Srl',
+          },
+          {
+            id: 'trial_piva',
+            label: 'P.IVA',
+            placeholder: '11 cifre',
+          },
+          {
+            id: 'trial_sede_legale',
+            label: 'Sede legale',
+            placeholder: 'Via, CAP, città',
+          },
+          {
+            id: 'trial_codice_univoco',
+            label: 'Codice univoco / SDI',
+            placeholder: '7 caratteri o PEC',
+          },
+        ],
       },
       {
         id: 'menu_assets',
         title: 'Menu (digitale o cartaceo)',
         line:
           'Se ha già menu digitale: mi manderesti il link al tuo menu digitale o una foto del QR che hai sui tavoli? Se non ce l’ha: mi manderesti PDF oppure foto del tuo menu cartaceo? Così ti preparo il tuo menu digitale.',
+        fields: [
+          {
+            id: 'trial_menu_asset',
+            label: 'Link menu / nota asset',
+            placeholder: 'URL, «foto via WA», «PDF in arrivo»…',
+          },
+        ],
       },
       {
         id: 'wa_number',
         title: 'WhatsApp',
         line: 'Perfetto, il tuo numero WhatsApp dove posso inviarti il menu digitale?',
+        fields: [
+          {
+            id: 'trial_whatsapp',
+            label: 'Numero WhatsApp',
+            placeholder: '333…',
+            inputType: 'tel',
+          },
+        ],
+      },
+      {
+        id: 'go_live',
+        title: 'Messa live + check',
+        line:
+          'Quando riesci a metterli sui tavoli? Così so da quando partono le due settimane. E fissiamo un check veloce dopo che sono arrivati.',
+        fields: [
+          {
+            id: 'trial_qr_live',
+            label: 'Data messa QR sui tavoli',
+            placeholder: 'es. giovedì dopo pranzo',
+          },
+          {
+            id: 'trial_check_call',
+            label: 'Check post-arrivo',
+            placeholder: 'es. lunedì 11:30',
+          },
+          {
+            id: 'trial_ops_owner',
+            label: 'Referente sala (chi mette i QR)',
+            placeholder: 'Nome / ruolo — eventuale cell',
+          },
+        ],
       },
       {
         id: 'remind_paper',
