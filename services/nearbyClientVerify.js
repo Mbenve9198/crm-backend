@@ -40,17 +40,34 @@ export function haversineM(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 
+const NAME_STOP = new Set([
+  'ristorante', 'pizzeria', 'restaurant', 'pizza', 'bar', 'cafe', 'caffè', 'caffe',
+  'trattoria', 'osteria', 'hostaria', 'hotel', 'steakhouse', 'pub', 'grill',
+  'cucina', 'food', 'the', 'and', 'del', 'della', 'delle', 'dei', 'di', 'da', 'al',
+  'la', 'il', 'lo', 'le', 'gli', 'con', 'per', 'san', 'santa',
+]);
+
+function significantTokens(name) {
+  return normalizeName(name)
+    .split(' ')
+    .filter((t) => t.length > 2 && !NAME_STOP.has(t));
+}
+
 function nameLooseMatch(a, b) {
   const na = normalizeName(a);
   const nb = normalizeName(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
-  if (na.includes(nb) || nb.includes(na)) return true;
-  const ta = na.split(' ').filter((t) => t.length > 3);
-  const tb = new Set(nb.split(' ').filter((t) => t.length > 3));
+  // includes solo se il più corto ha abbastanza segnale (evita "bar" ⊆ qualsiasi)
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer = na.length <= nb.length ? nb : na;
+  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  const ta = significantTokens(a);
+  const tb = new Set(significantTokens(b));
   if (ta.length === 0 || tb.size === 0) return false;
   const hit = ta.filter((t) => tb.has(t)).length;
-  return hit >= Math.min(2, ta.length);
+  // almeno 2 token significativi in comune
+  return hit >= 2;
 }
 
 async function serp(params) {
@@ -107,14 +124,45 @@ export async function buildAnchorIndex(Contact, { anchors, cityHintByAnchor = {}
     }
 
     const city = cityHintByAnchor[rawName] || '';
-    const q = [rawName, city].filter(Boolean).join(' ');
+    const cleaned = String(rawName).replace(/[""]/g, '"').replace(/^["']|["']$/g, '');
+    const q = [cleaned, city].filter(Boolean).join(' ');
     try {
       const data = await serp({ engine: 'google_maps', type: 'search', q });
-      const results = data.local_results || [];
-      const hit =
-        results.find((r) => nameLooseMatch(r.title, rawName)) || results[0] || null;
+      // SerpAPI spesso torna place_results (match unico) invece di local_results
+      const results = [...(data.local_results || [])];
+      if (data.place_results?.title) {
+        results.unshift({
+          title: data.place_results.title,
+          place_id: data.place_results.place_id,
+          gps_coordinates: data.place_results.gps_coordinates,
+        });
+      }
+      // Mai primo risultato cieco: solo match nome (altrimenti Arizona / omonimi)
+      let hit = results.find((r) => nameLooseMatch(r.title, rawName) || nameLooseMatch(r.title, cleaned)) || null;
+      if (hit?.place_id && !hit.gps_coordinates) {
+        const placeData = await serp({
+          engine: 'google_maps',
+          type: 'place',
+          place_id: hit.place_id,
+        });
+        const p = placeData.place_results;
+        if (p?.gps_coordinates) {
+          hit = {
+            ...hit,
+            title: p.title || hit.title,
+            gps_coordinates: p.gps_coordinates,
+            place_id: p.place_id || hit.place_id,
+          };
+        }
+      }
       if (!hit?.gps_coordinates) {
-        index.set(key, { name: rawName, lat: null, lng: null, placeId: null, source: 'unresolved' });
+        index.set(key, {
+          name: rawName,
+          lat: null,
+          lng: null,
+          placeId: null,
+          source: 'unresolved',
+        });
         continue;
       }
       index.set(key, {
