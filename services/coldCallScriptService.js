@@ -158,7 +158,9 @@ function buildOpening(slots) {
   return lines.join(' ');
 }
 
+/** Posizione relativa vs competitor — null se #1 o senza competitor noti. */
 function competitorsPhrase(slots) {
+  if (slots.rank === 1) return null;
   const comps = slots.competitors || [];
   if (comps.length >= 2) {
     return `sotto ${comps[0].name} e ${comps[1].name}`;
@@ -166,27 +168,35 @@ function competitorsPhrase(slots) {
   if (comps.length === 1) {
     return `sotto ${comps[0].name}`;
   }
-  return 'sotto altri locali della zona';
+  if (slots.rank != null && slots.rank > 1) {
+    return 'dietro ad altri locali della zona';
+  }
+  return null;
+}
+
+function reviewsPossessivePhrase(slots) {
+  if (slots.reviews != null) return `le vostre ${slots.reviews} recensioni`;
+  return 'le vostre recensioni';
 }
 
 function buildHook(slots) {
   const keyword = slots.keyword || 'la vostra categoria in zona';
   const rankTxt = slots.rank != null ? `#${slots.rank}` : 'fuori dai primi risultati';
-  const reviews = slots.reviews != null ? String(slots.reviews) : 'queste';
+  const under = competitorsPhrase(slots);
+  const positionBit = under ? `${rankTxt}, ${under}` : rankTxt;
   return (
-    `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}», e siete apparsi ${rankTxt}, ${competitorsPhrase(slots)}. ` +
-    `Il modo migliore per apparire nei primi risultati è avere più recensioni: come avete raccolto le vostre ${reviews} recensioni?`
+    `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}», e siete apparsi ${positionBit}. ` +
+    `Il modo migliore per apparire nei primi risultati è avere più recensioni: come avete raccolto ${reviewsPossessivePhrase(slots)}?`
   );
 }
 
 function buildDiscovery(slots) {
-  const reviews = slots.reviews != null ? String(slots.reviews) : 'queste';
   return [
     {
       id: 'q1',
       label: 'Recensioni oggi',
       mode: 'ask',
-      line: `Come avete raccolto le vostre ${reviews} recensioni?`,
+      line: `Come avete raccolto ${reviewsPossessivePhrase(slots)}?`,
       ...(slots.reviews != null ? { knownFact: `${slots.reviews} rec Maps` } : {}),
     },
     {
@@ -447,11 +457,40 @@ export function buildColdCallScript(contact) {
   };
 }
 
-export function buildMapsHookLine(slotsOrCard) {
-  // compat: accettava slots da extract; o card grezza via mapsHookFromCard
-  const slots = slotsOrCard?.nearby ? slotsOrCard : null;
+function positionKind(slots) {
+  const { keyword, rank, competitor } = slots;
+  if (keyword && rank === 1) return 'rank1';
+  if (keyword && rank != null && competitor) return 'trailing';
+  if (keyword && rank != null) return 'ranked';
+  return 'none';
+}
+
+function ratingReviewsSuffix(slots) {
+  const { reviews, rating } = slots;
+  return `${reviews != null ? ` con ${reviews} recensioni` : ''}${
+    rating != null ? ` (⭐ ${rating})` : ''
+  }`;
+}
+
+/** Pezzo Maps monolinea (CLI test + compat). Null se keyword/rank mancanti. */
+export function buildMapsHookLine(slots) {
   if (!slots) return null;
-  return buildHook(slots);
+  const { keyword, rank, competitor } = slots;
+  const kind = positionKind(slots);
+  const suffix = ratingReviewsSuffix(slots);
+
+  if (kind === 'rank1') {
+    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
+  }
+  if (kind === 'trailing') {
+    return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${
+      competitor.reviews ? `, ${competitor.reviews} rec` : ''
+    }). Voi risultate #${rank}${suffix}.`;
+  }
+  if (kind === 'ranked') {
+    return `Su Maps, per «${keyword}» risultate #${rank}${suffix}.`;
+  }
+  return null;
 }
 
 /** Hook Maps monolinea da card grezza (CLI markdown test). */
@@ -461,7 +500,7 @@ export function mapsHookFromCard(card) {
     { name: card?.place?.name || card?.contact?.name || '', properties: {} },
     card
   );
-  return buildHook(slots);
+  return buildMapsHookLine(slots);
 }
 
 export function summarizeVisibilityCard(contact) {
@@ -498,6 +537,7 @@ export default {
   buildColdCallScript,
   summarizeVisibilityCard,
   mapsHookFromCard,
+  buildMapsHookLine,
   computeCoverProjections,
   ratingAfterOneStar,
   fillScriptTemplate,
