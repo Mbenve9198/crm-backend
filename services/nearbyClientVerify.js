@@ -5,7 +5,8 @@
 
 import axios from 'axios';
 
-const DEFAULT_MAX_DIST_M = 1000;
+/** Raggio “vicino” per verify + enrich: 1.5 km (prima 1 km). */
+const DEFAULT_MAX_DIST_M = 1500;
 
 function requireEnv(name) {
   const v = process.env[name];

@@ -4,6 +4,10 @@ import {
   summarizeVisibilityCard,
   COLD_CALL_DEFAULT_LIST,
 } from './coldCallScriptService.js';
+import { NEARBY_DEFAULT_MAX_DIST_M } from './nearbyClientVerify.js';
+
+/** Allineato a enrich/verify: lead entro questo raggio dal cliente ancora. */
+export const DIALER_MAX_DIST_M = NEARBY_DEFAULT_MAX_DIST_M;
 
 /**
  * Owner filter allineato a getContacts (agent / manager|admin / else).
@@ -63,7 +67,7 @@ function buildBaseQueueFilter({ user, list, status, owner }) {
             onNull: 1e12,
           },
         },
-        1000,
+        DIALER_MAX_DIST_M,
       ],
     };
   }
@@ -109,15 +113,85 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
 
   const [total, contacts, cityFacet] = await Promise.all([
     Contact.countDocuments(filter),
-    Contact.find(filter)
-      .select(
-        'name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats updatedAt createdAt'
-      )
-      .populate('owner', 'firstName lastName email role')
-      .sort({ 'properties.dist_m': 1, updatedAt: -1 })
-      .skip(resolvedOffset)
-      .limit(resolvedLimit)
-      .lean(),
+    // Enrichati prima (visibilityCard.place.name), poi più vicini.
+    Contact.aggregate([
+      { $match: filter },
+      {
+        $addFields: {
+          _enriched: {
+            $cond: [
+              {
+                $gt: [
+                  {
+                    $strLenCP: {
+                      $trim: {
+                        input: {
+                          $ifNull: ['$properties.visibilityCard.place.name', ''],
+                        },
+                      },
+                    },
+                  },
+                  0,
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+          _distM: {
+            $convert: {
+              input: '$properties.dist_m',
+              to: 'double',
+              onError: 1e12,
+              onNull: 1e12,
+            },
+          },
+        },
+      },
+      { $sort: { _enriched: -1, _distM: 1, updatedAt: -1 } },
+      { $skip: resolvedOffset },
+      { $limit: resolvedLimit },
+      {
+        $project: {
+          name: 1,
+          phone: 1,
+          email: 1,
+          status: 1,
+          lists: 1,
+          owner: 1,
+          source: 1,
+          updatedAt: 1,
+          createdAt: 1,
+          properties: {
+            cliente_vicino: '$properties.cliente_vicino',
+            dist_m: '$properties.dist_m',
+            dist_km: '$properties.dist_km',
+            city: '$properties.city',
+            category: '$properties.category',
+            visibilityCard: '$properties.visibilityCard',
+            visibilityCardGeneratedAt: '$properties.visibilityCardGeneratedAt',
+            nearbyVerified: '$properties.nearbyVerified',
+            nearbyVerifiedDistM: '$properties.nearbyVerifiedDistM',
+            nearbyClientStats: '$properties.nearbyClientStats',
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'owner',
+          foreignField: '_id',
+          as: '_ownerDocs',
+          pipeline: [{ $project: { firstName: 1, lastName: 1, email: 1, role: 1 } }],
+        },
+      },
+      {
+        $addFields: {
+          owner: { $arrayElemAt: ['$_ownerDocs', 0] },
+        },
+      },
+      { $project: { _ownerDocs: 0, _enriched: 0, _distM: 0 } },
+    ]),
     Contact.aggregate([
       { $match: baseFilter },
       {
@@ -186,4 +260,5 @@ export default {
   buildContactOwnerFilter,
   isDialablePhone,
   fetchDialerQueue,
+  DIALER_MAX_DIST_M,
 };

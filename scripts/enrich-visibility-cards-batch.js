@@ -4,12 +4,14 @@
  *
  * Filtri:
  *   - lista Cold Call - Vicini Clienti
+ *   - status da contattare / da richiamare (o --status=...)
  *   - cliente_vicino presente
- *   - dist_m import ≤ --max-dist-m (default 1000)
+ *   - dist_m import ≤ --max-dist-m (default 1500)
  *   - re-geo haversine lead.place ↔ ancora Menu Chat ≤ max-dist-m
  *
  * Uso:
  *   node scripts/enrich-visibility-cards-batch.js --n=50
+ *   node scripts/enrich-visibility-cards-batch.js --all
  *   node scripts/enrich-visibility-cards-batch.js --n=20 --dry-run
  *   node scripts/enrich-visibility-cards-batch.js --verify-only --n=100
  *   node scripts/enrich-visibility-cards-batch.js --max-dist-m=1500 --force --n=30
@@ -33,15 +35,25 @@ dotenv.config();
 const LIST = 'Cold Call - Vicini Clienti';
 const DEFAULT_N = 50;
 const SLEEP_MS = 2500;
+const DEFAULT_STATUSES = ['da contattare', 'da richiamare'];
 
 const argv = process.argv.slice(2);
 const nArg = argv.find((a) => a.startsWith('--n='));
 const distArg = argv.find((a) => a.startsWith('--max-dist-m='));
-const N = nArg ? Number(nArg.split('=')[1]) : DEFAULT_N;
+const statusArg = argv.find((a) => a.startsWith('--status='));
+const ALL = argv.includes('--all');
+const N = ALL ? null : nArg ? Number(nArg.split('=')[1]) : DEFAULT_N;
 const MAX_DIST_M = distArg ? Number(distArg.split('=')[1]) : NEARBY_DEFAULT_MAX_DIST_M;
 const DRY_RUN = argv.includes('--dry-run');
 const FORCE = argv.includes('--force');
 const VERIFY_ONLY = argv.includes('--verify-only');
+const STATUSES = statusArg
+  ? statusArg
+      .split('=')[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : DEFAULT_STATUSES;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,7 +84,7 @@ async function main() {
 
   const query = {
     lists: LIST,
-    status: 'da contattare',
+    status: { $in: STATUSES },
     phone: { $regex: '^\\+' },
     'properties.place_id': { $exists: true, $nin: [null, ''] },
     'properties.cliente_vicino': { $exists: true, $nin: [null, ''] },
@@ -94,11 +106,15 @@ async function main() {
   if (!FORCE) {
     query['properties.nearbyVerified'] = { $ne: false };
     if (!VERIFY_ONLY) {
+      // Manca una card “vera” (place.name) — include anche docs con solo nearbyClientStats.
       query.$or = [
         { 'properties.visibilityCard': { $exists: false } },
         { 'properties.visibilityCard': null },
         { 'properties.visibilityCard.place': { $exists: false } },
         { 'properties.visibilityCard.place': null },
+        { 'properties.visibilityCard.place.name': { $exists: false } },
+        { 'properties.visibilityCard.place.name': null },
+        { 'properties.visibilityCard.place.name': '' },
         { 'properties.visibilityCard.ranking.error': 'no place' },
       ];
     } else {
@@ -110,11 +126,19 @@ async function main() {
     }
   }
 
+  const totalNeed = await Contact.countDocuments(query);
+  const targetN = ALL ? totalNeed : N;
+  if (!targetN || targetN < 1) {
+    console.log(`Nessun contatto da processare (match=${totalNeed}).`);
+    await mongoose.disconnect();
+    return;
+  }
+
   // Preload pool (più ampio di N) per costruire ancore dalle città presenti
   const pool = await Contact.find(query)
     .select('name status phone properties')
     .sort({ 'properties.dist_m': 1, updatedAt: -1 })
-    .limit(Math.max(N * 3, N))
+    .limit(ALL ? targetN : Math.max(targetN * 3, targetN))
     .lean();
 
   const cityHintByAnchor = {};
@@ -127,7 +151,7 @@ async function main() {
   const uniqueAnchors = [...new Set(pool.map((c) => c.properties?.cliente_vicino).filter(Boolean))];
 
   console.log(
-    `Pool ${pool.length} (n=${N}, maxDist=${MAX_DIST_M}m, dry-run=${DRY_RUN}, force=${FORCE}, verify-only=${VERIFY_ONLY})`
+    `Pool ${pool.length}/${totalNeed} (n=${targetN}${ALL ? ' --all' : ''}, statuses=${STATUSES.join(',')}, maxDist=${MAX_DIST_M}m, dry-run=${DRY_RUN}, force=${FORCE}, verify-only=${VERIFY_ONLY})`
   );
   console.log(`Ancore uniche da risolvere: ${uniqueAnchors.length}`);
 
@@ -142,7 +166,7 @@ async function main() {
     );
   }
 
-  const contacts = pool.slice(0, N);
+  const contacts = pool.slice(0, targetN);
   let ok = 0;
   let skippedNearby = 0;
   let fail = 0;
