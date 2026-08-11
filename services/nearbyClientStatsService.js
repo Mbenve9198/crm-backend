@@ -3,7 +3,7 @@
  * Usato per condizionare opening/hook cold call: "+X rec in Y mesi".
  *
  * Evita di leggere Mongo prodotto direttamente (DB separato): usa
- * GET /api/restaurants/similar con CRM_API_KEY.
+ * GET /api/restaurants/similar + GET /api/restaurants/lookup (deep name search).
  */
 
 import axios from 'axios';
@@ -38,11 +38,31 @@ export function nameLooseMatch(a, b) {
   if (na === nb) return true;
   const shorter = na.length <= nb.length ? na : nb;
   const longer = na.length <= nb.length ? nb : na;
-  if (shorter.length >= 8 && longer.includes(shorter)) return true;
+  if (shorter.length >= 6 && longer.includes(shorter)) return true;
   const ta = significantTokens(a);
   const tb = new Set(significantTokens(b));
   if (ta.length === 0 || tb.size === 0) return false;
-  return ta.filter((t) => tb.has(t)).length >= 2;
+  const hit = ta.filter((t) => tb.has(t)).length;
+  // 2 token = match forte
+  if (hit >= 2) return true;
+  // 1 token solo se distintivo (≥6) — evita «porto» → Il Porto vs Oasi del porto
+  if (hit === 1) {
+    const shared = ta.find((t) => tb.has(t));
+    return !!shared && shared.length >= 6;
+  }
+  return false;
+}
+
+/** Pulisce prefissi/virgolette tipici degli ancora import. */
+export function cleanAnchorName(name) {
+  return String(name || '')
+    .replace(/[“”«»]/g, '"')
+    .replace(/^["'\s]+|["'\s]+$/g, '')
+    .replace(/^ristorante\s+/i, '')
+    .replace(/^pizzeria\s+/i, '')
+    .replace(/["']/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function backendUrl() {
@@ -65,6 +85,76 @@ async function fetchSimilar({ city, type, limit = 100 } = {}) {
     timeout: 45000,
   });
   return data?.restaurants || [];
+}
+
+/** Lookup approfondito per nome / placeId (senza filtro menu≥10). */
+async function fetchLookup({
+  name,
+  city,
+  placeId,
+  includeInactive = true,
+  limit = 15,
+} = {}) {
+  const base = backendUrl();
+  const key = apiKey();
+  if (!base || !key) {
+    throw new Error('CRM_API_URL / CRM_API_KEY mancanti per stats clienti-ancora');
+  }
+  const { data } = await axios.get(`${base}/api/restaurants/lookup`, {
+    params: {
+      name: name || undefined,
+      placeId: placeId || undefined,
+      city: city || undefined,
+      limit,
+      includeInactive: includeInactive ? '1' : undefined,
+    },
+    headers: { 'x-api-key': key },
+    timeout: 45000,
+  });
+  return data?.restaurants || [];
+}
+
+/** Risolve place Google dell’ancora (spesso in place_results, non local_results). */
+async function resolveAnchorPlace(name, city) {
+  const key = process.env.SERPAPI_KEY;
+  if (!key) return null;
+  const cleaned = cleanAnchorName(name);
+  const q = [cleaned || name, city].filter(Boolean).join(' ');
+  try {
+    const { data } = await axios.get('https://serpapi.com/search.json', {
+      params: {
+        api_key: key,
+        engine: 'google_maps',
+        type: 'search',
+        q,
+        hl: 'it',
+      },
+      timeout: 45000,
+    });
+    const place = data.place_results;
+    if (place?.place_id || place?.title) {
+      return {
+        title: place.title || name,
+        placeId: place.place_id || null,
+        reviews: place.reviews ?? null,
+        rating: place.rating ?? null,
+        address: place.address || null,
+      };
+    }
+    const hit = (data.local_results || []).find(
+      (r) => nameLooseMatch(r.title, name) || nameLooseMatch(r.title, cleaned)
+    );
+    if (!hit) return null;
+    return {
+      title: hit.title,
+      placeId: hit.place_id || null,
+      reviews: hit.reviews ?? null,
+      rating: hit.rating ?? null,
+      address: hit.address || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function toStats(restaurant) {
@@ -108,8 +198,31 @@ function toStats(restaurant) {
   };
 }
 
+function pickBestHit(name, city, restaurants) {
+  const hits = (restaurants || []).filter((r) => nameLooseMatch(name, r.name));
+  hits.sort((a, b) => {
+    const ca = normalizeName(a.address?.city || '');
+    const cb = normalizeName(b.address?.city || '');
+    const want = normalizeName(city || '');
+    const sa = want && ca && (ca.includes(want) || want.includes(ca)) ? 1 : 0;
+    const sb = want && cb && (cb.includes(want) || want.includes(cb)) ? 1 : 0;
+    if (sa !== sb) return sb - sa;
+    const addrA = normalizeName(a.address?.formattedAddress || '');
+    const addrB = normalizeName(b.address?.formattedAddress || '');
+    const inNameA = want && normalizeName(a.name).includes(want) ? 1 : 0;
+    const inNameB = want && normalizeName(b.name).includes(want) ? 1 : 0;
+    if (inNameA !== inNameB) return inNameB - inNameA;
+    const addrHitA = want && addrA.includes(want) ? 1 : 0;
+    const addrHitB = want && addrB.includes(want) ? 1 : 0;
+    if (addrHitA !== addrHitB) return addrHitB - addrHitA;
+    return (b.reviewsGained || 0) - (a.reviewsGained || 0);
+  });
+  return hits[0] || null;
+}
+
 /**
  * Scarica un pool di clienti-ancora (per città) e fa match per nome.
+ * Per i miss: lookup approfondito per nome (anche inactive / senza menu pieno).
  * @returns {Map<string, object>} normalizeName(anchor) → stats
  */
 export async function fetchNearbyClientStatsMap(anchors) {
@@ -129,9 +242,8 @@ export async function fetchNearbyClientStatsMap(anchors) {
   ];
 
   const byId = new Map();
-  // pool globale
   try {
-    for (const r of await fetchSimilar({ limit: 200 })) {
+    for (const r of await fetchSimilar({ limit: 500 })) {
       byId.set(String(r._id), r);
     }
   } catch {
@@ -152,17 +264,57 @@ export async function fetchNearbyClientStatsMap(anchors) {
 
   for (const name of names) {
     const city = cityHints[name];
-    const hits = restaurants.filter((r) => nameLooseMatch(name, r.name));
-    hits.sort((a, b) => {
-      const ca = normalizeName(a.address?.city || '');
-      const cb = normalizeName(b.address?.city || '');
-      const want = normalizeName(city || '');
-      const sa = want && ca && (ca.includes(want) || want.includes(ca)) ? 1 : 0;
-      const sb = want && cb && (cb.includes(want) || want.includes(cb)) ? 1 : 0;
-      if (sa !== sb) return sb - sa;
-      return (b.reviewsGained || 0) - (a.reviewsGained || 0);
-    });
-    const best = hits[0];
+    let best = pickBestHit(name, city, restaurants);
+
+    if (!best) {
+      const queries = [...new Set([name, cleanAnchorName(name)].filter(Boolean))];
+      for (const q of queries) {
+        try {
+          const deep = await fetchLookup({ name: q, city, includeInactive: true, limit: 20 });
+          best = pickBestHit(name, city, deep) || pickBestHit(q, city, deep);
+          if (best) break;
+          if (city) {
+            const deep2 = await fetchLookup({
+              name: q,
+              city: null,
+              includeInactive: true,
+              limit: 20,
+            });
+            best = pickBestHit(name, city, deep2) || pickBestHit(q, city, deep2);
+            if (best) break;
+          }
+        } catch (err) {
+          console.warn(`lookup fail «${q}»:`, err.message || err);
+        }
+      }
+    }
+
+    // Ultimo tentativo: SerpAPI → placeId → lookup prodotto
+    if (!best) {
+      const place = await resolveAnchorPlace(name, city);
+      if (place?.placeId) {
+        try {
+          const byPlace = await fetchLookup({
+            placeId: place.placeId,
+            includeInactive: true,
+            limit: 5,
+          });
+          best = byPlace[0] || null;
+          if (best) {
+            console.log(
+              `lookup via placeId «${name}» → ${best.name} (${place.placeId})`
+            );
+          } else {
+            console.warn(
+              `ancora «${name}» su Maps (${place.title}, ${place.reviews} rec) ma assente nel prodotto`
+            );
+          }
+        } catch (err) {
+          console.warn(`lookup placeId fail «${name}»:`, err.message || err);
+        }
+      }
+    }
+
     if (best) {
       map.set(normalizeName(name), toStats(best));
     }
@@ -188,6 +340,7 @@ export function formatNearbyClientProof(stats) {
 
 export default {
   nameLooseMatch,
+  cleanAnchorName,
   fetchNearbyClientStatsMap,
   formatNearbyClientProof,
 };
