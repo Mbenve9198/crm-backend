@@ -45,6 +45,8 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     lists: resolvedList,
     // Allineato a isDialablePhone: + seguito da almeno una cifra
     phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
+    // Escludi lead già re-geo come NON vicini al cliente Menu Chat
+    'properties.nearbyVerified': { $ne: false },
     ...buildContactOwnerFilter(user, owner),
   };
 
@@ -52,12 +54,30 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     filter.status = resolvedStatus;
   }
 
+  // Per la lista Vicini: richiedi ancora + dist_m import ≤ 1km (re-geo fine-grain in enrich)
+  if (resolvedList === COLD_CALL_DEFAULT_LIST) {
+    filter['properties.cliente_vicino'] = { $exists: true, $nin: [null, ''] };
+    filter.$expr = {
+      $lte: [
+        {
+          $convert: {
+            input: '$properties.dist_m',
+            to: 'double',
+            onError: 1e12,
+            onNull: 1e12,
+          },
+        },
+        1000,
+      ],
+    };
+  }
+
   const [total, contacts] = await Promise.all([
     Contact.countDocuments(filter),
     Contact.find(filter)
-      .select('name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt updatedAt createdAt')
+      .select('name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM updatedAt createdAt')
       .populate('owner', 'firstName lastName email role')
-      .sort({ updatedAt: -1 })
+      .sort({ 'properties.dist_m': 1, updatedAt: -1 })
       .skip(resolvedOffset)
       .limit(resolvedLimit)
       .lean(),

@@ -338,11 +338,13 @@ export async function reviewVelocity(place, { maxPages = 3 } = {}) {
 /**
  * Genera la visibility card completa per un contact document.
  * keyword + place in parallelo, poi rank + velocity in parallelo.
+ * @param {object} [opts.place] place già risolto (evita doppia SerpAPI dopo nearby-verify)
  * @throws se place non risolvibile — il batch non deve persistere stub.
  */
-export async function buildVisibilityCard(contact) {
+export async function buildVisibilityCard(contact, opts = {}) {
   const base = contactBaseFromDoc(contact);
-  const [keyword, place] = await Promise.all([pickKeyword(base), resolvePlace(contact)]);
+  const placePromise = opts.place ? Promise.resolve(opts.place) : resolvePlace(contact);
+  const [keyword, place] = await Promise.all([pickKeyword(base), placePromise]);
   if (!place) {
     const err = new Error(`place non risolto per ${base.name || base.id}`);
     err.code = 'NO_PLACE';

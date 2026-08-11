@@ -53,8 +53,8 @@ Output: `analysis/coldcall-alessandro/visibility-cards-test/`
 ### Gap da chiudere prima del rollout
 1. **Fallback keyword** se Maps torna 0 risultati → riprovare `alt_keywords` / keyword più ampia / zoom diverso  
 2. **Velocity più robusta**: più pagine reviews o stima vs totale; oggi ~28 newest → indicativa  
-3. **Verifica cliente vicino** (re-geo lead vs anchor) — step separato, ancora da fare  
-4. Persistenza su `contact.properties` o collection dedicata `visibilityCards`  
+3. **Verifica cliente vicino** — `services/nearbyClientVerify.js` + batch `--max-dist-m` (default 1000m). Haversine lead↔ancora; fail → `nearbyVerified=false` (esclusi dal dialer).  
+4. Persistenza su `contact.properties.visibilityCard` (batch enrich)  
 5. Serper credits se si vuole unificare provider
 
 ## Costo stimato per lead (SerpAPI)
