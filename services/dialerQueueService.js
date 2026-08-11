@@ -44,7 +44,8 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
 
   const filter = {
     lists: resolvedList,
-    phone: { $exists: true, $type: 'string', $regex: /^\s*\+/ },
+    // Allineato a isDialablePhone: + seguito da almeno una cifra
+    phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
     ...buildContactOwnerFilter(user, owner),
   };
 
@@ -63,26 +64,24 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
       .lean(),
   ]);
 
-  const data = contacts
-    .filter((c) => isDialablePhone(c.phone))
-    .map((c) => {
-      const summary = summarizeVisibilityCard(c);
-      return {
-        _id: c._id,
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        status: c.status,
-        lists: c.lists,
-        source: c.source,
-        owner: c.owner,
-        cardSummary: summary,
-        hasVisibilityCard: summary.hasVisibilityCard,
-        scriptReady: summary.hasVisibilityCard || !!(summary.nearbyClient?.name),
-        updatedAt: c.updatedAt,
-        createdAt: c.createdAt,
-      };
-    });
+  const data = contacts.map((c) => {
+    const summary = summarizeVisibilityCard(c);
+    return {
+      _id: c._id,
+      name: c.name,
+      phone: c.phone,
+      email: c.email,
+      status: c.status,
+      lists: c.lists,
+      source: c.source,
+      owner: c.owner,
+      cardSummary: summary,
+      hasVisibilityCard: summary.hasVisibilityCard,
+      scriptReady: summary.hasVisibilityCard || !!(summary.nearbyClient?.name),
+      updatedAt: c.updatedAt,
+      createdAt: c.createdAt,
+    };
+  });
 
   return {
     contacts: data,

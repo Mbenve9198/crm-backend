@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Contact from '../models/contactModel.js';
 import { buildColdCallScript } from '../services/coldCallScriptService.js';
 import { fetchDialerQueue } from '../services/dialerQueueService.js';
@@ -31,6 +32,9 @@ export const getDialerQueue = async (req, res) => {
 export const getColdCallScript = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID contatto non valido' });
+    }
     const contact = await Contact.findById(id).populate('owner', 'firstName lastName email role');
 
     if (!contact) {
@@ -67,6 +71,9 @@ function isPlainObject(value) {
 export const upsertVisibilityCard = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'ID contatto non valido' });
+    }
     const { visibilityCard } = req.body;
 
     if (!isPlainObject(visibilityCard)) {
