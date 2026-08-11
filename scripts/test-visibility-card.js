@@ -41,36 +41,83 @@ async function serp(params) {
   return data;
 }
 
+function guessNeighborhood(address = '', city = '') {
+  const a = String(address || '');
+  // pattern comuni IT: "Via X, N, CAP Città" — quartiere a volte nel nome locale, non in address
+  // Heuristic: per Roma prova a leggere pezzi noti dal nome/address se presenti
+  const known = [
+    'Trastevere', 'San Lorenzo', 'Testaccio', 'Prati', 'Ostiense', 'Centocelle',
+    'Pigneto', 'Monti', 'Esquilino', 'Flaminio', 'Parioli', 'Eur', 'Navigli',
+    'Brera', 'Isola', 'Porta Venezia', 'San Salvario', 'Centro',
+  ];
+  const blob = `${a} ${city}`;
+  return known.find(k => new RegExp(k, 'i').test(blob)) || null;
+}
+
+const TOURIST_CITIES = new Set([
+  'roma', 'rome', 'milano', 'milan', 'firenze', 'florence', 'venezia', 'venice',
+  'napoli', 'naples', 'torino', 'turin', 'bologna', 'verona', 'genova', 'genoa',
+  'palermo', 'catania', 'pisa', 'siena', 'amalfi', 'capri', 'como', 'rimini',
+  'livorno', 'la spezia', 'cinque terre',
+]);
+
+function isTouristCity(city = '') {
+  const c = normalize(city);
+  return TOURIST_CITIES.has(c) || [...TOURIST_CITIES].some(t => c.includes(t));
+}
+
 async function pickKeyword({ name, category, city, address }) {
-  const prompt = `Sei un esperto di local SEO ristorazione Italia.
-Dato questo locale, scegli UNA sola keyword di ricerca Google Maps che un cliente tipico digiterebbe per trovarlo (settore + zona quando utile).
+  const neighborhood = guessNeighborhood(`${name} ${address}`, city);
+  const tourist = isTouristCity(city);
+  const prompt = `Devi scegliere query Google Maps REALI: cosa digita qualcuno col telefono quando ha fame e vuole un posto come questo.
 
 Locale: ${name}
-Categoria Maps: ${category || 'n/d'}
+Categoria Google: ${category || 'n/d'}
 Città: ${city || 'n/d'}
+Quartiere (se noto): ${neighborhood || 'n/d'}
 Indirizzo: ${address || 'n/d'}
+Contesto domanda: ${tourist
+    ? 'CITTÀ TURISTICA — mix di ITALIANI + TURISTI (spesso cercano in inglese). Devi coprire entrambi i pubblici.'
+    : 'Città poco/medio turistica — priorità a come cercano gli ITALIANI; inglese solo se naturale (es. sushi, tacos, steakhouse).'}
+
+Come cercano le persone (non etichette SEO/categorie Google):
+- Italiani: "pizzeria San Lorenzo", "sushi Prati", "tacos Roma", "ristorante di carne Latina", "peruviano Livorno"
+- Turisti (EN): "pizza Trastevere", "tacos Rome", "steakhouse Rome", "peruvian restaurant Livorno", "mexican food San Lorenzo"
+- Male: "tex-mex", "bisteccheria Latina", "american restaurant", jargon da scheda Maps, categorie Google letterali
 
 Regole:
-- italiano
-- specifica del settore (es. "pizzeria Trastevere", "sushi Navigli", "ristorante di pesce Livorno")
+- "keyword" = la query PRINCIPALE più utile per una cold call (quella con più intent locale reale)
+- In città turistiche: se il traffico turistico conta, la keyword principale può essere EN; metti comunque IT nelle alt
+- In città non turistiche: keyword principale in IT (parole EN ok solo se le usano anche gli italiani: sushi, tacos, steakhouse, burger)
+- Grandi città: settore + QUARTIERE quando possibile; medie: settore + città
+- Se categoria Tex-Mex/Messicano → "tacos" / "mexican" / "messicano", MAI "tex-mex"
+- Carne/bisteccheria → "steakhouse" o "ristorante di carne", non "bisteccheria" se suona falso
 - NON usare il nome del locale
-- evita keyword troppo generiche tipo solo "ristorante" senza zona/settore
-- se la categoria è chiara, usala; altrimenti inferisci dal nome
+- 2-5 parole max
 
-Rispondi SOLO JSON valido:
-{"keyword":"...","rationale":"max 20 parole","alt_keywords":["...","..."]}`;
+Rispondi SOLO JSON:
+{
+  "keyword": "query principale",
+  "keyword_lang": "it|en",
+  "audience": "local|tourist|both",
+  "rationale": "max 25 parole",
+  "alt_keywords": ["alt IT o EN 1", "alt 2", "alt 3"]
+}`;
 
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
-    temperature: 0.2,
+    max_tokens: 400,
+    temperature: 0.3,
     messages: [{ role: 'user', content: prompt }],
   });
   const text = msg.content?.[0]?.text || '';
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start < 0 || end < 0) throw new Error(`Claude keyword parse fail: ${text}`);
-  return JSON.parse(text.slice(start, end + 1));
+  const parsed = JSON.parse(text.slice(start, end + 1));
+  parsed.neighborhood = neighborhood;
+  parsed.touristCity = tourist;
+  return parsed;
 }
 
 function normalize(s) {
@@ -136,8 +183,8 @@ async function resolvePlace(contact) {
   };
 }
 
-async function rankForKeyword(place, keyword) {
-  if (!place?.lat || !place?.lng) return { error: 'missing coords' };
+async function rankForKeywordOnce(place, keyword) {
+  if (!place?.lat || !place?.lng) return { error: 'missing coords', keyword, resultsReturned: 0 };
   const data = await serp({
     engine: 'google_maps',
     type: 'search',
@@ -167,7 +214,7 @@ async function rankForKeyword(place, keyword) {
   }
   return {
     keyword,
-    userRank: userRank ?? 'Fuori top risultati restituiti',
+    userRank: userRank ?? (results.length ? 'Fuori top risultati restituiti' : 'Nessun risultato'),
     resultsReturned: results.length,
     user: userRow ? { rating: userRow.rating, reviews: userRow.reviews, type: userRow.type } : null,
     competitorsAhead: ahead.slice(0, 5),
@@ -177,7 +224,27 @@ async function rankForKeyword(place, keyword) {
       rating: r.rating,
       reviews: r.reviews,
     })),
+    found: userRank != null,
   };
+}
+
+/** Prova keyword principale + alt finché c'è un rank trovabile o risultati utili. */
+async function rankForKeyword(place, keywordObj) {
+  const tried = [];
+  const queue = [keywordObj.keyword, ...(keywordObj.alt_keywords || [])].filter(Boolean);
+  let best = null;
+  for (const kw of queue) {
+    const r = await rankForKeywordOnce(place, kw);
+    tried.push({ keyword: kw, resultsReturned: r.resultsReturned, userRank: r.userRank });
+    if (!best) best = r;
+    if (r.found) {
+      best = { ...r, keywordTried: tried, selectedKeyword: kw };
+      break;
+    }
+    // preferisci comunque la query con più risultati locali
+    if ((r.resultsReturned || 0) > (best.resultsReturned || 0)) best = r;
+  }
+  return { ...best, keywordTried: tried, selectedKeyword: best.keyword };
 }
 
 function monthKey(iso) {
@@ -252,9 +319,11 @@ function renderCard(card) {
     `- cliente_vicino (import): ${contact.clienteVicino || 'n/d'} @ ${contact.distM ?? '?'}m`,
     ``,
     `## Keyword (Claude)`,
-    `- **${keyword.keyword}**`,
+    `- **${ranking?.selectedKeyword || keyword.keyword}**`,
+    `- audience: ${keyword.audience || 'n/d'} · lang: ${keyword.keyword_lang || 'n/d'} · tourist_city: ${keyword.touristCity ? 'yes' : 'no'}`,
     `- rationale: ${keyword.rationale || ''}`,
-    `- alt: ${(keyword.alt_keywords || []).join(' · ') || '—'}`,
+    `- proposte: ${keyword.keyword}${(keyword.alt_keywords || []).length ? ' · ' + keyword.alt_keywords.join(' · ') : ''}`,
+    `- usata per ranking: ${ranking?.selectedKeyword || keyword.keyword}`,
     ``,
     `## Profilo Google Maps`,
     `- nome Maps: ${place?.name || 'n/d'}`,
@@ -266,7 +335,7 @@ function renderCard(card) {
     `- coords: ${place?.lat ?? '?'}, ${place?.lng ?? '?'}`,
     ``,
     `## Ranking per keyword`,
-    `- keyword: **${ranking?.keyword || keyword.keyword}**`,
+    `- keyword: **${ranking?.selectedKeyword || ranking?.keyword || keyword.keyword}**`,
     `- posizione: **${ranking?.userRank ?? 'n/d'}** (su ${ranking?.resultsReturned ?? 0} risultati)`,
     ``,
     `### Competitor davanti`,
@@ -293,16 +362,17 @@ function renderCard(card) {
     }
     lines.push(`- note: ${velocity.windowNote}`);
   }
+  const kwHook = ranking?.selectedKeyword || keyword.keyword;
   lines.push('', '## Hook cold call (bozza da scheda)');
   const rankTxt = ranking?.userRank;
   const c1 = comps[0];
   if (typeof rankTxt === 'number' && c1) {
     lines.push(
-      `> Su Maps, chi cerca “${keyword.keyword}” vede prima **${c1.name}** (#${c1.rank}, ${c1.reviews} rec). Voi risultate #${rankTxt} con ${place?.reviews ?? '?'} recensioni (⭐ ${place?.rating ?? '?'}).`
+      `> Su Maps, chi cerca “${kwHook}” vede prima **${c1.name}** (#${c1.rank}, ${c1.reviews} rec). Voi risultate #${rankTxt} con ${place?.reviews ?? '?'} recensioni (⭐ ${place?.rating ?? '?'}).`
     );
   } else if (c1) {
     lines.push(
-      `> Su Maps per “${keyword.keyword}” i primi sono guidati da **${c1.name}** (${c1.reviews} rec). Voi con ${place?.reviews ?? '?'} recensioni siete fuori dai primi risultati locali.`
+      `> Su Maps per “${kwHook}” i primi sono guidati da **${c1.name}** (${c1.reviews} rec). Voi con ${place?.reviews ?? '?'} recensioni siete fuori dai primi risultati locali.`
     );
   } else {
     lines.push(`> Avete ${place?.reviews ?? '?'} recensioni a ⭐ ${place?.rating ?? '?'}; velocity recente ~${velocity?.avgPerMonthRecent ?? '?'} rec/mese.`);
@@ -368,8 +438,9 @@ async function main() {
     const place = await resolvePlace(c);
     console.log('place:', place?.name, place?.rating, place?.reviews);
 
-    const ranking = place ? await rankForKeyword(place, keyword.keyword) : { error: 'no place' };
-    console.log('rank:', ranking.userRank, 'ahead:', ranking.competitorsAhead?.length);
+    const ranking = place ? await rankForKeyword(place, keyword) : { error: 'no place' };
+    console.log('keyword picked:', keyword.keyword, '| audience:', keyword.audience, '| alts:', keyword.alt_keywords);
+    console.log('rank:', ranking.userRank, 'via', ranking.selectedKeyword, 'ahead:', ranking.competitorsAhead?.length);
 
     const velocity = place ? await reviewVelocity(place, { maxPages: 3 }) : { error: 'no place' };
     console.log('velocity avg/mo:', velocity.avgPerMonthRecent, 'fetched', velocity.fetched);
