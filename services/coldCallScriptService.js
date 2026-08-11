@@ -14,13 +14,14 @@ function pickNearby(contact, card) {
   const props = contact.properties || {};
   const fromCard = card?.contact?.clienteVicino || card?.nearbyClient?.name;
   const name = fromCard || props.cliente_vicino || null;
-  const dist =
-    card?.contact?.distM ??
-    card?.nearbyClient?.distM ??
-    props.dist_m ??
-    props.dist_km ??
-    null;
-  return { name, distM: dist != null ? Number(dist) : null };
+
+  let distM = null;
+  if (card?.contact?.distM != null) distM = Number(card.contact.distM);
+  else if (card?.nearbyClient?.distM != null) distM = Number(card.nearbyClient.distM);
+  else if (props.dist_m != null) distM = Number(props.dist_m);
+  else if (props.dist_km != null) distM = Number(props.dist_km) * 1000;
+
+  return { name, distM: distM != null && !Number.isNaN(distM) ? distM : null };
 }
 
 function pickKeyword(card) {

@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import activityRoutes from './routes/activityRoutes.js';
 import callRoutes from './routes/callRoutes.js';
+import dialerRoutes from './routes/dialerRoutes.js';
 import inboundLeadRoutes from './routes/inboundLeadRoutes.js';
 import voiceFileRoutes from './routes/voiceFileRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
@@ -453,6 +454,7 @@ app.use('/api', activityRoutes);
 
 // Routes per le chiamate (sotto /api/calls)
 app.use('/api/calls', callRoutes);
+app.use('/api/dialer', dialerRoutes);
 
 // Routes per voice files (sotto /api/voice-files)
 app.use('/api/voice-files', voiceFileRoutes);

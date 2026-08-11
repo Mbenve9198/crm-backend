@@ -6,7 +6,6 @@ import { promisify } from 'util';
 import User from '../models/userModel.js'; // Added import for User
 import Activity from '../models/activityModel.js';
 import claudeService from '../services/claudeService.js'; // Per generazione script AI
-import { buildColdCallScript } from '../services/coldCallScriptService.js';
 
 const readFile = promisify(fs.readFile);
 const unlinkFile = promisify(fs.unlink);
@@ -3712,90 +3711,5 @@ export const updateActualCloseDate = async (req, res) => {
   } catch (err) {
     console.error('❌ updateActualCloseDate:', err);
     res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-/**
- * Script cold call strutturato (template + visibility card)
- * GET /contacts/:id/cold-call-script
- */
-export const getColdCallScript = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const contact = await Contact.findById(id).populate('owner', 'firstName lastName email role');
-
-    if (!contact) {
-      return res.status(404).json({ success: false, message: 'Contatto non trovato' });
-    }
-
-    if (!req.user.canAccessContact(contact)) {
-      return res.status(403).json({ success: false, message: 'Non hai accesso a questo contatto' });
-    }
-
-    const script = buildColdCallScript(contact);
-
-    res.json({
-      success: true,
-      data: {
-        contactId: contact._id,
-        contactName: contact.name,
-        ...script,
-      },
-    });
-  } catch (error) {
-    console.error('Errore getColdCallScript:', error);
-    res.status(500).json({ success: false, message: 'Errore interno del server' });
-  }
-};
-
-/**
- * Salva / aggiorna visibility card su contatto
- * PUT /contacts/:id/visibility-card
- * Body: { visibilityCard: object }
- */
-export const upsertVisibilityCard = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { visibilityCard } = req.body;
-
-    if (!visibilityCard || typeof visibilityCard !== 'object') {
-      return res.status(400).json({
-        success: false,
-        message: 'visibilityCard (object) è obbligatorio',
-      });
-    }
-
-    const contact = await Contact.findById(id);
-    if (!contact) {
-      return res.status(404).json({ success: false, message: 'Contatto non trovato' });
-    }
-
-    if (!req.user.canAccessContact(contact)) {
-      return res.status(403).json({ success: false, message: 'Non hai accesso a questo contatto' });
-    }
-
-    const generatedAt = new Date().toISOString();
-    contact.properties = {
-      ...(contact.properties || {}),
-      visibilityCard,
-      visibilityCardGeneratedAt: generatedAt,
-    };
-    contact.markModified('properties');
-    contact.lastModifiedBy = req.user._id;
-    await contact.save();
-
-    res.json({
-      success: true,
-      message: 'Scheda visibilità salvata',
-      data: {
-        contactId: contact._id,
-        visibilityCard: contact.properties.visibilityCard,
-        visibilityCardGeneratedAt: generatedAt,
-        script: buildColdCallScript(contact),
-      },
-    });
-  } catch (error) {
-    console.error('Errore upsertVisibilityCard:', error);
-    res.status(500).json({ success: false, message: 'Errore interno del server' });
   }
 };

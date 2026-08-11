@@ -21,16 +21,16 @@ In basso/flottante: Chiama (Twilio click-to-call già esistente) + esito.
 
 ## API
 
-### `GET /api/calls/dialer-queue`
-Query: `list`, `status` (default `da contattare`), `limit` (50), `offset`  
-Risposta: `{ contacts, total, list }` con flag `hasVisibilityCard` / `scriptReady`.
+### `GET /api/dialer/queue`
+Auth: `agent | manager | admin`. Query: `list`, `status` (default `da contattare`), `limit` (50), `offset`, `owner`.  
+Risposta snella: identity + `cardSummary` + `hasVisibilityCard` / `scriptReady` (no full `properties`).
 
-### `GET /api/contacts/:id/cold-call-script`
+### `GET /api/dialer/contacts/:id/script`
 Script strutturato (template + slot), non monologo AI on-demand.  
 Fonte: `properties.visibilityCard` + fallback `cliente_vicino` / `dist_m`.
 
-### Persistenza scheda
-`contact.properties.visibilityCard` + `visibilityCardGeneratedAt`
+### `PUT /api/dialer/contacts/:id/visibility-card`
+Persistenza: `contact.properties.visibilityCard` + `visibilityCardGeneratedAt` (richiede `canModifyContact`).
 
 ## Fuori scope v0
 - Generazione batch schede in questa PR (resta job/script)

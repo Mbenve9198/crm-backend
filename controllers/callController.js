@@ -4,10 +4,6 @@ import Call from '../models/callModel.js';
 import Contact from '../models/contactModel.js';
 import Activity from '../models/activityModel.js';
 import User from '../models/userModel.js';
-import {
-  summarizeVisibilityCard,
-  COLD_CALL_DEFAULT_LIST,
-} from '../services/coldCallScriptService.js';
 
 /**
  * Controller per la gestione delle chiamate Twilio
@@ -1267,85 +1263,6 @@ export const updateCallCoaching = async (req, res) => {
     res.json({ success: true, data: call });
   } catch (error) {
     console.error('Errore updateCallCoaching:', error);
-    res.status(500).json({ success: false, message: 'Errore interno del server' });
-  }
-};
-
-/**
- * Coda Power Dialer cold call
- * GET /api/calls/dialer-queue
- */
-export const getDialerQueue = async (req, res) => {
-  try {
-    const list = (req.query.list || COLD_CALL_DEFAULT_LIST).toString();
-    const status = (req.query.status || 'da contattare').toString();
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
-
-    const filter = {
-      lists: list,
-      phone: { $exists: true, $nin: [null, ''] },
-    };
-
-    if (status && status !== 'all') {
-      filter.status = status;
-    }
-
-    // Agent: solo i propri contatti. Manager/admin: tutti (opzionale owner=)
-    if (req.user.role === 'agent') {
-      filter.owner = req.user._id;
-    } else if (req.query.owner && req.query.owner !== 'all') {
-      if (!mongoose.Types.ObjectId.isValid(req.query.owner)) {
-        return res.status(400).json({ success: false, message: 'owner non valido' });
-      }
-      filter.owner = req.query.owner;
-    }
-
-    const [total, contacts] = await Promise.all([
-      Contact.countDocuments(filter),
-      Contact.find(filter)
-        .select('name phone email status lists properties owner source updatedAt createdAt')
-        .populate('owner', 'firstName lastName email role')
-        .sort({ updatedAt: -1 })
-        .skip(offset)
-        .limit(limit)
-        .lean(),
-    ]);
-
-    const data = contacts.map((c) => {
-      const summary = summarizeVisibilityCard(c);
-      return {
-        _id: c._id,
-        name: c.name,
-        phone: c.phone,
-        email: c.email,
-        status: c.status,
-        lists: c.lists,
-        source: c.source,
-        owner: c.owner,
-        properties: c.properties || {},
-        visibilityCard: c.properties?.visibilityCard || null,
-        cardSummary: summary,
-        hasVisibilityCard: summary.hasVisibilityCard,
-        scriptReady: true,
-        updatedAt: c.updatedAt,
-        createdAt: c.createdAt,
-      };
-    });
-
-    res.json({
-      success: true,
-      data: {
-        contacts: data,
-        total,
-        list,
-        status,
-        limit,
-        offset,
-      },
-    });
-  } catch (error) {
-    console.error('Errore getDialerQueue:', error);
     res.status(500).json({ success: false, message: 'Errore interno del server' });
   }
 };
