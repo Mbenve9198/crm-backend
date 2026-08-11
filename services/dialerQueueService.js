@@ -32,20 +32,17 @@ export function isDialablePhone(phone) {
   return /^\s*\+[0-9]/.test(String(phone));
 }
 
-/**
- * @returns {{ contacts: object[], total: number, list: string, status: string, limit: number, offset: number }}
- */
-export async function fetchDialerQueue({ user, list, status, limit, offset, owner }) {
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildBaseQueueFilter({ user, list, status, owner }) {
   const resolvedList = (list || COLD_CALL_DEFAULT_LIST).toString();
   const resolvedStatus = (status || 'da contattare').toString();
-  const resolvedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
-  const resolvedOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
   const filter = {
     lists: resolvedList,
-    // Allineato a isDialablePhone: + seguito da almeno una cifra
     phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
-    // Escludi lead già re-geo come NON vicini al cliente Menu Chat
     'properties.nearbyVerified': { $ne: false },
     ...buildContactOwnerFilter(user, owner),
   };
@@ -54,7 +51,6 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     filter.status = resolvedStatus;
   }
 
-  // Per la lista Vicini: richiedi ancora + dist_m import ≤ 1km (re-geo fine-grain in enrich)
   if (resolvedList === COLD_CALL_DEFAULT_LIST) {
     filter['properties.cliente_vicino'] = { $exists: true, $nin: [null, ''] };
     filter.$expr = {
@@ -72,19 +68,90 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     };
   }
 
-  const [total, contacts] = await Promise.all([
+  return { filter, resolvedList, resolvedStatus };
+}
+
+function applyCityFilter(filter, city) {
+  const cityTrim = city != null ? String(city).trim() : '';
+  if (!cityTrim || cityTrim === 'all') return filter;
+
+  const cityRe = new RegExp(`^${escapeRegex(cityTrim)}$`, 'i');
+  const cityClause = {
+    $or: [
+      { 'properties.city': cityRe },
+      { 'properties.visibilityCard.contact.city': cityRe },
+      { 'properties.visibilityCard.place.address': new RegExp(escapeRegex(cityTrim), 'i') },
+    ],
+  };
+
+  if (Array.isArray(filter.$and)) {
+    return { ...filter, $and: [...filter.$and, cityClause] };
+  }
+  return { ...filter, $and: [cityClause] };
+}
+
+/**
+ * @returns {{ contacts: object[], total: number, list: string, status: string, city: string, cities: {name:string,count:number}[], limit: number, offset: number }}
+ */
+export async function fetchDialerQueue({ user, list, status, limit, offset, owner, city }) {
+  const resolvedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
+  const resolvedOffset = Math.max(parseInt(offset, 10) || 0, 0);
+  const cityTrim = city != null ? String(city).trim() : '';
+  const resolvedCity = !cityTrim || cityTrim === 'all' ? 'all' : cityTrim;
+
+  const { filter: baseFilter, resolvedList, resolvedStatus } = buildBaseQueueFilter({
+    user,
+    list,
+    status,
+    owner,
+  });
+  const filter = applyCityFilter(baseFilter, resolvedCity);
+
+  const [total, contacts, cityFacet] = await Promise.all([
     Contact.countDocuments(filter),
     Contact.find(filter)
-      .select('name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats updatedAt createdAt')
+      .select(
+        'name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats updatedAt createdAt'
+      )
       .populate('owner', 'firstName lastName email role')
       .sort({ 'properties.dist_m': 1, updatedAt: -1 })
       .skip(resolvedOffset)
       .limit(resolvedLimit)
       .lean(),
+    Contact.aggregate([
+      { $match: baseFilter },
+      {
+        $project: {
+          city: {
+            $trim: {
+              input: {
+                $ifNull: [
+                  '$properties.city',
+                  { $ifNull: ['$properties.visibilityCard.contact.city', ''] },
+                ],
+              },
+            },
+          },
+        },
+      },
+      { $match: { city: { $nin: [null, ''] } } },
+      { $group: { _id: '$city', count: { $sum: 1 } } },
+      { $sort: { count: -1, _id: 1 } },
+      { $limit: 80 },
+    ]),
   ]);
+
+  const cities = cityFacet.map((row) => ({
+    name: row._id,
+    count: row.count,
+  }));
 
   const data = contacts.map((c) => {
     const summary = summarizeVisibilityCard(c);
+    const cityName =
+      (typeof c.properties?.city === 'string' && c.properties.city.trim()) ||
+      summary.city ||
+      null;
     return {
       _id: c._id,
       name: c.name,
@@ -94,9 +161,10 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
       lists: c.lists,
       source: c.source,
       owner: c.owner,
-      cardSummary: summary,
+      city: cityName,
+      cardSummary: summary.city ? summary : { ...summary, city: cityName },
       hasVisibilityCard: summary.hasVisibilityCard,
-      scriptReady: summary.hasVisibilityCard || !!(summary.nearbyClient?.name),
+      scriptReady: summary.hasVisibilityCard || !!summary.nearbyClient?.name,
       updatedAt: c.updatedAt,
       createdAt: c.createdAt,
     };
@@ -107,6 +175,8 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     total,
     list: resolvedList,
     status: resolvedStatus,
+    city: resolvedCity,
+    cities,
     limit: resolvedLimit,
     offset: resolvedOffset,
   };
