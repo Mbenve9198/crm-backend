@@ -43,11 +43,12 @@ export function nameLooseMatch(a, b) {
   const tb = new Set(significantTokens(b));
   if (ta.length === 0 || tb.size === 0) return false;
   const hit = ta.filter((t) => tb.has(t)).length;
-  // 2 token = match forte; 1 token lungo (≥5) basta (es. «Tegolo»)
+  // 2 token = match forte
   if (hit >= 2) return true;
+  // 1 token solo se distintivo (≥6) — evita «porto» → Il Porto vs Oasi del porto
   if (hit === 1) {
     const shared = ta.find((t) => tb.has(t));
-    return !!shared && shared.length >= 5;
+    return !!shared && shared.length >= 6;
   }
   return false;
 }
