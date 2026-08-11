@@ -1,0 +1,138 @@
+{
+  "contact": {
+    "id": "6a68caf7f1c8f50e003efb4d",
+    "name": "Perú Pisco Bar/Restaurant",
+    "status": "da contattare",
+    "city": "Livorno",
+    "category": "Ristorante peruviano",
+    "address": "Via Terrazzini, 27/29/31, 57122 Livorno LI, Italia",
+    "clienteVicino": "Ristorante \"Il Tegolo Livorno\"",
+    "distM": 24,
+    "placeIdImport": "ChIJgV_huQrp1RIRyqkEe-aulHM",
+    "ratingImport": 4.2,
+    "reviewsImport": 34
+  },
+  "keyword": {
+    "keyword": "peruvian restaurant Livorno",
+    "keyword_lang": "en",
+    "audience": "both",
+    "rationale": "Città turistica con traffico misto. EN cattura turisti internazionali; peruviano è nicchia, EN più cercato globalmente.",
+    "alt_keywords": [
+      "ristorante peruviano Livorno",
+      "perù Livorno",
+      "cucina peruviana Livorno",
+      "peruvian food Livorno"
+    ],
+    "neighborhood": null,
+    "touristCity": true
+  },
+  "place": {
+    "source": "place_id",
+    "name": "Perú Pisco Bar/Restaurant",
+    "placeId": "ChIJgV_huQrp1RIRyqkEe-aulHM",
+    "dataId": "0x12d5e90ab9e15f81:0x7394aee67b04a9ca",
+    "address": "Via Terrazzini, 27/29/31, 57122 Livorno LI, Italia",
+    "rating": 4.3,
+    "reviews": 35,
+    "type": "Ristorante peruviano",
+    "lat": 43.5534186,
+    "lng": 10.315199699999999,
+    "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWnLSvGcdknqHkfrrAzOiS40qzrLZPDNG9ncwmHKDVGMScc1OLGJpRQbla2j_0HiUP4I2f5UFHx-pbVjvHidPfpWgFwNWbOxXg2ooTXd40NrLlcY-2uVHA6uIBeYJp20sXrR6_axjw=w1000-h1000-c-n"
+  },
+  "ranking": {
+    "keyword": "peruvian restaurant Livorno",
+    "userRank": 2,
+    "resultsReturned": 7,
+    "user": {
+      "rating": 4.3,
+      "reviews": 35,
+      "type": "Ristorante peruviano"
+    },
+    "competitorsAhead": [
+      {
+        "rank": 1,
+        "name": "Ristorante La Cusqueña",
+        "rating": 4.7,
+        "reviews": 33,
+        "type": "Ristorante",
+        "placeId": "ChIJo-bnKdnp1RIRxJXaZf2DedI"
+      }
+    ],
+    "top3": [
+      {
+        "rank": 1,
+        "name": "Ristorante La Cusqueña",
+        "rating": 4.7,
+        "reviews": 33
+      },
+      {
+        "rank": 2,
+        "name": "Perú Pisco Bar/Restaurant",
+        "rating": 4.3,
+        "reviews": 35
+      },
+      {
+        "rank": 3,
+        "name": "Ristorante D'Janet",
+        "rating": 5,
+        "reviews": 1
+      }
+    ],
+    "found": true,
+    "keywordTried": [
+      {
+        "keyword": "peruvian restaurant Livorno",
+        "resultsReturned": 7,
+        "userRank": 2
+      }
+    ],
+    "selectedKeyword": "peruvian restaurant Livorno"
+  },
+  "velocity": {
+    "fetched": 28,
+    "pages": 3,
+    "placeInfo": null,
+    "byMonth": {
+      "2023-05": 3,
+      "2023-08": 3,
+      "2025-01": 2,
+      "2024-12": 2,
+      "2025-02": 1,
+      "2024-05": 1,
+      "2023-07": 1,
+      "2024-03": 1,
+      "2024-08": 1,
+      "2023-06": 1,
+      "2023-01": 1,
+      "2023-04": 1,
+      "2022-10": 1,
+      "2022-11": 1,
+      "2026-08": 1,
+      "2026-05": 1,
+      "2026-04": 1,
+      "2023-12": 2,
+      "2022-12": 1,
+      "2024-04": 1,
+      "2023-09": 1
+    },
+    "recentMonths": [
+      {
+        "month": "2026-04",
+        "reviews": 1
+      },
+      {
+        "month": "2026-05",
+        "reviews": 1
+      },
+      {
+        "month": "2026-08",
+        "reviews": 1
+      }
+    ],
+    "avgPerMonthRecent": 1,
+    "windowNote": "Velocity stimata sulle recensioni newest scaricate (paginate).",
+    "oldestFetched": "2023-08-21T18:28:13Z",
+    "newestFetched": "2023-05-09T09:54:45Z"
+  },
+  "generatedAt": "2026-08-11T13:56:56.369Z"
+}

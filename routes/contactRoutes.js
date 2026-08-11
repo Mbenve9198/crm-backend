@@ -28,6 +28,8 @@ import {
   updateActualCloseDate,
   bulkChangeOwner,
   generateCallScript,
+  getColdCallScript,
+  upsertVisibilityCard,
   getCallbacksDue
 } from '../controllers/contactController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
@@ -151,6 +153,8 @@ router.get('/callbacks/due', getCallbacksDue);
 
 // 📞 Genera script di chiamata personalizzato con AI (prima di /:id per evitare conflitti)
 router.get('/:id/call-script', restrictTo('agent', 'manager', 'admin'), generateCallScript);
+router.get('/:id/cold-call-script', restrictTo('agent', 'manager', 'admin'), getColdCallScript);
+router.put('/:id/visibility-card', restrictTo('agent', 'manager', 'admin'), upsertVisibilityCard);
 
 router.get('/:id', getContactById);                                           // Ottieni contatto per ID
 router.put('/:id', restrictTo('agent', 'manager', 'admin'), updateContact);   // Aggiorna contatto

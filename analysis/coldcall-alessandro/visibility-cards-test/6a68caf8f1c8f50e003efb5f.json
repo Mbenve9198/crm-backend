@@ -1,0 +1,149 @@
+{
+  "contact": {
+    "id": "6a68caf8f1c8f50e003efb5f",
+    "name": "Tacos kings-Rome San lorenzo",
+    "status": "da contattare",
+    "city": "Roma",
+    "category": "Ristorante Tex-Mex",
+    "address": "Via dei Latini, 72, 00185 Roma RM, Italia",
+    "clienteVicino": "Sanlollo - Pizza & Cucina",
+    "distM": 35,
+    "placeIdImport": "ChIJyZ2HbQthLxMRyojnd_Iz6q4",
+    "ratingImport": 4.8,
+    "reviewsImport": 313
+  },
+  "keyword": {
+    "keyword": "tacos Roma San Lorenzo",
+    "keyword_lang": "it",
+    "audience": "both",
+    "rationale": "Italiani cercano 'tacos Roma/quartiere'; turisti cercano 'tacos Rome'. Query locale + categoria forte + quartiere noto.",
+    "alt_keywords": [
+      "tacos Rome San Lorenzo",
+      "mexican food Roma",
+      "messicano San Lorenzo",
+      "ristorante messicano Roma"
+    ],
+    "neighborhood": "San Lorenzo",
+    "touristCity": true
+  },
+  "place": {
+    "source": "place_id",
+    "name": "Tacos kings-Rome San lorenzo",
+    "placeId": "ChIJyZ2HbQthLxMRyojnd_Iz6q4",
+    "dataId": "0x132f610b6d879dc9:0xaeea33f277e788ca",
+    "address": "Via dei Latini, 72, 00185 Roma RM, Italia",
+    "rating": 4.8,
+    "reviews": 320,
+    "type": "Ristorante Tex-Mex, Ristorante messicano",
+    "lat": 41.895966,
+    "lng": 12.5143822,
+    "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWmfIbAucSXAoee7CGZ6GzD2urrzcY_k5XwNyoKx6ku8jJiy8JoOjmuc4FEU__QuZEqdVU5l7HpyVXLIBhPq34gZlhWtZn2qetKPHaWvLAPAeHtdXVS575ebdzLZCKxT3aNIXZchWsLS7eX4=w1000-h1000-c-n"
+  },
+  "ranking": {
+    "keyword": "mexican food Roma",
+    "userRank": 2,
+    "resultsReturned": 20,
+    "user": {
+      "rating": 4.8,
+      "reviews": 320,
+      "type": "Ristorante messicano"
+    },
+    "competitorsAhead": [
+      {
+        "rank": 1,
+        "name": "Pico's Trastevere Sabor a Mexico",
+        "rating": 4.5,
+        "reviews": 2505,
+        "type": "Ristorante messicano",
+        "placeId": "ChIJeaEvmEhhLxMRP25NcfjeLR8"
+      }
+    ],
+    "top3": [
+      {
+        "rank": 1,
+        "name": "Pico's Trastevere Sabor a Mexico",
+        "rating": 4.5,
+        "reviews": 2505
+      },
+      {
+        "rank": 2,
+        "name": "Tacos kings-Rome San lorenzo",
+        "rating": 4.8,
+        "reviews": 320
+      },
+      {
+        "rank": 3,
+        "name": "La Cucaracha",
+        "rating": 4.5,
+        "reviews": 1858
+      }
+    ],
+    "found": true,
+    "keywordTried": [
+      {
+        "keyword": "tacos Roma San Lorenzo",
+        "resultsReturned": 0,
+        "userRank": "Nessun risultato"
+      },
+      {
+        "keyword": "tacos Rome San Lorenzo",
+        "resultsReturned": 0,
+        "userRank": "Nessun risultato"
+      },
+      {
+        "keyword": "mexican food Roma",
+        "resultsReturned": 20,
+        "userRank": 2
+      }
+    ],
+    "selectedKeyword": "mexican food Roma"
+  },
+  "velocity": {
+    "fetched": 28,
+    "pages": 3,
+    "placeInfo": null,
+    "byMonth": {
+      "2026-03": 1,
+      "2026-04": 2,
+      "2025-02": 2,
+      "2025-05": 1,
+      "2025-10": 1,
+      "2025-09": 1,
+      "2024-11": 1,
+      "2023-10": 2,
+      "2023-09": 1,
+      "2023-02": 1,
+      "2024-03": 1,
+      "2023-05": 2,
+      "2023-11": 2,
+      "2023-07": 1,
+      "2024-02": 1,
+      "2024-05": 1,
+      "2026-05": 1,
+      "2026-01": 1,
+      "2025-12": 2,
+      "2025-08": 1,
+      "2024-01": 1,
+      "2025-04": 1
+    },
+    "recentMonths": [
+      {
+        "month": "2026-03",
+        "reviews": 1
+      },
+      {
+        "month": "2026-04",
+        "reviews": 2
+      },
+      {
+        "month": "2026-05",
+        "reviews": 1
+      }
+    ],
+    "avgPerMonthRecent": 1.33,
+    "windowNote": "Velocity stimata sulle recensioni newest scaricate (paginate).",
+    "oldestFetched": "2025-04-12T17:58:55Z",
+    "newestFetched": "2026-03-27T17:38:03Z"
+  },
+  "generatedAt": "2026-08-11T13:57:05.955Z"
+}

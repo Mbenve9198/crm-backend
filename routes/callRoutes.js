@@ -13,7 +13,8 @@ import {
   cleanupStuckCalls,
   getAllCalls,
   getCallsAnalytics,
-  updateCallCoaching
+  updateCallCoaching,
+  getDialerQueue
 } from '../controllers/callController.js';
 import { protect, restrictTo } from '../controllers/authController.js';
 
@@ -33,6 +34,9 @@ router.get('/all', protect, restrictTo('admin', 'manager'), getAllCalls);
 
 // Analytics chiamate per owner (admin/manager)
 router.get('/analytics', protect, restrictTo('admin', 'manager'), getCallsAnalytics);
+
+// Coda Power Dialer (cold call)
+router.get('/dialer-queue', protect, getDialerQueue);
 
 // Ottieni le mie chiamate
 router.get('/my-calls', protect, getMyCalls);
