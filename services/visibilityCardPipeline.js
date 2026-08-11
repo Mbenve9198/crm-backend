@@ -5,6 +5,9 @@
 
 import axios from 'axios';
 import Anthropic from '@anthropic-ai/sdk';
+import { isUsableVisibilityCard } from './visibilityCardUtils.js';
+
+export { isUsableVisibilityCard };
 
 const TOURIST_CITIES = new Set([
   'roma', 'rome', 'milano', 'milan', 'firenze', 'florence', 'venezia', 'venice',
@@ -45,8 +48,10 @@ function nameMatch(a, b) {
   if (na.includes(nb) || nb.includes(na)) return true;
   const ta = new Set(na.split(' ').filter((t) => t.length > 2));
   const tb = nb.split(' ').filter((t) => t.length > 2);
+  // Serve almeno 2 token in comune (o tutti se ne ha ≥2); zero token → no match
+  if (tb.length < 2 || ta.size === 0) return false;
   const hit = tb.filter((t) => ta.has(t)).length;
-  return hit >= Math.min(2, tb.length);
+  return hit >= 2;
 }
 
 function guessNeighborhood(address = '', city = '') {
@@ -157,12 +162,12 @@ export async function resolvePlace(contact) {
       };
     }
   }
+  // Senza place_id: solo match per nome fidato — mai local_results[0] cieco
   const q = [contact.name, contact.properties?.city].filter(Boolean).join(' ');
+  if (!q) return null;
   const data = await serp({ engine: 'google_maps', type: 'search', q });
   const hit =
-    (data.local_results || []).find((r) => nameMatch(r.title, contact.name)) ||
-    data.local_results?.[0] ||
-    data.place_results;
+    (data.local_results || []).find((r) => nameMatch(r.title, contact.name)) || null;
   if (!hit) return null;
   return {
     source: 'search',
@@ -180,8 +185,19 @@ export async function resolvePlace(contact) {
   };
 }
 
+function rowMatchesPlace(place, row) {
+  // Se abbiamo placeId, match SOLO su place_id (nameMatch è troppo loose su zone tipo "San Lorenzo")
+  if (place.placeId) return !!row.place_id && row.place_id === place.placeId;
+  return nameMatch(row.title, place.name);
+}
+
 async function rankForKeywordOnce(place, keyword) {
-  if (!place?.lat || !place?.lng) return { error: 'missing coords', keyword, resultsReturned: 0 };
+  if (!keyword || !String(keyword).trim()) {
+    return { error: 'empty keyword', keyword: keyword || '', resultsReturned: 0, found: false };
+  }
+  if (!place?.lat || !place?.lng) {
+    return { error: 'missing coords', keyword, resultsReturned: 0, found: false };
+  }
   const data = await serp({
     engine: 'google_maps',
     type: 'search',
@@ -194,7 +210,7 @@ async function rankForKeywordOnce(place, keyword) {
   let userRow = null;
   const ahead = [];
   for (const r of results) {
-    const match = (place.placeId && r.place_id === place.placeId) || nameMatch(r.title, place.name);
+    const match = rowMatchesPlace(place, r);
     if (match && userRank == null) {
       userRank = r.position;
       userRow = r;
@@ -228,7 +244,24 @@ async function rankForKeywordOnce(place, keyword) {
 /** Prova keyword principale + alt finché c'è un rank trovabile o risultati utili. */
 export async function rankForKeyword(place, keywordObj) {
   const tried = [];
-  const queue = [keywordObj.keyword, ...(keywordObj.alt_keywords || [])].filter(Boolean);
+  const queue = [keywordObj?.keyword, ...(keywordObj?.alt_keywords || [])]
+    .map((k) => (typeof k === 'string' ? k.trim() : ''))
+    .filter(Boolean);
+
+  if (queue.length === 0) {
+    return {
+      error: 'empty keyword',
+      keyword: null,
+      selectedKeyword: null,
+      userRank: null,
+      resultsReturned: 0,
+      competitorsAhead: [],
+      top3: [],
+      found: false,
+      keywordTried: [],
+    };
+  }
+
   let best = null;
   for (const kw of queue) {
     const r = await rankForKeywordOnce(place, kw);
@@ -240,7 +273,11 @@ export async function rankForKeyword(place, keywordObj) {
     }
     if ((r.resultsReturned || 0) > (best.resultsReturned || 0)) best = r;
   }
-  return { ...best, keywordTried: tried, selectedKeyword: best.keyword };
+  return {
+    ...best,
+    keywordTried: tried,
+    selectedKeyword: best?.selectedKeyword || best?.keyword || queue[0],
+  };
 }
 
 function monthKey(iso) {
@@ -296,16 +333,6 @@ export async function reviewVelocity(place, { maxPages = 3 } = {}) {
     oldestFetched: all[all.length - 1]?.iso_date,
     newestFetched: all[0]?.iso_date,
   };
-}
-
-/** Card usabile in dialer: place risolto (non stub ranking/velocity-only). */
-export function isUsableVisibilityCard(card) {
-  if (!card || typeof card !== 'object') return false;
-  const place = card.place;
-  if (!place || place.error) return false;
-  if (!place.placeId && !place.name) return false;
-  if (card.ranking?.error === 'no place' || card.velocity?.error === 'no place') return false;
-  return true;
 }
 
 /**
