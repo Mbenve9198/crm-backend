@@ -143,16 +143,15 @@ Campi post-call (30s): `dmName`, `recallAt`, `hookRecognized`, `nextStepLevel` (
 
 ### Qualità dati / tooling
 
-- **5 call lunghe senza transcript** (tra cui Falabràch 871s, Conte Brillo 694s, Ponte Milvio 679s, Verace 651s) → gap serio sulle “migliori” per durata; ri-trascrivere.
-- Molti transcript **troncati** sulle call lunghe → coaching cieco sulle top call.
-- `callAnalysis` in DB è quasi vuoto (`objections: []`) → oggi non serve al feedback loop.
+- **✅ Recovery fatto (2026-08-11):** trascritte le 4 long con recording (Falabràch, Conte Brillo, Tyler Ponte Milvio, Verace). Restano: Fedele 37s senza recording; alcune long **troncate** (La Differenza, Gaia) da ri-trascrivere con lo stesso pipeline MP3.
+- Le 4 recovery hanno ora `callAnalysis` completo (score 4–5, obiezioni popolate).
 - Brand name in call a volte storpiato (ASR/fonetica): monitorare chiarezza «Menu Chat».
 
 ### Cosa *non* ottimizzare adesso
 
-- Prezzo in cold: compare raro; prima sistemare permesso/gate/labeling.
-- Allungare le call: le long fallite dimostrano che più minuti ≠ più deal.
-- Aumentare volume dialing finché il CRM non distingue S7 da gatekeeper soft.
+- Prezzo in apertura cold short: sulle long funziona *dopo* discovery/trial; non aprirci.
+- Allungare le call a caso: le long fallite (Concordia) ≠ le long trial (Tyler).
+- Aumentare volume dialing finché il CRM non distingue S7/trial da gatekeeper soft.
 
 ---
 
