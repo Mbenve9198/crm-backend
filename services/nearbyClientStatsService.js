@@ -109,7 +109,7 @@ function toStats(restaurant) {
 }
 
 /**
- * Scarica un pool di clienti cliente ancora (per città ancora) e fa match per nome.
+ * Scarica un pool di clienti-ancora (per città) e fa match per nome.
  * @returns {Map<string, object>} normalizeName(anchor) → stats
  */
 export async function fetchNearbyClientStatsMap(anchors) {
