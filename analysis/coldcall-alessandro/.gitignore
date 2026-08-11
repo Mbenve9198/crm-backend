@@ -2,3 +2,5 @@
 transcripts/
 bundle-*.md
 new-long-transcripts/
+
+visibility-cards-test/*.json
