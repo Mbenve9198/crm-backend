@@ -26,11 +26,10 @@ export function buildContactOwnerFilter(user, ownerQuery) {
   return { owner: user._id };
 }
 
-/** Telefono dialabile: non vuoto dopo trim e prefisso + */
+/** Telefono dialabile: + seguito da almeno una cifra (spazi ignorati). */
 export function isDialablePhone(phone) {
   if (phone == null) return false;
-  const normalized = String(phone).replace(/\s/g, '');
-  return normalized.length > 1 && normalized.startsWith('+');
+  return /^\s*\+[0-9]/.test(String(phone));
 }
 
 /**
