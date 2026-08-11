@@ -96,12 +96,28 @@ function extractSlots(contact, card) {
   const nearbyClientStats =
     props.nearbyClientStats || card?.nearbyClientStats || null;
 
+  const foundFlag = card?.ranking?.found;
+  const rawRankStr = typeof rawRank === 'string' ? rawRank.toLowerCase() : '';
+  const looksOutOfTop =
+    foundFlag === false ||
+    /fuori|nessun|non\s*trov|top\s*20|top risultati/.test(rawRankStr);
+
+  /** rank1 | ranked | out_of_top | unknown */
+  let rankKind = 'unknown';
+  if (rank === 1) rankKind = 'rank1';
+  else if (rank != null && rank > 1) rankKind = 'ranked';
+  else if (looksOutOfTop || (keyword && rank == null && ahead.length > 0)) {
+    rankKind = 'out_of_top';
+  }
+
   return {
     locale: card?.place?.name || contact.name,
     nearby: { name: nearbyName, distM },
     nearbyClientStats,
     keyword,
     rank,
+    rankKind,
+    rankingFound: foundFlag === true ? true : foundFlag === false ? false : null,
     competitors: ahead.slice(0, 2),
     competitor: ahead[0] || null,
     rating,
@@ -111,6 +127,7 @@ function extractSlots(contact, card) {
     category: card?.contact?.category || props.category || null,
     placeId: card?.place?.placeId || props.place_id || null,
     generatedAt: props.visibilityCardGeneratedAt || card?.generatedAt || null,
+    agentName: null,
   };
 }
 
@@ -134,10 +151,8 @@ function nearbyProofLine(slots) {
 }
 
 function buildOpening(slots) {
-  const lines = [
-    'Stop. Ascolta.',
-    `Buongiorno, ${slots.locale}? Sono Alessandro di Menu Chat.`,
-  ];
+  const agent = slots.agentName || '{{agentName}}';
+  const lines = [`Buongiorno, ${slots.locale}? Sono ${agent} di Menu Chat.`];
 
   if (slots.nearby.name) {
     const distLabel = formatDist(slots.nearby.distM);
@@ -180,14 +195,39 @@ function reviewsPossessivePhrase(slots) {
   return 'le vostre recensioni';
 }
 
+function topCompetitorsPhrase(slots) {
+  const comps = slots.competitors || [];
+  if (comps.length >= 2) return `${comps[0].name} e ${comps[1].name}`;
+  if (comps.length === 1) return comps[0].name;
+  return 'altri locali della zona';
+}
+
 function buildHook(slots) {
   const keyword = slots.keyword || 'la vostra categoria in zona';
-  const rankTxt = slots.rank != null ? `#${slots.rank}` : 'fuori dai primi risultati';
+  const q1 = `come avete raccolto ${reviewsPossessivePhrase(slots)}?`;
+
+  if (slots.rankKind === 'rank1') {
+    return (
+      `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}», e siete apparsi #1 — bravi. ` +
+      `Il punto non è arrivarci, è restarci: chi è dietro sale in fretta se raccoglie più recensioni di voi. ` +
+      `Per capire se ha senso aiutarvi a difendere la posizione: ${q1}`
+    );
+  }
+
+  if (slots.rankKind === 'out_of_top') {
+    return (
+      `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}»: voi non uscite nei primi risultati — per quella ricerca praticamente non vi trovano. ` +
+      `Chi appare per primo sono ${topCompetitorsPhrase(slots)}. ` +
+      `Il modo migliore per rientrare in mappa è avere più recensioni vere: ${q1}`
+    );
+  }
+
   const under = competitorsPhrase(slots);
+  const rankTxt = slots.rank != null ? `#${slots.rank}` : 'fuori dai primi risultati';
   const positionBit = under ? `${rankTxt}, ${under}` : rankTxt;
   return (
     `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}», e siete apparsi ${positionBit}. ` +
-    `Il modo migliore per apparire nei primi risultati è avere più recensioni: come avete raccolto ${reviewsPossessivePhrase(slots)}?`
+    `Il modo migliore per salire nei primi risultati è avere più recensioni: ${q1}`
   );
 }
 
@@ -214,14 +254,16 @@ function buildDiscovery(slots) {
       label: 'Menu cartaceo o digitale',
       mode: 'ask',
       line: 'Avete menu cartaceo o digitale?',
+      choiceOptions: [
+        { id: 'cartaceo', label: 'Cartaceo' },
+        { id: 'digitale', label: 'Digitale' },
+      ],
       followUpIfPaper:
-        'Se cartaceo — sareste disposti a mettere il menu digitale se vi permettesse di raccogliere circa {{potentialMonthly}} recensioni al mese?',
-    },
-    {
-      id: 'name_role',
-      label: 'Nome / ruolo',
-      mode: 'ask',
-      line: 'Scusa, stiamo parlando da un minuto: come ti chiami? … Sei titolare, socio, o gestisci tu queste cose?',
+        'Sareste disposti a mettere il menu digitale se vi permettesse di raccogliere circa {{potentialMonthly}} recensioni al mese?',
+      followUpChoices: [
+        { id: 'si', label: 'Sì' },
+        { id: 'no', label: 'No', opensObjection: 'no_digital' },
+      ],
     },
   ];
 }
@@ -230,10 +272,19 @@ function buildValueTemplate(slots) {
   const keyword = slots.keyword || 'in zona';
   const ancora = slots.nearby.name || 'il locale vicino con cui lavoriamo';
   const reviews = slots.reviews != null ? String(slots.reviews) : 'quelle che avete';
+  let mapsGoal =
+    'ed essere primi nei risultati su Google Maps quando uno cerca «' + keyword + '»';
+  if (slots.rankKind === 'rank1') {
+    mapsGoal =
+      'e restare saldamente primi su Google Maps quando uno cerca «' + keyword + '»';
+  } else if (slots.rankKind === 'out_of_top') {
+    mapsGoal =
+      'e tornare visibili nei risultati su Google Maps quando uno cerca «' + keyword + '»';
+  }
   return {
     needsCovers: true,
     lines: [
-      `In base a quello che mi hai detto, con il nostro sistema potreste raccogliere circa {{potentialMonthly}} recensioni al mese, e quindi fra un anno avreste circa {{yearReviews}} recensioni (oggi ${reviews} + {{potentialMonthly}}×12) ed essere primi nei risultati su Google Maps quando uno cerca «${keyword}».`,
+      `In base a quello che mi hai detto, con il nostro sistema potreste raccogliere circa {{potentialMonthly}} recensioni al mese, e quindi fra un anno avreste circa {{yearReviews}} recensioni (oggi ${reviews} + {{potentialMonthly}}×12) ${mapsGoal}.`,
       `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane senza impegno?`,
     ],
   };
@@ -277,7 +328,7 @@ function buildTrialSteps(slots) {
         id: 'remind_paper',
         title: 'Reminder cartaceo',
         line:
-          'Ok, allora grazie {{nome}}. Ricordati: quando ti arrivano i QR, dovrai metterli sui tavoli e non dare assolutamente il menu cartaceo a meno di casi eccezionali. Se dai entrambi, le persone useranno il cartaceo, il servizio non funzionerà e avremo perso soldi entrambi.',
+          'Ok, allora grazie. Ricordati: quando ti arrivano i QR, dovrai metterli sui tavoli e non dare assolutamente il menu cartaceo a meno di casi eccezionali. Se dai entrambi, le persone useranno il cartaceo, il servizio non funzionerà e avremo perso soldi entrambi.',
       },
       {
         id: 'close',
@@ -286,6 +337,35 @@ function buildTrialSteps(slots) {
       },
     ],
   };
+}
+
+function buildEarlyObjections(slots) {
+  const agent = slots.agentName || '{{agentName}}';
+  const nearbyBit = slots.nearby.name
+    ? `, come facciamo già con ${slots.nearby.name}`
+    : '';
+  return [
+    {
+      id: 'busy',
+      short: 'Occupato',
+      trigger: 'Siamo in servizio / non posso parlare ora',
+      placement: 'early',
+      line:
+        `Capito, non vi rubo tempo. Sono ${agent} di Menu Chat. Vi richiamo quando siete più tranquilli: preferite oggi dopo servizio o domani mattina prima delle 11? Intanto lasci pure solo il nome: ${agent}, recensioni Google${nearbyBit}.`,
+    },
+    {
+      id: 'gate',
+      short: 'Non è lui',
+      trigger: 'Non sono io che decido / chi parla?',
+      placement: 'early',
+      line:
+        `Capito. Sono ${agent} di Menu Chat${
+          slots.nearby.name
+            ? `: lavoriamo già con ${slots.nearby.name} qui vicino`
+            : ''
+        }. Chi decide di solito su menu e recensioni? Preferisce che lo richiami io domani mattina o nel pomeriggio? Se ha un cellulare lo segno e non disturbo più la sala.`,
+    },
+  ];
 }
 
 function buildObjections(slots) {
@@ -297,32 +377,32 @@ function buildObjections(slots) {
       ? `ora se ti arriva una recensione a una stella, considerando che hai ${reviews} recensioni con rating ${rating}, scenderesti subito a circa ${after}; ma dopo mesi con noi avrai così tante recensioni che il rating non si abbasserà più allo stesso modo`
       : `ora una stella ti fa male subito; con molte più recensioni vere il rating diventa molto più stabile`;
 
-  const objections = [
+  return [
     {
       id: 'negatives',
-      short: 'Negative',
-      trigger: 'E le recensioni negative?',
+      short: 'Recensioni negative?',
+      trigger: 'Recensioni negative?',
       line:
         `Chi vuole lasciarti una negativa lo fa già oggi: ti cerca su Google e la scrive, a prescindere. Il problema vero è che chi si trova bene non fa niente. Con noi le positive che prima non arrivavano ora arrivano ogni giorno — e se prima una negativa ti rimaneva in cima per settimane, ora dopo un giorno sarà già sommersa da altre positive. Inoltre ${ratingBit}.`,
     },
     {
       id: 'fake',
-      short: 'False?',
-      trigger: 'Sono recensioni false?',
+      short: 'Recensioni false?',
+      trigger: 'Recensioni false?',
       line:
         'No. Niente recensioni comprate, niente bot: solo i tuoi clienti veri, quelli che hanno mangiato da te e scansionato il QR. Chiediamo a chi si è trovato bene di scrivere quello che già pensa. È esattamente il tipo di recensione che Google vuole.',
     },
     {
       id: 'price',
-      short: 'Prezzo',
+      short: 'Quanto costa?',
       trigger: 'Quanto costa?',
       line:
         'Le prime due settimane niente: nessuna carta, si disdice con un messaggio. Poi poco più di cento euro al mese — ma ne parliamo a prova finita, coi tuoi numeri davanti.',
     },
     {
       id: 'partner',
-      short: 'Socio',
-      trigger: 'Ne voglio parlare col socio',
+      short: 'Devo parlarne col socio',
+      trigger: 'Devo parlarne col socio',
       line:
         'Certo, ci mancherebbe. Ti dico solo una cosa così non gli porti una roba più grande di quella che è. Qui non c’è niente da decidere adesso: sono due settimane di prova, non paghi niente e non firmi niente. Se in due settimane non vi arrivano recensioni in più, ci salutiamo. La decisione vera la prendete tra due settimane guardando i vostri numeri, non fidandovi di quello che vi dico io al telefono. Detto questo: al di là del socio, tu la proveresti?',
       branches: [
@@ -343,32 +423,26 @@ function buildObjections(slots) {
     },
     {
       id: 'no_digital',
-      short: 'No digitale',
-      trigger: 'Non voglio menu digitale / carta è esperienza / clienti anziani',
+      short: 'No menu digitale',
+      trigger: 'No menu digitale',
       line:
         'Certo, lo capisco. Il QR per il menu è l’unico modo per far ottenere recensioni in automatico così. E mi dica: sarebbe disposto a mettere su digitale almeno la carta dei vini o dei dolci? Oppure il menu del giorno se ce l’ha?',
       branches: [
-        { id: 'partial_yes', label: 'Se sì → procedi trial', line: 'Perfetto, partiamo da quello — stesso flusso WhatsApp, stesso obiettivo recensioni.' },
-        { id: 'partial_no', label: 'Se no → chiudi', line: 'Ok, allora non è il momento. Se cambia idea sulle recensioni Maps, mi trovi. Buona giornata.' },
+        {
+          id: 'partial_yes',
+          label: 'Se sì → procedi trial',
+          line:
+            'Perfetto, partiamo da quello — stesso flusso WhatsApp, stesso obiettivo recensioni.',
+        },
+        {
+          id: 'partial_no',
+          label: 'Se no → chiudi',
+          line:
+            'Ok, allora non è il momento. Se cambia idea sulle recensioni Maps, mi trovi. Buona giornata.',
+        },
       ],
     },
-    {
-      id: 'busy',
-      short: 'Busy',
-      trigger: 'Sono occupato / in servizio',
-      line:
-        `Hai ragione, non ti rubo un secondo. Quando richiamo il titolare — o te? Meglio mattina prima delle 11 o dopo le 15? Lascia solo il nome: Alessandro di Menu Chat, recensioni Google${slots.nearby.name ? ` come ${slots.nearby.name}` : ''}.`,
-    },
-    {
-      id: 'gate',
-      short: 'Gate',
-      trigger: 'Non sono io che decido',
-      line:
-        `Capito, non sei tu che decidi. Come si chiama chi gestisce queste cose? Meglio che lo richiami domani 10:30 o giovedì 16:00? Puoi dirgli che ha chiamato Alessandro di Menu Chat, per le recensioni Google${slots.nearby.name ? ` — stesso tipo di lavoro che facciamo con ${slots.nearby.name}` : ''}? C’è un cellulare o un altro modo per trovarlo più facilmente?`,
-    },
   ];
-
-  return objections;
 }
 
 function buildCardSummary(slots, hook) {
@@ -376,6 +450,7 @@ function buildCardSummary(slots, hook) {
     name: slots.locale,
     keyword: slots.keyword,
     rank: slots.rank,
+    rankKind: slots.rankKind,
     rating: slots.rating,
     reviews: slots.reviews,
     competitorAhead: slots.competitor
@@ -416,15 +491,22 @@ export function fillScriptTemplate(template, vars = {}) {
 
 /**
  * @param {object} contact - mongoose contact (lean ok)
+ * @param {{ agentName?: string }} [opts]
  * @returns {object} structured script
  */
-export function buildColdCallScript(contact) {
+export function buildColdCallScript(contact, opts = {}) {
   const card = asCard(contact);
   const slots = extractSlots(contact, card);
+  const agentName =
+    (typeof opts.agentName === 'string' && opts.agentName.trim()) ||
+    null;
+  slots.agentName = agentName;
+
   const hook = buildHook(slots);
   const summary = buildCardSummary(slots, hook);
   const value = buildValueTemplate(slots);
   const trial = buildTrialSteps(slots);
+  const earlyObjections = buildEarlyObjections(slots);
   const objections = buildObjections(slots);
 
   // Stringhe “piene” senza coperti (placeholder leggibili) per fallback / note
@@ -432,7 +514,7 @@ export function buildColdCallScript(contact) {
     potentialMonthly: '…',
     yearReviews: '…',
     twoWeekPotential: '…',
-    nome: '…',
+    agentName: agentName || '…',
   };
 
   return {
@@ -443,26 +525,33 @@ export function buildColdCallScript(contact) {
     valueBlock: value,
     trial: trial.steps.map((s) => s.line).join(' '),
     trialBlock: trial,
-    busy: objections.find((o) => o.id === 'busy')?.line || '',
-    gate: objections.find((o) => o.id === 'gate')?.line || '',
-    objections: objections.filter((o) => o.id !== 'busy' && o.id !== 'gate'),
+    earlyObjections,
+    busy: earlyObjections.find((o) => o.id === 'busy')?.line || '',
+    gate: earlyObjections.find((o) => o.id === 'gate')?.line || '',
+    objections,
     cardSummary: summary,
     hasVisibilityCard: !!card,
     listHint: DEFAULT_LIST,
+    agentName: agentName || null,
     projectionHints: {
       reviews: slots.reviews,
       rating: slots.rating,
       keyword: slots.keyword,
       nearbyName: slots.nearby.name,
+      rankKind: slots.rankKind,
     },
   };
 }
 
 function positionKind(slots) {
-  const { keyword, rank, competitor } = slots;
+  const { keyword, rank, competitor, rankKind } = slots;
+  if (rankKind === 'out_of_top' || (keyword && rankKind === 'out_of_top')) {
+    return 'out_of_top';
+  }
   if (keyword && rank === 1) return 'rank1';
   if (keyword && rank != null && competitor) return 'trailing';
   if (keyword && rank != null) return 'ranked';
+  if (keyword && rankKind === 'out_of_top') return 'out_of_top';
   return 'none';
 }
 
@@ -481,7 +570,10 @@ export function buildMapsHookLine(slots) {
   const suffix = ratingReviewsSuffix(slots);
 
   if (kind === 'rank1') {
-    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
+    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; il rischio è farsi raggiungere sul volume di recensioni.`;
+  }
+  if (kind === 'out_of_top') {
+    return `Su Maps, per «${keyword}» non uscite nei primi risultati (fuori top 20): per quella ricerca praticamente non vi trovano${suffix}.`;
   }
   if (kind === 'trailing') {
     return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${

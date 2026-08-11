@@ -45,7 +45,8 @@ export const getColdCallScript = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Non hai accesso a questo contatto' });
     }
 
-    const script = buildColdCallScript(contact);
+    const agentName = req.user?.firstName || req.user?.name || null;
+    const script = buildColdCallScript(contact, { agentName });
 
     res.json({
       success: true,
@@ -109,7 +110,9 @@ export const upsertVisibilityCard = async (req, res) => {
         contactId: contact._id,
         visibilityCard: contact.properties.visibilityCard,
         visibilityCardGeneratedAt: generatedAt,
-        script: buildColdCallScript(contact),
+        script: buildColdCallScript(contact, {
+          agentName: req.user?.firstName || req.user?.name || null,
+        }),
       },
     });
   } catch (error) {
