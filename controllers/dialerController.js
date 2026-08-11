@@ -12,6 +12,7 @@ export const getDialerQueue = async (req, res) => {
       user: req.user,
       list: req.query.list,
       status: req.query.status,
+      city: req.query.city,
       limit: req.query.limit,
       offset: req.query.offset,
       owner: req.query.owner,
