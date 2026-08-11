@@ -46,9 +46,13 @@ async function main() {
   };
 
   if (!FORCE) {
+    // Riprova anche stub senza place (arricchimenti falliti salvati per errore in passato)
     query.$or = [
       { 'properties.visibilityCard': { $exists: false } },
       { 'properties.visibilityCard': null },
+      { 'properties.visibilityCard.place': { $exists: false } },
+      { 'properties.visibilityCard.place': null },
+      { 'properties.visibilityCard.ranking.error': 'no place' },
     ];
   }
 

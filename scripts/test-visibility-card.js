@@ -10,12 +10,15 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 import { MongoClient } from 'mongodb';
 import {
   buildVisibilityCard,
   contactBaseFromDoc,
 } from '../services/visibilityCardPipeline.js';
 import { mapsHookFromCard } from '../services/coldCallScriptService.js';
+
+dotenv.config();
 
 const LIST = 'Cold Call - Vicini Clienti';
 const OUT_DIR = 'analysis/coldcall-alessandro/visibility-cards-test';

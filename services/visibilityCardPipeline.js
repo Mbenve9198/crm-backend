@@ -298,16 +298,33 @@ export async function reviewVelocity(place, { maxPages = 3 } = {}) {
   };
 }
 
+/** Card usabile in dialer: place risolto (non stub ranking/velocity-only). */
+export function isUsableVisibilityCard(card) {
+  if (!card || typeof card !== 'object') return false;
+  const place = card.place;
+  if (!place || place.error) return false;
+  if (!place.placeId && !place.name) return false;
+  if (card.ranking?.error === 'no place' || card.velocity?.error === 'no place') return false;
+  return true;
+}
+
 /**
  * Genera la visibility card completa per un contact document.
  * keyword + place in parallelo, poi rank + velocity in parallelo.
+ * @throws se place non risolvibile — il batch non deve persistere stub.
  */
 export async function buildVisibilityCard(contact) {
   const base = contactBaseFromDoc(contact);
   const [keyword, place] = await Promise.all([pickKeyword(base), resolvePlace(contact)]);
-  const [ranking, velocity] = place
-    ? await Promise.all([rankForKeyword(place, keyword), reviewVelocity(place, { maxPages: 3 })])
-    : [{ error: 'no place' }, { error: 'no place' }];
+  if (!place) {
+    const err = new Error(`place non risolto per ${base.name || base.id}`);
+    err.code = 'NO_PLACE';
+    throw err;
+  }
+  const [ranking, velocity] = await Promise.all([
+    rankForKeyword(place, keyword),
+    reviewVelocity(place, { maxPages: 3 }),
+  ]);
   return {
     contact: base,
     keyword,
@@ -325,4 +342,5 @@ export default {
   rankForKeyword,
   reviewVelocity,
   buildVisibilityCard,
+  isUsableVisibilityCard,
 };

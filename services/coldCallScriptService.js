@@ -6,9 +6,20 @@
 
 const DEFAULT_LIST = 'Cold Call - Vicini Clienti';
 
+/** True solo se la scheda ha un place risolto (non stub fallito). */
+function isUsableCard(card) {
+  if (!card || typeof card !== 'object') return false;
+  const place = card.place;
+  if (!place || place.error) return false;
+  if (!place.placeId && !place.name) return false;
+  if (card.ranking?.error === 'no place' || card.velocity?.error === 'no place') return false;
+  return true;
+}
+
 function asCard(contact) {
   const props = contact.properties || {};
-  return props.visibilityCard || null;
+  const card = props.visibilityCard || null;
+  return isUsableCard(card) ? card : null;
 }
 
 function asNumber(v) {
