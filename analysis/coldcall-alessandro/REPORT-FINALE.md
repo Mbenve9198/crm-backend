@@ -203,6 +203,8 @@ Dettaglio in `agent-outputs/05-new-long-transcripts.md`.
 | `agent-outputs/03-process-funnel.md` | Talk track reale + funnel S0–S8 |
 | `agent-outputs/04-experiments-improvements.md` | Quick wins, A/B, coaching, CRM |
 | `agent-outputs/05-new-long-transcripts.md` | Recovery 4 long + implicazioni |
+| `agent-outputs/06-script-critique.md` | Review qualità script |
+| `SCRIPT-COLD-CALL.md` | **Script operativo v1.1** + playbook obiezioni |
 | `REPORT-FINALE.md` | Questo documento |
 
 > I transcript grezzi (`transcripts/`, `bundle-*.md`) restano in working tree per analisi locali; **non** vanno in git (PII / contenuti chiamata).
