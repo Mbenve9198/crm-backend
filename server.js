@@ -145,7 +145,7 @@ app.use(cors({
     
     console.log(`🌐 CORS Check - Origin: ${origin}, Allowed: ${allowedOrigins.join(', ')}`);
     
-    // Permetti tutti i domini Vercel se non è specificato FRONTEND_URL
+    // Permetti tutti i domini Vercel / preview CRM
     if (!origin || 
         allowedOrigins.includes(origin) ||
         origin.includes('.vercel.app') ||
@@ -154,12 +154,14 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log(`❌ CORS Deny: ${origin}`);
-      callback(new Error('Non permesso da CORS'));
+      // Non throw: Error → 500 senza ACAO e il browser mostra solo "CORS blocked"
+      callback(null, false);
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 204,
 }));
 
 // Logging delle richieste (solo in development)
