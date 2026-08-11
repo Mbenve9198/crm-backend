@@ -1,11 +1,9 @@
 /**
- * Script cold call strutturato: template + slot dalla visibility card.
- * Nessuna chiamata AI — deterministico e pronto in dialer.
- * Ogni dato scheda noto condiziona opening / hook / discovery / value / obiezioni.
+ * Script cold call v3: apertura ancora+proof, hook Maps, qualificazione,
+ * value/trial condizionati dai coperti (calcolo 10% lato FE/BE helper).
  */
 
 import { isUsableVisibilityCard } from './visibilityCardUtils.js';
-import { formatNearbyClientProof } from './nearbyClientStatsService.js';
 
 const DEFAULT_LIST = 'Cold Call - Vicini Clienti';
 
@@ -24,30 +22,44 @@ function asNumber(v) {
 function formatDist(distM) {
   const n = asNumber(distM);
   if (n == null) return null;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)} km`;
+  if (n >= 1000) {
+    const km = n / 1000;
+    const rounded = km < 10 ? Math.round(km * 10) / 10 : Math.round(km);
+    return `${rounded} km`;
+  }
   return `${Math.round(n)} metri`;
 }
 
-/** Arrotonda velocity per parlato: 1 decimale sotto 10, intero sopra. */
-function roundVelocity(v) {
-  if (v == null) return null;
-  return v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
-}
-
-function formatVelocityPerMonth(v) {
-  const rounded = roundVelocity(v);
-  if (rounded == null) return null;
-  const unit = rounded === 1 ? 'recensione/mese' : 'recensioni/mese';
-  return `Negli ultimi mesi risultano circa ${rounded} ${unit}.`;
-}
-
-function isLowVelocity(v) {
-  return v != null && v < 1.5;
-}
-
 /**
- * Estrae una sola volta tutti gli slot usati da opening/hook/discovery/value/obiezioni.
+ * Proiezioni da coperti/settimana.
+ * mensili ≈ settimanali × 4; potenziale rec/mese = 10% coperti mensili.
  */
+export function computeCoverProjections(coversPerWeek, currentReviews) {
+  const weekly = asNumber(coversPerWeek);
+  if (weekly == null || weekly <= 0) return null;
+  const coversMonthly = Math.round(weekly * 4);
+  const potentialMonthly = Math.max(1, Math.round(coversMonthly * 0.1));
+  const reviewsNow = asNumber(currentReviews) || 0;
+  const yearReviews = reviewsNow + potentialMonthly * 12;
+  const twoWeekPotential = Math.max(1, Math.round(potentialMonthly / 2));
+  return {
+    coversPerWeek: weekly,
+    coversMonthly,
+    potentialMonthly,
+    yearReviews,
+    twoWeekPotential,
+    reviewsNow,
+  };
+}
+
+/** Nuovo rating medio dopo una recensione a 1 stella. */
+export function ratingAfterOneStar(rating, reviews) {
+  const r = asNumber(rating);
+  const n = asNumber(reviews);
+  if (r == null || n == null || n <= 0) return null;
+  return Math.round(((r * n + 1) / (n + 1)) * 100) / 100;
+}
+
 function extractSlots(contact, card) {
   const props = contact.properties || {};
   const fromCard = card?.contact?.clienteVicino || card?.nearbyClient?.name;
@@ -70,8 +82,9 @@ function extractSlots(contact, card) {
   if (typeof rawRank === 'number' && Number.isFinite(rawRank)) rank = rawRank;
   else if (typeof rawRank === 'string' && /^\d+$/.test(rawRank.trim())) rank = Number(rawRank.trim());
 
-  const ahead = card?.ranking?.competitorsAhead;
-  const competitor = Array.isArray(ahead) && ahead.length > 0 ? ahead[0] : null;
+  const ahead = Array.isArray(card?.ranking?.competitorsAhead)
+    ? card.ranking.competitorsAhead
+    : [];
 
   const rating = asNumber(
     card?.place?.rating ?? card?.ranking?.user?.rating ?? props.rating
@@ -79,26 +92,20 @@ function extractSlots(contact, card) {
   const reviews = asNumber(
     card?.place?.reviews ?? card?.ranking?.user?.reviews ?? props.reviews_count
   );
-  const velocity = asNumber(card?.velocity?.avgPerMonthRecent);
 
   const nearbyClientStats =
-    props.nearbyClientStats ||
-    card?.nearbyClientStats ||
-    null;
+    props.nearbyClientStats || card?.nearbyClientStats || null;
 
   return {
     locale: card?.place?.name || contact.name,
     nearby: { name: nearbyName, distM },
     nearbyClientStats,
-    nearbyProof: formatNearbyClientProof(nearbyClientStats),
     keyword,
     rank,
-    competitor,
+    competitors: ahead.slice(0, 2),
+    competitor: ahead[0] || null,
     rating,
     reviews,
-    velocity,
-    velocityRounded: roundVelocity(velocity),
-    lowVelocity: isLowVelocity(velocity),
     address: card?.place?.address || props.address || null,
     city: card?.contact?.city || props.city || null,
     category: card?.contact?.category || props.category || null,
@@ -107,285 +114,262 @@ function extractSlots(contact, card) {
   };
 }
 
-/** rank1 | trailing | ranked | none — una sola decisione di posizione Maps. */
-function positionKind(slots) {
-  const { keyword, rank, competitor } = slots;
-  if (keyword && rank === 1) return 'rank1';
-  if (keyword && rank != null && competitor) return 'trailing';
-  if (keyword && rank != null) return 'ranked';
-  return 'none';
-}
-
-function ratingReviewsSuffix(slots) {
-  const { reviews, rating } = slots;
-  return `${reviews != null ? ` con ${reviews} recensioni` : ''}${rating != null ? ` (⭐ ${rating})` : ''}`;
-}
-
-/** Una sola generatrice del pezzo Maps (usata da hook e da render markdown test). */
-export function buildMapsHookLine(slots) {
-  const { keyword, rank, competitor } = slots;
-  const kind = positionKind(slots);
-  const suffix = ratingReviewsSuffix(slots);
-
-  if (kind === 'rank1') {
-    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
+function nearbyProofLine(slots) {
+  const s = slots.nearbyClientStats;
+  if (!s || s.reviewsGained == null || s.reviewsGained <= 0) return null;
+  const months = asNumber(s.monthsActive);
+  const monthsLabel =
+    months == null || months <= 0
+      ? null
+      : months === 1
+        ? '1 mese'
+        : `${Math.round(months)} mesi`;
+  if (s.initialReviewCount != null && s.currentReviewCount != null && monthsLabel) {
+    return `lo abbiamo aiutato a passare da ${s.initialReviewCount} a ${s.currentReviewCount} recensioni in ${monthsLabel}`;
   }
-  if (kind === 'trailing') {
-    return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${competitor.reviews ? `, ${competitor.reviews} rec` : ''}). Voi risultate #${rank}${suffix}.`;
+  if (monthsLabel) {
+    return `gli abbiamo portato +${s.reviewsGained} recensioni Google in ${monthsLabel}`;
   }
-  if (kind === 'ranked') {
-    return `Su Maps, per «${keyword}» risultate #${rank}${suffix}.`;
-  }
-  return null;
+  return `gli abbiamo portato +${s.reviewsGained} recensioni Google vere`;
 }
 
 function buildOpening(slots) {
-  const lines = [`Buongiorno, ${slots.locale}? Sono Alessandro di Menu Chat.`];
+  const lines = [
+    'Stop. Ascolta.',
+    `Buongiorno, ${slots.locale}? Sono Alessandro di Menu Chat.`,
+  ];
 
   if (slots.nearby.name) {
     const distLabel = formatDist(slots.nearby.distM);
-    lines.push(
-      `Lavoriamo con ${slots.nearby.name}${distLabel ? `, qui a ${distLabel}` : ' qui vicino'}, sulle recensioni Google vere.`
-    );
+    const proof = nearbyProofLine(slots);
+    let line = `Vi chiamo perché lavoriamo con ${slots.nearby.name}${
+      distLabel ? `, qui a ${distLabel} da voi` : ' qui vicino'
+    }`;
+    if (proof) line += `: ${proof}`;
+    else line += ', sulle recensioni Google vere';
+    lines.push(`${line}.`);
   } else {
-    lines.push(`Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
+    lines.push(`Vi chiamo perché lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
   }
 
-  if (slots.nearbyProof) {
-    lines.push(slots.nearbyProof);
+  if (slots.reviews != null) {
+    lines.push(`Voi su Maps siete a circa ${slots.reviews} recensioni.`);
   }
-
-  const leadBits = [];
-  if (slots.reviews != null) leadBits.push(`circa ${slots.reviews} recensioni`);
-  if (slots.rating != null) leadBits.push(`media ${slots.rating}`);
-  if (slots.keyword && slots.rank != null) leadBits.push(`#${slots.rank} su «${slots.keyword}»`);
-  if (leadBits.length) {
-    lines.push(`Voi su Maps siete a ${leadBits.join(', ')}.`);
-  }
-
-  const velocityLine = formatVelocityPerMonth(slots.velocity);
-  if (velocityLine) lines.push(velocityLine);
 
   lines.push(
-    `Vi chiamo per lo stesso motivo — capire in trenta secondi se anche a voi può servire. Due domande al volo, va bene?`
+    `Posso farvi due domande al volo per capire se possiamo aiutarvi allo stesso modo?`
   );
   return lines.join(' ');
 }
 
+/** Posizione relativa vs competitor — null se #1 o senza competitor noti. */
+function competitorsPhrase(slots) {
+  if (slots.rank === 1) return null;
+  const comps = slots.competitors || [];
+  if (comps.length >= 2) {
+    return `sotto ${comps[0].name} e ${comps[1].name}`;
+  }
+  if (comps.length === 1) {
+    return `sotto ${comps[0].name}`;
+  }
+  if (slots.rank != null && slots.rank > 1) {
+    return 'dietro ad altri locali della zona';
+  }
+  return null;
+}
+
+function reviewsPossessivePhrase(slots) {
+  if (slots.reviews != null) return `le vostre ${slots.reviews} recensioni`;
+  return 'le vostre recensioni';
+}
+
 function buildHook(slots) {
-  const parts = [];
-
-  if (slots.nearby.name) {
-    const distLabel = formatDist(slots.nearby.distM);
-    parts.push(
-      `Perfetto. Vi chiamo perché siete vicini a ${slots.nearby.name}${distLabel ? ` (${distLabel})` : ''}, con cui lavoriamo sulle recensioni Google vere.`
-    );
-  } else {
-    parts.push(`Perfetto. Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
-  }
-
-  if (slots.nearbyProof) {
-    parts.push(slots.nearbyProof);
-  }
-
-  if (slots.reviews != null || slots.rating != null) {
-    parts.push(
-      `Voi su Maps siete a circa ${slots.reviews != null ? `${slots.reviews} recensioni` : 'poche recensioni'}${slots.rating != null ? `, media ${slots.rating}` : ''}.`
-    );
-  }
-
-  const velocityLine = formatVelocityPerMonth(slots.velocity);
-  if (velocityLine) parts.push(velocityLine);
-
-  const mapsHook = buildMapsHookLine(slots);
-  if (mapsHook) parts.push(mapsHook);
-
-  if (slots.lowVelocity) {
-    parts.push(`Dai dati recenti sembra che le recensioni arrivino più «al naturale» — poche al mese.`);
-  }
-
-  parts.push(`State già facendo qualcosa di concreto per le recensioni, o lasciate al naturale?`);
-  return parts.join(' ');
+  const keyword = slots.keyword || 'la vostra categoria in zona';
+  const rankTxt = slots.rank != null ? `#${slots.rank}` : 'fuori dai primi risultati';
+  const under = competitorsPhrase(slots);
+  const positionBit = under ? `${rankTxt}, ${under}` : rankTxt;
+  return (
+    `Perfetto. Ho simulato una ricerca su Google Maps, scrivendo «${keyword}», e siete apparsi ${positionBit}. ` +
+    `Il modo migliore per apparire nei primi risultati è avere più recensioni: come avete raccolto ${reviewsPossessivePhrase(slots)}?`
+  );
 }
 
 function buildDiscovery(slots) {
-  const kind = positionKind(slots);
-  const { velocityRounded, lowVelocity, competitor, keyword, rank, rating } = slots;
-
-  const questions = [
+  return [
     {
       id: 'q1',
       label: 'Recensioni oggi',
       mode: 'ask',
-      line: lowVelocity
-        ? 'Dai dati Maps sembra che le recensioni arrivino più al naturale — state facendo qualcosa per incentivarle?'
-        : 'State già facendo qualcosa per le recensioni?',
-      ...(lowVelocity ? { knownFact: 'velocity bassa — al naturale' } : {}),
+      line: `Come avete raccolto ${reviewsPossessivePhrase(slots)}?`,
+      ...(slots.reviews != null ? { knownFact: `${slots.reviews} rec Maps` } : {}),
     },
-    velocityRounded != null
-      ? {
-          id: 'q2',
-          label: 'Volume / stack',
-          mode: 'confirm',
-          line:
-            velocityRounded === 1
-              ? 'Dai dati Maps risulta circa 1 recensione al mese di recente — vi torna, o state facendo di più/meno?'
-              : `Dai dati Maps risultano circa ${velocityRounded} recensioni al mese di recente — vi torna, o state facendo di più/meno?`,
-          knownFact: `~${velocityRounded} rec/mese Maps`,
-        }
-      : {
-          id: 'q2',
-          label: 'Volume / stack',
-          mode: 'ask',
-          line: 'Quante ne entrano più o meno al mese, a occhio? (Se hanno già QR/agenzia: vi sta portando quante al mese?)',
-        },
-  ];
-
-  if (kind === 'trailing') {
-    questions.push({
-      id: 'q_competitor',
-      label: 'Gap Maps',
-      mode: 'confirm',
-      line: `Su «${keyword}» Maps mostra prima ${competitor.name}${competitor.reviews != null ? ` (${competitor.reviews} rec)` : ''} e voi #${rank} — lo sapevate, o vi interessa chiudere quel gap?`,
-      knownFact: `${competitor.name} #${competitor.rank ?? 1} · voi #${rank}`,
-    });
-  } else if (kind === 'rank1') {
-    questions.push({
-      id: 'q_rank1',
-      label: 'Difesa #1',
-      mode: 'confirm',
-      line: `Su «${keyword}» risultate #1 — ottimo. Vi interessa difendere/accelerare il volume di recensioni vere al mese?`,
-      knownFact: `#1 su «${keyword}»`,
-    });
-  }
-
-  questions.push(
     {
-      id: 'q3',
-      label: 'Capacità',
+      id: 'q2_covers',
+      label: 'Coperti / settimana',
       mode: 'ask',
+      inputType: 'number',
       line: 'Più o meno quanti coperti fate a settimana in questo periodo?',
+      placeholder: 'es. 200',
+      drivesProjections: true,
+    },
+    {
+      id: 'q3_menu',
+      label: 'Menu cartaceo o digitale',
+      mode: 'ask',
+      line: 'Avete menu cartaceo o digitale?',
+      followUpIfPaper:
+        'Se cartaceo — sareste disposti a mettere il menu digitale se vi permettesse di raccogliere circa {{potentialMonthly}} recensioni al mese?',
     },
     {
       id: 'name_role',
       label: 'Nome / ruolo',
       mode: 'ask',
       line: 'Scusa, stiamo parlando da un minuto: come ti chiami? … Sei titolare, socio, o gestisci tu queste cose?',
-    }
-  );
-
-  if (rating != null && rating < 4.3) {
-    questions.push({
-      id: 'rating_focus',
-      label: 'Focus voto',
-      mode: 'ask',
-      line: `Vedo media ${rating} — vi interessa più alzare il voto, il volume, o entrambi?`,
-      knownFact: `media ${rating}`,
-    });
-  }
-
-  return questions;
+    },
+  ];
 }
 
-function buildValue(slots) {
-  const kind = positionKind(slots);
-  const parts = [
-    `In pratica facciamo una cosa sola: più recensioni vere su Google Maps.`,
-    `Menù digitale / QR a tavola → WhatsApp → richiesta recensione al momento giusto.`,
-    `Non compriamo recensioni: massimizziamo quelle dei clienti che avete già.`,
-  ];
+function buildValueTemplate(slots) {
+  const keyword = slots.keyword || 'in zona';
+  const ancora = slots.nearby.name || 'il locale vicino con cui lavoriamo';
+  const reviews = slots.reviews != null ? String(slots.reviews) : 'quelle che avete';
+  return {
+    needsCovers: true,
+    lines: [
+      `In base a quello che mi hai detto, con il nostro sistema potreste raccogliere circa {{potentialMonthly}} recensioni al mese, e quindi fra un anno avreste circa {{yearReviews}} recensioni (oggi ${reviews} + {{potentialMonthly}}×12) ed essere primi nei risultati su Google Maps quando uno cerca «${keyword}».`,
+      `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane senza impegno?`,
+    ],
+  };
+}
 
-  if (kind === 'trailing') {
-    parts.push(
-      `L’obiettivo concreto su «${slots.keyword}» è avvicinarvi a ${slots.competitor.name} (oggi davanti a voi) con volume vero, non con trucchi.`
-    );
-  } else if (kind === 'rank1') {
-    parts.push(
-      `Siete già #1 su «${slots.keyword}»: il pezzo utile è tenere/accelerare il ritmo di recensioni vere, così non vi superano.`
-    );
-  }
-
-  if (slots.lowVelocity && slots.velocityRounded != null) {
-    parts.push(
-      `Oggi il ritmo recente è ~${slots.velocityRounded}/mese: nei locali simili vediamo ordine di grandezza 50–100 recensioni vere al mese, in base alle scansioni.`
-    );
-  } else {
-    parts.push(
-      `Nei locali simili vediamo ordine di grandezza 50–100 recensioni vere al mese, in base alle scansioni.`
-    );
-  }
-
-  return parts.join(' ');
+function buildTrialSteps(slots) {
+  void slots;
+  return {
+    needsCovers: true,
+    steps: [
+      {
+        id: 'explain',
+        title: 'Come funziona',
+        line:
+          'Bene, ti spiego come funziona: mettiamo dei QR code sui tavoli e quando il cliente scannerizza per vedere il menu digitale si apre una chat WhatsApp che invia in automatico il menu. Dopo che ha finito di mangiare, quando l’esperienza è ancora calda, riceve un messaggio WhatsApp con la richiesta di recensione e link diretto a Google. Puoi aspettarti che ogni 100 persone che vedono il menu, circa 10 mettano la recensione. Ti è chiaro fin qui?',
+      },
+      {
+        id: 'ship_qr',
+        title: 'Spedizione QR',
+        line:
+          'Per iniziare la prova ti inviamo 50 QR code direttamente all’indirizzo che preferisci: ti costano giusto 25€ + IVA per la stampa e la spedizione. Tu dovrai solo mettere i QR sui tavoli e togliere il cartaceo (davvero importante). A che indirizzo posso inviarteli?',
+      },
+      {
+        id: 'invoice',
+        title: 'Fattura setup',
+        line:
+          'Ok, te li spediamo in giornata. Intanto ti mando la fattura dei 25€ + IVA: basta la paghi entro un paio di giorni. Mi servirebbe P.IVA, ragione sociale, sede legale e codice univoco.',
+      },
+      {
+        id: 'menu_assets',
+        title: 'Menu (digitale o cartaceo)',
+        line:
+          'Se ha già menu digitale: mi manderesti il link al tuo menu digitale o una foto del QR che hai sui tavoli? Se non ce l’ha: mi manderesti PDF oppure foto del tuo menu cartaceo? Così ti preparo il tuo menu digitale.',
+      },
+      {
+        id: 'wa_number',
+        title: 'WhatsApp',
+        line: 'Perfetto, il tuo numero WhatsApp dove posso inviarti il menu digitale?',
+      },
+      {
+        id: 'remind_paper',
+        title: 'Reminder cartaceo',
+        line:
+          'Ok, allora grazie {{nome}}. Ricordati: quando ti arrivano i QR, dovrai metterli sui tavoli e non dare assolutamente il menu cartaceo a meno di casi eccezionali. Se dai entrambi, le persone useranno il cartaceo, il servizio non funzionerà e avremo perso soldi entrambi.',
+      },
+      {
+        id: 'close',
+        title: 'Chiusura',
+        line: 'Bene. Allora grazie ancora e buona serata.',
+      },
+    ],
+  };
 }
 
 function buildObjections(slots) {
-  const kind = positionKind(slots);
-  const { nearby, keyword, competitor, velocityRounded } = slots;
+  const reviews = slots.reviews;
+  const rating = slots.rating;
+  const after = ratingAfterOneStar(rating, reviews);
+  const ratingBit =
+    rating != null && reviews != null && after != null
+      ? `ora se ti arriva una recensione a una stella, considerando che hai ${reviews} recensioni con rating ${rating}, scenderesti subito a circa ${after}; ma dopo mesi con noi avrai così tante recensioni che il rating non si abbasserà più allo stesso modo`
+      : `ora una stella ti fa male subito; con molte più recensioni vere il rating diventa molto più stabile`;
 
   const objections = [
     {
-      id: 'menu_qr',
-      short: 'Menù / QR',
-      trigger: 'Abbiamo già il menù digitale / QR',
-      line: 'Perfetto — allora non vi vendo il menù. Il pezzo che manca di solito è far arrivare recensioni vere in automatico da chi usa il QR. Vi mostro solo quello in prova.',
+      id: 'negatives',
+      short: 'Negative',
+      trigger: 'E le recensioni negative?',
+      line:
+        `Chi vuole lasciarti una negativa lo fa già oggi: ti cerca su Google e la scrive, a prescindere. Il problema vero è che chi si trova bene non fa niente. Con noi le positive che prima non arrivavano ora arrivano ogni giorno — e se prima una negativa ti rimaneva in cima per settimane, ora dopo un giorno sarà già sommersa da altre positive. Inoltre ${ratingBit}.`,
     },
     {
-      id: 'not_now',
-      short: 'Non ora',
-      trigger: 'Non mi interessa / non ora',
-      line: 'Ok, non insisto. Se cambia qualcosa sulle recensioni Maps, mi trovate. Buona giornata.',
+      id: 'fake',
+      short: 'False?',
+      trigger: 'Sono recensioni false?',
+      line:
+        'No. Niente recensioni comprate, niente bot: solo i tuoi clienti veri, quelli che hanno mangiato da te e scansionato il QR. Chiediamo a chi si è trovato bene di scrivere quello che già pensa. È esattamente il tipo di recensione che Google vuole.',
     },
     {
       id: 'price',
       short: 'Prezzo',
       trigger: 'Quanto costa?',
-      line: 'Prima vediamo se vi serve: in prova il setup QR è 25€ + IVA, senza impegno sul piano annuale. Se funziona vi spiego i numeri dopo.',
+      line:
+        'Le prime due settimane niente: nessuna carta, si disdice con un messaggio. Poi poco più di cento euro al mese — ma ne parliamo a prova finita, coi tuoi numeri davanti.',
     },
     {
-      id: 'send_info',
-      short: 'Mail / WA',
-      trigger: 'Mandami una mail / materiale',
-      line: 'Certo — meglio WhatsApp, lo aprite subito. Mi date il numero giusto e vi scrivo io tra un minuto, poi ci risentiamo.',
+      id: 'partner',
+      short: 'Socio',
+      trigger: 'Ne voglio parlare col socio',
+      line:
+        'Certo, ci mancherebbe. Ti dico solo una cosa così non gli porti una roba più grande di quella che è. Qui non c’è niente da decidere adesso: sono due settimane di prova, non paghi niente e non firmi niente. Se in due settimane non vi arrivano recensioni in più, ci salutiamo. La decisione vera la prendete tra due settimane guardando i vostri numeri, non fidandovi di quello che vi dico io al telefono. Detto questo: al di là del socio, tu la proveresti?',
+      branches: [
+        {
+          id: 'partner_yes',
+          label: 'Se dice sì',
+          line:
+            'Perfetto. Allora quando gliene parli digli che la prova è gratis e in due settimane già potrete raccogliere circa {{twoWeekPotential}} recensioni in più. Quando lo senti, stasera? Ti richiamo domani alle 15.',
+          needsCovers: true,
+        },
+        {
+          id: 'partner_hesitate',
+          label: 'Se tentenna',
+          line:
+            'Posso essere sincero? Ho la sensazione che più che il socio ci sia qualcosa che non ti convince. Dimmelo tranquillamente, non mi offendo: è meglio un no adesso che due settimane di messaggi. Cos’è che non ti torna?',
+        },
+      ],
     },
     {
-      id: 'unknown_nearby',
-      short: 'Non conosco',
-      trigger: 'Non conosco il locale vicino',
-      line: nearby.name
-        ? `Ci sta, zona piena di locali — ${nearby.name} è solo il riferimento. A prescindere dal nome: voi sulle recensioni Maps state già facendo qualcosa, o al naturale?`
-        : 'Ci sta, zona piena di locali. A prescindere dal nome: voi sulle recensioni Maps state già facendo qualcosa, o al naturale?',
+      id: 'no_digital',
+      short: 'No digitale',
+      trigger: 'Non voglio menu digitale / carta è esperienza / clienti anziani',
+      line:
+        'Certo, lo capisco. Il QR per il menu è l’unico modo per far ottenere recensioni in automatico così. E mi dica: sarebbe disposto a mettere su digitale almeno la carta dei vini o dei dolci? Oppure il menu del giorno se ce l’ha?',
+      branches: [
+        { id: 'partial_yes', label: 'Se sì → procedi trial', line: 'Perfetto, partiamo da quello — stesso flusso WhatsApp, stesso obiettivo recensioni.' },
+        { id: 'partial_no', label: 'Se no → chiudi', line: 'Ok, allora non è il momento. Se cambia idea sulle recensioni Maps, mi trovi. Buona giornata.' },
+      ],
+    },
+    {
+      id: 'busy',
+      short: 'Busy',
+      trigger: 'Sono occupato / in servizio',
+      line:
+        `Hai ragione, non ti rubo un secondo. Quando richiamo il titolare — o te? Meglio mattina prima delle 11 o dopo le 15? Lascia solo il nome: Alessandro di Menu Chat, recensioni Google${slots.nearby.name ? ` come ${slots.nearby.name}` : ''}.`,
+    },
+    {
+      id: 'gate',
+      short: 'Gate',
+      trigger: 'Non sono io che decido',
+      line:
+        `Capito, non sei tu che decidi. Come si chiama chi gestisce queste cose? Meglio che lo richiami domani 10:30 o giovedì 16:00? Puoi dirgli che ha chiamato Alessandro di Menu Chat, per le recensioni Google${slots.nearby.name ? ` — stesso tipo di lavoro che facciamo con ${slots.nearby.name}` : ''}? C’è un cellulare o un altro modo per trovarlo più facilmente?`,
     },
   ];
-
-  if (kind === 'rank1') {
-    objections.push({
-      id: 'already_first',
-      short: 'Siamo #1',
-      trigger: 'Siamo già i primi / stiamo bene così',
-      line: `Esatto, su «${keyword}» risultate #1 — bravi. Il rischio tipico è che il volume mensile resti basso e qualcuno vi passi. La prova serve solo ad accelerare le recensioni vere, non a “sistemare” il ranking.`,
-    });
-  }
-
-  if (kind === 'trailing') {
-    const compShort =
-      competitor.name.replace(/^Ristorante\s+/i, '').trim().split(/\s+/).slice(0, 2).join(' ') ||
-      'Competitor';
-    objections.push({
-      id: 'competitor_ok',
-      short: compShort,
-      trigger: `Conosco ${competitor.name} / non ci interessa il confronto`,
-      line: `Non è una gara personale con ${competitor.name}: è cosa vede chi cerca «${keyword || 'in zona'}» su Maps. Se il volume vero sale, la posizione tende a seguirlo — partiamo dalla prova e guardiamo i numeri.`,
-    });
-  }
-
-  if (velocityRounded != null) {
-    objections.push({
-      id: 'velocity_wrong',
-      short: 'Numeri sbagliati',
-      trigger: 'I vostri numeri sulle recensioni non tornano',
-      line: `Ok, Maps a noi dà circa ${velocityRounded}/mese di recente — se da voi è diverso dimmi pure il ritmo vero e ragioniamo su quello. L’importante è se volete accelerare in modo automatico.`,
-    });
-  }
 
   return objections;
 }
@@ -397,7 +381,6 @@ function buildCardSummary(slots, hook) {
     rank: slots.rank,
     rating: slots.rating,
     reviews: slots.reviews,
-    velocityPerMonth: slots.velocity,
     competitorAhead: slots.competitor
       ? {
           name: slots.competitor.name,
@@ -406,11 +389,17 @@ function buildCardSummary(slots, hook) {
           reviews: slots.competitor.reviews,
         }
       : null,
+    competitorsAhead: (slots.competitors || []).map((c) => ({
+      name: c.name,
+      rank: c.rank,
+      rating: c.rating,
+      reviews: c.reviews,
+    })),
     nearbyClient: slots.nearby.name
       ? { name: slots.nearby.name, distM: slots.nearby.distM }
       : null,
     nearbyClientStats: slots.nearbyClientStats || null,
-    nearbyProof: slots.nearbyProof || null,
+    nearbyProof: nearbyProofLine(slots),
     address: slots.address,
     city: slots.city,
     category: slots.category,
@@ -418,6 +407,14 @@ function buildCardSummary(slots, hook) {
     hook,
     generatedAt: slots.generatedAt,
   };
+}
+
+/** Riempie {{token}} in una stringa. */
+export function fillScriptTemplate(template, vars = {}) {
+  if (!template) return template;
+  return String(template).replace(/\{\{(\w+)\}\}/g, (_, key) =>
+    vars[key] != null ? String(vars[key]) : `{{${key}}}`
+  );
 }
 
 /**
@@ -429,36 +426,84 @@ export function buildColdCallScript(contact) {
   const slots = extractSlots(contact, card);
   const hook = buildHook(slots);
   const summary = buildCardSummary(slots, hook);
-  const ancora = slots.nearby.name || 'il locale vicino con cui lavoriamo';
+  const value = buildValueTemplate(slots);
+  const trial = buildTrialSteps(slots);
+  const objections = buildObjections(slots);
+
+  // Stringhe “piene” senza coperti (placeholder leggibili) per fallback / note
+  const fallbackVars = {
+    potentialMonthly: '…',
+    yearReviews: '…',
+    twoWeekPotential: '…',
+    nome: '…',
+  };
 
   return {
     opening: buildOpening(slots),
     hook,
     discovery: buildDiscovery(slots),
-    value: buildValue(slots),
-    busy:
-      `Hai ragione, non ti rubo un secondo. Quando richiamo il titolare — o te? Meglio mattina prima delle 11 o dopo le 15? ` +
-      `Lascia solo il nome: Alessandro di Menu Chat, recensioni Google come ${ancora}.`,
-    gate:
-      `Capito, non sei tu che decidi. Come si chiama chi gestisce queste cose? ` +
-      `Meglio che lo richiami domani 10:30 o giovedì 16:00? ` +
-      `Puoi dirgli che ha chiamato Alessandro di Menu Chat, per le recensioni Google — stesso tipo di lavoro che facciamo con ${ancora}? ` +
-      `C’è un cellulare o un altro modo per trovarlo più facilmente?`,
-    trial:
-      `Quello che vi consiglio è la prova di due settimane: montiamo i QR, guardiamo i numeri insieme. ` +
-      `Per creare e spedirvi circa 50 QR c’è solo il setup 25€ + IVA. ` +
-      `Ti mando ora su WhatsApp brochure + esempio. Partiamo da [data] — ti va?`,
-    objections: buildObjections(slots),
+    value: value.lines.map((l) => fillScriptTemplate(l, fallbackVars)).join(' '),
+    valueBlock: value,
+    trial: trial.steps.map((s) => s.line).join(' '),
+    trialBlock: trial,
+    busy: objections.find((o) => o.id === 'busy')?.line || '',
+    gate: objections.find((o) => o.id === 'gate')?.line || '',
+    objections: objections.filter((o) => o.id !== 'busy' && o.id !== 'gate'),
     cardSummary: summary,
     hasVisibilityCard: !!card,
     listHint: DEFAULT_LIST,
+    projectionHints: {
+      reviews: slots.reviews,
+      rating: slots.rating,
+      keyword: slots.keyword,
+      nearbyName: slots.nearby.name,
+    },
   };
+}
+
+function positionKind(slots) {
+  const { keyword, rank, competitor } = slots;
+  if (keyword && rank === 1) return 'rank1';
+  if (keyword && rank != null && competitor) return 'trailing';
+  if (keyword && rank != null) return 'ranked';
+  return 'none';
+}
+
+function ratingReviewsSuffix(slots) {
+  const { reviews, rating } = slots;
+  return `${reviews != null ? ` con ${reviews} recensioni` : ''}${
+    rating != null ? ` (⭐ ${rating})` : ''
+  }`;
+}
+
+/** Pezzo Maps monolinea (CLI test + compat). Null se keyword/rank mancanti. */
+export function buildMapsHookLine(slots) {
+  if (!slots) return null;
+  const { keyword, rank, competitor } = slots;
+  const kind = positionKind(slots);
+  const suffix = ratingReviewsSuffix(slots);
+
+  if (kind === 'rank1') {
+    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
+  }
+  if (kind === 'trailing') {
+    return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${
+      competitor.reviews ? `, ${competitor.reviews} rec` : ''
+    }). Voi risultate #${rank}${suffix}.`;
+  }
+  if (kind === 'ranked') {
+    return `Su Maps, per «${keyword}» risultate #${rank}${suffix}.`;
+  }
+  return null;
 }
 
 /** Hook Maps monolinea da card grezza (CLI markdown test). */
 export function mapsHookFromCard(card) {
   if (!card) return null;
-  const slots = extractSlots({ name: card?.place?.name || card?.contact?.name || '', properties: {} }, card);
+  const slots = extractSlots(
+    { name: card?.place?.name || card?.contact?.name || '', properties: {} },
+    card
+  );
   return buildMapsHookLine(slots);
 }
 
@@ -472,6 +517,7 @@ export function summarizeVisibilityCard(contact) {
       keyword: null,
       rank: null,
       nearbyClient: slots.nearby.name ? slots.nearby : null,
+      nearbyClientStats: slots.nearbyClientStats,
       hook,
     };
   }
@@ -482,8 +528,8 @@ export function summarizeVisibilityCard(contact) {
     rank: summary.rank,
     rating: summary.rating,
     reviews: summary.reviews,
-    velocityPerMonth: summary.velocityPerMonth,
     nearbyClient: summary.nearbyClient,
+    nearbyClientStats: summary.nearbyClientStats,
     competitorAhead: summary.competitorAhead,
     hook: summary.hook,
   };
@@ -496,5 +542,8 @@ export default {
   summarizeVisibilityCard,
   mapsHookFromCard,
   buildMapsHookLine,
+  computeCoverProjections,
+  ratingAfterOneStar,
+  fillScriptTemplate,
   COLD_CALL_DEFAULT_LIST,
 };
