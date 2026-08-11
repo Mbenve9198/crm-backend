@@ -227,11 +227,10 @@ function toStats(restaurant) {
 
 function pickBestHit(name, city, restaurants) {
   let hits = (restaurants || []).filter((r) => nameLooseMatch(name, r.name));
-  // Se abbiamo la città del lead, scarta match fuori zona (es. Giardino Firenze vs Taormina)
+  // Preferisci match in città; se la hint è sbagliata non azzerare i hit per nome forte
   if (city) {
     const local = hits.filter((r) => cityCompatible(city, r));
     if (local.length) hits = local;
-    else return null;
   }
   hits.sort((a, b) => {
     const ta = significantTokens(name);
