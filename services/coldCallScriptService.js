@@ -162,9 +162,9 @@ function buildOpening(slots) {
   return lines.join(' ');
 }
 
-/** Posizione relativa vs competitor — null se #1 o senza competitor noti. */
+/** Posizione relativa vs competitor — solo con rank numerico noto (>1). */
 function competitorsPhrase(slots) {
-  if (slots.rank === 1) return null;
+  if (slots.rank == null || slots.rank <= 1) return null;
   const comps = slots.competitors || [];
   if (comps.length >= 2) {
     return `sotto ${comps[0].name} e ${comps[1].name}`;
@@ -172,10 +172,7 @@ function competitorsPhrase(slots) {
   if (comps.length === 1) {
     return `sotto ${comps[0].name}`;
   }
-  if (slots.rank != null && slots.rank > 1) {
-    return 'dietro ad altri locali della zona';
-  }
-  return null;
+  return 'dietro ad altri locali della zona';
 }
 
 function reviewsPossessivePhrase(slots) {
