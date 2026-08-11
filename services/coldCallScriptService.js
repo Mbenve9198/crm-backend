@@ -241,18 +241,6 @@ function buildDiscovery(slots) {
       ...(slots.reviews != null ? { knownFact: `${slots.reviews} rec Maps` } : {}),
     },
     {
-      id: 'q1b_decision',
-      label: 'Chi decide',
-      mode: 'ask',
-      line:
-        'Su menu e cose nuove in sala, la decisione la prendi tu o c’è anche un socio/titolare da coinvolgere?',
-      choiceOptions: [
-        { id: 'me', label: 'Decido io' },
-        { id: 'with_partner', label: 'Con socio/titolare' },
-        { id: 'other', label: 'Altra persona' },
-      ],
-    },
-    {
       id: 'q2_covers',
       label: 'Coperti / settimana',
       mode: 'ask',
@@ -297,6 +285,7 @@ function buildValueTemplate(slots) {
     needsCovers: true,
     lines: [
       `In base a quello che mi hai detto, con il nostro sistema potreste raccogliere circa {{potentialMonthly}} recensioni al mese, e quindi fra un anno avreste circa {{yearReviews}} recensioni (oggi ${reviews} + {{potentialMonthly}}×12) ${mapsGoal}.`,
+      `A quel punto — con circa {{yearReviews}} recensioni e tra le prime posizioni quando uno cerca «${keyword}» — cosa cambia per il locale?`,
       `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane senza impegno?`,
     ],
   };
