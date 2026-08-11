@@ -117,9 +117,13 @@ function extractSlots(contact, card) {
 function nearbyProofLine(slots) {
   const s = slots.nearbyClientStats;
   if (!s || s.reviewsGained == null || s.reviewsGained <= 0) return null;
-  const months = s.monthsActive;
+  const months = asNumber(s.monthsActive);
   const monthsLabel =
-    months == null ? null : months === 1 ? '1 mese' : `${months} mesi`;
+    months == null || months <= 0
+      ? null
+      : months === 1
+        ? '1 mese'
+        : `${Math.round(months)} mesi`;
   if (s.initialReviewCount != null && s.currentReviewCount != null && monthsLabel) {
     return `lo abbiamo aiutato a passare da ${s.initialReviewCount} a ${s.currentReviewCount} recensioni in ${monthsLabel}`;
   }
