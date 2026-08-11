@@ -1,0 +1,604 @@
+[
+  {
+    "anchor": "L’ Euro & gluten free",
+    "leads": 116,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "691da562cf2186e82dbdc1fb",
+      "name": "L’ Euro & gluten free",
+      "city": null,
+      "address": "Viale XVIII Dicembre, 26, 04100 Latina LT, Italy",
+      "initialReviewCount": 825,
+      "currentReviewCount": 1101,
+      "reviewsGained": 276,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 31,
+      "rating": 4.2,
+      "startedAt": "2025-11-19T11:09:23.002Z",
+      "syncedAt": "2026-08-11T16:28:20.575Z"
+    },
+    "proof": "Con L’ Euro & gluten free in 9 mesi siamo passati da 825 a 1101 recensioni Google (+276)."
+  },
+  {
+    "anchor": "L'Ostu",
+    "leads": 104,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "690cc9a7adc14e451ff8575b",
+      "name": "L'Ostu",
+      "city": null,
+      "address": "Via Cristoforo Colombo, 63/A, 10129 Torino TO, Italy",
+      "initialReviewCount": 1491,
+      "currentReviewCount": 1808,
+      "reviewsGained": 317,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 35,
+      "rating": 4.3,
+      "startedAt": "2025-11-06T16:15:35.482Z",
+      "syncedAt": "2026-08-11T16:28:20.576Z"
+    },
+    "proof": "Con L'Ostu in 9 mesi siamo passati da 1491 a 1808 recensioni Google (+317)."
+  },
+  {
+    "anchor": "Trattoria Il Giardino",
+    "leads": 101,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6926da0cc5c6f0989d951975",
+      "name": "Trattoria Il Giardino",
+      "city": null,
+      "address": "Via della Scala, 61R, 50123 Firenze FI, Italy",
+      "initialReviewCount": 959,
+      "currentReviewCount": 1690,
+      "reviewsGained": 731,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 81,
+      "rating": 4.6,
+      "startedAt": "2025-11-26T10:44:28.828Z",
+      "syncedAt": "2026-08-11T16:28:20.577Z"
+    },
+    "proof": "Con Trattoria Il Giardino in 9 mesi siamo passati da 959 a 1690 recensioni Google (+731)."
+  },
+  {
+    "anchor": "Osteria il Riposto",
+    "leads": 89,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "694140ab3b4149bd513370cf",
+      "name": "Osteria il Riposto",
+      "city": null,
+      "address": "Via Napoli, 76a, 00184 Roma RM, Italy",
+      "initialReviewCount": 1048,
+      "currentReviewCount": 1671,
+      "reviewsGained": 623,
+      "monthsActive": 8,
+      "avgReviewsPerMonth": 78,
+      "rating": 4.5,
+      "startedAt": "2025-12-16T11:21:15.798Z",
+      "syncedAt": "2026-08-11T16:28:20.578Z"
+    },
+    "proof": "Con Osteria il Riposto in 8 mesi siamo passati da 1048 a 1671 recensioni Google (+623)."
+  },
+  {
+    "anchor": "Sanlollo - Pizza & Cucina",
+    "leads": 76,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "695be032327c1976850815db",
+      "name": "Sanlollo - Pizza & Cucina",
+      "city": null,
+      "address": "Via dei Latini, 57, 00185 Roma RM, Italy",
+      "initialReviewCount": 1257,
+      "currentReviewCount": 1578,
+      "reviewsGained": 321,
+      "monthsActive": 7,
+      "avgReviewsPerMonth": 46,
+      "rating": 4.6,
+      "startedAt": "2026-01-05T16:00:50.744Z",
+      "syncedAt": "2026-08-11T16:28:20.580Z"
+    },
+    "proof": "Con Sanlollo - Pizza & Cucina in 7 mesi siamo passati da 1257 a 1578 recensioni Google (+321)."
+  },
+  {
+    "anchor": "Ristorante Al Giardino",
+    "leads": 76,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69e7ad682a62f1bf199079ec",
+      "name": "Ristorante Al Giardino",
+      "city": null,
+      "address": "Via Bagnoli Croci, 84, 98039 Taormina ME, Italy",
+      "initialReviewCount": 1232,
+      "currentReviewCount": 1396,
+      "reviewsGained": 164,
+      "monthsActive": 4,
+      "avgReviewsPerMonth": 41,
+      "rating": 4.6,
+      "startedAt": "2026-04-21T17:01:28.040Z",
+      "syncedAt": "2026-08-11T16:28:20.581Z"
+    },
+    "proof": "Con Ristorante Al Giardino in 4 mesi siamo passati da 1232 a 1396 recensioni Google (+164)."
+  },
+  {
+    "anchor": "Arnold's",
+    "leads": 73,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6842c79679894135713abadd",
+      "name": "Arnold's",
+      "city": null,
+      "address": "Piazzale della Porta al Prato, 47, 50123 Firenze FI, Italy",
+      "initialReviewCount": 700,
+      "currentReviewCount": 2783,
+      "reviewsGained": 2083,
+      "monthsActive": 39,
+      "avgReviewsPerMonth": 53,
+      "rating": 4.7,
+      "startedAt": "2023-06-01T00:00:00.000Z",
+      "syncedAt": "2026-08-11T16:28:20.582Z"
+    },
+    "proof": "Con Arnold's in 39 mesi siamo passati da 700 a 2783 recensioni Google (+2083)."
+  },
+  {
+    "anchor": "Ristorante Empoli La Maison - Pizza e Pesce",
+    "leads": 70,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6942c8c133f0d7c7ae273c12",
+      "name": "Ristorante Empoli La Maison - Pizza e Pesce",
+      "city": null,
+      "address": "Piazza Farinata degli Uberti, 2, 50053 Empoli FI, Italy",
+      "initialReviewCount": 395,
+      "currentReviewCount": 630,
+      "reviewsGained": 235,
+      "monthsActive": 8,
+      "avgReviewsPerMonth": 29,
+      "rating": 4.7,
+      "startedAt": "2025-12-17T15:14:09.690Z",
+      "syncedAt": "2026-08-11T16:28:20.582Z"
+    },
+    "proof": "Con Ristorante Empoli La Maison - Pizza e Pesce in 8 mesi siamo passati da 395 a 630 recensioni Google (+235)."
+  },
+  {
+    "anchor": "Impact Food",
+    "leads": 65,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "683ffdfd03dea944490371fb",
+      "name": "Impact Food",
+      "city": null,
+      "address": "Viale Maresciallo Pilsudski, 86, 00197 Roma RM, Italy",
+      "initialReviewCount": 308,
+      "currentReviewCount": 3557,
+      "reviewsGained": 3249,
+      "monthsActive": 28,
+      "avgReviewsPerMonth": 116,
+      "rating": 4.8,
+      "startedAt": "2024-05-01T00:00:00.000Z",
+      "syncedAt": "2026-08-11T16:28:20.583Z"
+    },
+    "proof": "Con Impact Food in 28 mesi siamo passati da 308 a 3557 recensioni Google (+3249)."
+  },
+  {
+    "anchor": "Il Porto",
+    "leads": 62,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "68470153608a7bb88b5717d5",
+      "name": "Il Porto",
+      "city": null,
+      "address": "Via S. Giovanni, 44, 57123 Livorno LI, Italy",
+      "initialReviewCount": 1108,
+      "currentReviewCount": 6850,
+      "reviewsGained": 5742,
+      "monthsActive": 37,
+      "avgReviewsPerMonth": 155,
+      "rating": 4.6,
+      "startedAt": "2023-08-01T00:00:00.000Z",
+      "syncedAt": "2026-08-11T16:28:20.584Z"
+    },
+    "proof": "Con Il Porto in 37 mesi siamo passati da 1108 a 6850 recensioni Google (+5742)."
+  },
+  {
+    "anchor": "Ristorante Da Nonna Catia - Cucina Romana e Pizzeria",
+    "leads": 60,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "690897663a008581154fbca3",
+      "name": "Ristorante Da Nonna Catia - Cucina Romana e Pizzeria",
+      "city": null,
+      "address": "Viale Franco Angeli, 39/41, 00172 Roma RM, Italy",
+      "initialReviewCount": 15,
+      "currentReviewCount": 208,
+      "reviewsGained": 193,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 21,
+      "rating": 4.8,
+      "startedAt": "2025-11-03T11:52:06.647Z",
+      "syncedAt": "2026-08-11T16:28:20.585Z"
+    },
+    "proof": "Con Ristorante Da Nonna Catia - Cucina Romana e Pizzeria in 9 mesi siamo passati da 15 a 208 recensioni Google (+193)."
+  },
+  {
+    "anchor": "TIPO1",
+    "leads": 54,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6841ba1679894135713aac13",
+      "name": "TIPO1",
+      "city": null,
+      "address": "Vico Quercia, 13, 72023 Mesagne BR, Italy",
+      "initialReviewCount": 596,
+      "currentReviewCount": 756,
+      "reviewsGained": 160,
+      "monthsActive": 14,
+      "avgReviewsPerMonth": 11,
+      "rating": 4.6,
+      "startedAt": "2025-06-05T15:39:02.498Z",
+      "syncedAt": "2026-08-11T16:28:20.585Z"
+    },
+    "proof": "Con TIPO1 in 14 mesi siamo passati da 596 a 756 recensioni Google (+160)."
+  },
+  {
+    "anchor": "La Capannina del Gragnanese",
+    "leads": 48,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6841bf4c79894135713aafad",
+      "name": "La Capannina del Gragnanese",
+      "city": null,
+      "address": "Via Don Luigi Sturzo, 98, 80040 Volla NA, Italy",
+      "initialReviewCount": 911,
+      "currentReviewCount": 1803,
+      "reviewsGained": 892,
+      "monthsActive": 14,
+      "avgReviewsPerMonth": 64,
+      "rating": 4.5,
+      "startedAt": "2025-06-05T16:01:16.659Z",
+      "syncedAt": "2026-08-11T16:28:20.586Z"
+    },
+    "proof": "Con La Capannina del Gragnanese in 14 mesi siamo passati da 911 a 1803 recensioni Google (+892)."
+  },
+  {
+    "anchor": "Ristorante \"La Prua\"",
+    "leads": 43,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69a99065f40a62fbe7093cc1",
+      "name": "Ristorante \"La Prua\"",
+      "city": null,
+      "address": "Lungomare delle Meduse, 78, 00071 Torvaianica RM, Italy",
+      "initialReviewCount": 709,
+      "currentReviewCount": 853,
+      "reviewsGained": 144,
+      "monthsActive": 5,
+      "avgReviewsPerMonth": 29,
+      "rating": 4.4,
+      "startedAt": "2026-03-05T14:17:09.655Z",
+      "syncedAt": "2026-08-11T16:28:20.587Z"
+    },
+    "proof": "Con Ristorante \"La Prua\" in 5 mesi siamo passati da 709 a 853 recensioni Google (+144)."
+  },
+  {
+    "anchor": "Angry Monkey Bar",
+    "leads": 43,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69306e4e7576bc7712246814",
+      "name": "Angry Monkey Bar",
+      "city": null,
+      "address": "Viale delle Provincie, 56, 00162 Roma RM, Italy",
+      "initialReviewCount": 163,
+      "currentReviewCount": 379,
+      "reviewsGained": 216,
+      "monthsActive": 8,
+      "avgReviewsPerMonth": 27,
+      "rating": 4.7,
+      "startedAt": "2025-12-03T17:07:26.619Z",
+      "syncedAt": "2026-08-11T16:28:20.589Z"
+    },
+    "proof": "Con Angry Monkey Bar in 8 mesi siamo passati da 163 a 379 recensioni Google (+216)."
+  },
+  {
+    "anchor": "Mr. Jerry",
+    "leads": 27,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "685d65aad76c058a91158eee",
+      "name": "Mr. Jerry",
+      "city": null,
+      "address": "Via Scandicci Alto, 22, 50018 Scandicci FI, Italy",
+      "initialReviewCount": 191,
+      "currentReviewCount": 1056,
+      "reviewsGained": 865,
+      "monthsActive": 14,
+      "avgReviewsPerMonth": 62,
+      "rating": 4.5,
+      "startedAt": "2025-06-26T15:22:18.460Z",
+      "syncedAt": "2026-08-11T16:28:20.590Z"
+    },
+    "proof": "Con Mr. Jerry in 14 mesi siamo passati da 191 a 1056 recensioni Google (+865)."
+  },
+  {
+    "anchor": "Tramonto al molinari",
+    "leads": 25,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69737f91f02b3f03c9cb360b",
+      "name": "Tramonto al molinari",
+      "city": null,
+      "address": "Via Giacomino Spanu, 07037 Sorso SS, Italy",
+      "initialReviewCount": 134,
+      "currentReviewCount": 325,
+      "reviewsGained": 191,
+      "monthsActive": 7,
+      "avgReviewsPerMonth": 27,
+      "rating": 4.7,
+      "startedAt": "2026-01-23T14:02:57.987Z",
+      "syncedAt": "2026-08-11T16:28:20.590Z"
+    },
+    "proof": "Con Tramonto al molinari in 7 mesi siamo passati da 134 a 325 recensioni Google (+191)."
+  },
+  {
+    "anchor": "Hostaria Da Bacco",
+    "leads": 24,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69b2e0bdf40a62fbe7d1f717",
+      "name": "Hostaria Da Bacco",
+      "city": null,
+      "address": "Via Bruno Buozzi, 9, 60015 Falconara Marittima AN, Italy",
+      "initialReviewCount": 542,
+      "currentReviewCount": 755,
+      "reviewsGained": 213,
+      "monthsActive": 5,
+      "avgReviewsPerMonth": 43,
+      "rating": 4.6,
+      "startedAt": "2026-03-12T15:50:21.403Z",
+      "syncedAt": "2026-08-11T16:28:20.591Z"
+    },
+    "proof": "Con Hostaria Da Bacco in 5 mesi siamo passati da 542 a 755 recensioni Google (+213)."
+  },
+  {
+    "anchor": "GARDEN STIBBERT",
+    "leads": 23,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69931780148044b2ebf5f180",
+      "name": "GARDEN STIBBERT",
+      "city": null,
+      "address": "Via di Montughi, 4, 50139 Firenze FI, Italy",
+      "initialReviewCount": 36,
+      "currentReviewCount": 145,
+      "reviewsGained": 109,
+      "monthsActive": 6,
+      "avgReviewsPerMonth": 18,
+      "rating": 4.1,
+      "startedAt": "2026-02-16T13:11:28.461Z",
+      "syncedAt": "2026-08-11T16:28:20.591Z"
+    },
+    "proof": "Con GARDEN STIBBERT in 6 mesi siamo passati da 36 a 145 recensioni Google (+109)."
+  },
+  {
+    "anchor": "Ristorante \"Il Tegolo Livorno\"",
+    "leads": 23,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  },
+  {
+    "anchor": "Pizzeria Tanaquilla",
+    "leads": 19,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6953ebb14cb4d1e70a884212",
+      "name": "Pizzeria Tanaquilla",
+      "city": null,
+      "address": "Via Guglielmo Marconi, 100, 01023 Bolsena VT, Italy",
+      "initialReviewCount": 953,
+      "currentReviewCount": 1201,
+      "reviewsGained": 248,
+      "monthsActive": 7,
+      "avgReviewsPerMonth": 35,
+      "rating": 4.5,
+      "startedAt": "2025-12-30T15:11:45.685Z",
+      "syncedAt": "2026-08-11T16:28:20.593Z"
+    },
+    "proof": "Con Pizzeria Tanaquilla in 7 mesi siamo passati da 953 a 1201 recensioni Google (+248)."
+  },
+  {
+    "anchor": "Ristorante La Bottaia dè Roveri",
+    "leads": 16,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "6964fd97038cd5bb2199da7e",
+      "name": "Ristorante La Bottaia dè Roveri",
+      "city": null,
+      "address": "66026 San Pietro CH, Italy",
+      "initialReviewCount": 513,
+      "currentReviewCount": 678,
+      "reviewsGained": 165,
+      "monthsActive": 7,
+      "avgReviewsPerMonth": 24,
+      "rating": 4.3,
+      "startedAt": "2026-01-12T13:56:39.806Z",
+      "syncedAt": "2026-08-11T16:28:20.593Z"
+    },
+    "proof": "Con Ristorante La Bottaia dè Roveri in 7 mesi siamo passati da 513 a 678 recensioni Google (+165)."
+  },
+  {
+    "anchor": "Le Botteghe",
+    "leads": 16,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "68873faee46b28ad9f647fd5",
+      "name": "Le Botteghe",
+      "city": null,
+      "address": "Piazza dei Domenicani, 20, 57123 Livorno LI, Italy",
+      "initialReviewCount": 641,
+      "currentReviewCount": 1230,
+      "reviewsGained": 589,
+      "monthsActive": 13,
+      "avgReviewsPerMonth": 45,
+      "rating": 4.5,
+      "startedAt": "2025-07-28T09:15:26.079Z",
+      "syncedAt": "2026-08-11T16:28:20.594Z"
+    },
+    "proof": "Con Le Botteghe in 13 mesi siamo passati da 641 a 1230 recensioni Google (+589)."
+  },
+  {
+    "anchor": "Ristorante \"Oasi del porto\"",
+    "leads": 11,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  },
+  {
+    "anchor": "Wald",
+    "leads": 10,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69fb39f42d594d8f44d564f1",
+      "name": "Wald",
+      "city": null,
+      "address": "Via Dante Alighieri, 55, 38056 Levico Terme TN, Italy",
+      "initialReviewCount": 280,
+      "currentReviewCount": 468,
+      "reviewsGained": 188,
+      "monthsActive": 3,
+      "avgReviewsPerMonth": 63,
+      "rating": 4,
+      "startedAt": "2026-05-06T12:54:12.243Z",
+      "syncedAt": "2026-08-11T16:28:20.595Z"
+    },
+    "proof": "Con Wald in 3 mesi siamo passati da 280 a 468 recensioni Google (+188)."
+  },
+  {
+    "anchor": "Era ora",
+    "leads": 9,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "686d41e11550cb21c9eb2025",
+      "name": "Era ora",
+      "city": null,
+      "address": "Piazza dei Legnami, 4, 57122 Livorno LI, Italy",
+      "initialReviewCount": 560,
+      "currentReviewCount": 900,
+      "reviewsGained": 340,
+      "monthsActive": 13,
+      "avgReviewsPerMonth": 26,
+      "rating": 4.3,
+      "startedAt": "2025-07-08T16:05:53.111Z",
+      "syncedAt": "2026-08-11T16:28:20.596Z"
+    },
+    "proof": "Con Era ora in 13 mesi siamo passati da 560 a 900 recensioni Google (+340)."
+  },
+  {
+    "anchor": "Ristorante Il Molo",
+    "leads": 7,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69dfa10e35cda09afd8c01e5",
+      "name": "Ristorante Il Molo",
+      "city": null,
+      "address": "Via S. Giovanni, 54, 57123 Livorno LI, Italy",
+      "initialReviewCount": 1713,
+      "currentReviewCount": 2089,
+      "reviewsGained": 376,
+      "monthsActive": 4,
+      "avgReviewsPerMonth": 94,
+      "rating": 4.6,
+      "startedAt": "2026-04-15T14:30:38.322Z",
+      "syncedAt": "2026-08-11T16:28:20.597Z"
+    },
+    "proof": "Con Ristorante Il Molo in 4 mesi siamo passati da 1713 a 2089 recensioni Google (+376)."
+  },
+  {
+    "anchor": "I Saulle",
+    "leads": 7,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "692eb85af61ceea16be7b68c",
+      "name": "I Saulle",
+      "city": null,
+      "address": "Località Amérique, 11, 11020 Quart AO, Italy",
+      "initialReviewCount": 3265,
+      "currentReviewCount": 4270,
+      "reviewsGained": 1005,
+      "monthsActive": 8,
+      "avgReviewsPerMonth": 126,
+      "rating": 4.4,
+      "startedAt": "2025-12-02T09:58:50.248Z",
+      "syncedAt": "2026-08-11T16:28:20.597Z"
+    },
+    "proof": "Con I Saulle in 8 mesi siamo passati da 3265 a 4270 recensioni Google (+1005)."
+  },
+  {
+    "anchor": "Grand Canyon Steakhouse",
+    "leads": 5,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  },
+  {
+    "anchor": "Casa d'Africa - Pizzeria Gourmet e Cucina Toscana - Ristorante con Piscina e Giardino",
+    "leads": 5,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "690e1916adc14e451ff93762",
+      "name": "Casa d'Africa - Pizzeria Gourmet e Cucina Toscana - Ristorante con Piscina e Giardino",
+      "city": null,
+      "address": "Via della Buca, 3, 50050 Cerreto Guidi FI, Italy",
+      "initialReviewCount": 952,
+      "currentReviewCount": 1109,
+      "reviewsGained": 157,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 17,
+      "rating": 4.3,
+      "startedAt": "2025-11-07T16:06:46.539Z",
+      "syncedAt": "2026-08-11T16:28:20.599Z"
+    },
+    "proof": "Con Casa d'Africa - Pizzeria Gourmet e Cucina Toscana - Ristorante con Piscina e Giardino in 9 mesi siamo passati da 952 a 1109 recensioni Google (+157)."
+  },
+  {
+    "anchor": "MOOD Gibellina",
+    "leads": 3,
+    "matched": true,
+    "restaurant": {
+      "restaurantId": "69273df3c5c6f0989d9935e9",
+      "name": "MOOD Gibellina",
+      "city": null,
+      "address": "Viale Belice, 26, 91024 Nuova Gibellina TP, Italy",
+      "initialReviewCount": 53,
+      "currentReviewCount": 442,
+      "reviewsGained": 389,
+      "monthsActive": 9,
+      "avgReviewsPerMonth": 43,
+      "rating": 4.8,
+      "startedAt": "2025-11-26T17:50:43.535Z",
+      "syncedAt": "2026-08-11T16:28:20.600Z"
+    },
+    "proof": "Con MOOD Gibellina in 9 mesi siamo passati da 53 a 442 recensioni Google (+389)."
+  },
+  {
+    "anchor": "Ristorante Podere La Rocca",
+    "leads": 1,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  },
+  {
+    "anchor": "Tandoori- Pizza & Cucina",
+    "leads": 1,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  },
+  {
+    "anchor": "Gaia A Mare",
+    "leads": 1,
+    "matched": false,
+    "restaurant": null,
+    "proof": null
+  }
+]

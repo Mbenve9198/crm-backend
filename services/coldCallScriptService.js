@@ -5,6 +5,7 @@
  */
 
 import { isUsableVisibilityCard } from './visibilityCardUtils.js';
+import { formatNearbyClientProof } from './nearbyClientStatsService.js';
 
 const DEFAULT_LIST = 'Cold Call - Vicini Clienti';
 
@@ -80,9 +81,16 @@ function extractSlots(contact, card) {
   );
   const velocity = asNumber(card?.velocity?.avgPerMonthRecent);
 
+  const nearbyClientStats =
+    props.nearbyClientStats ||
+    card?.nearbyClientStats ||
+    null;
+
   return {
     locale: card?.place?.name || contact.name,
     nearby: { name: nearbyName, distM },
+    nearbyClientStats,
+    nearbyProof: formatNearbyClientProof(nearbyClientStats),
     keyword,
     rank,
     competitor,
@@ -143,6 +151,10 @@ function buildOpening(slots) {
     lines.push(`Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
   }
 
+  if (slots.nearbyProof) {
+    lines.push(slots.nearbyProof);
+  }
+
   const leadBits = [];
   if (slots.reviews != null) leadBits.push(`circa ${slots.reviews} recensioni`);
   if (slots.rating != null) leadBits.push(`media ${slots.rating}`);
@@ -170,6 +182,10 @@ function buildHook(slots) {
     );
   } else {
     parts.push(`Perfetto. Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
+  }
+
+  if (slots.nearbyProof) {
+    parts.push(slots.nearbyProof);
   }
 
   if (slots.reviews != null || slots.rating != null) {
@@ -393,6 +409,8 @@ function buildCardSummary(slots, hook) {
     nearbyClient: slots.nearby.name
       ? { name: slots.nearby.name, distM: slots.nearby.distM }
       : null,
+    nearbyClientStats: slots.nearbyClientStats || null,
+    nearbyProof: slots.nearbyProof || null,
     address: slots.address,
     city: slots.city,
     category: slots.category,

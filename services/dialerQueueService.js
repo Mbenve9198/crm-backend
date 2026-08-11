@@ -75,7 +75,7 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
   const [total, contacts] = await Promise.all([
     Contact.countDocuments(filter),
     Contact.find(filter)
-      .select('name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM updatedAt createdAt')
+      .select('name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats updatedAt createdAt')
       .populate('owner', 'firstName lastName email role')
       .sort({ 'properties.dist_m': 1, updatedAt: -1 })
       .skip(resolvedOffset)
