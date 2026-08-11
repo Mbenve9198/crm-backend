@@ -31,6 +31,13 @@ function significantTokens(name) {
     .filter((t) => t.length > 2 && !NAME_STOP.has(t));
 }
 
+/** Token troppo generici per un match a 1 parola */
+const WEAK_NAME_TOKENS = new Set([
+  'giardino', 'porto', 'mare', 'garden', 'lounge', 'grill', 'taverna',
+  'locale', 'cafe', 'house', 'food', 'kitchen', 'pizza', 'sushi', 'roma',
+  'firenze', 'milano', 'napoli', 'torino', 'livorno', 'latina',
+]);
+
 export function nameLooseMatch(a, b) {
   const na = normalizeName(a);
   const nb = normalizeName(b);
@@ -38,19 +45,39 @@ export function nameLooseMatch(a, b) {
   if (na === nb) return true;
   const shorter = na.length <= nb.length ? na : nb;
   const longer = na.length <= nb.length ? nb : na;
-  if (shorter.length >= 6 && longer.includes(shorter)) return true;
+  if (shorter.length >= 8 && longer.includes(shorter)) {
+    const st = significantTokens(shorter);
+    if (st.length >= 2) return true;
+    if (st.length === 1 && st[0].length >= 6 && !WEAK_NAME_TOKENS.has(st[0])) return true;
+  }
   const ta = significantTokens(a);
-  const tb = new Set(significantTokens(b));
-  if (ta.length === 0 || tb.size === 0) return false;
-  const hit = ta.filter((t) => tb.has(t)).length;
-  // 2 token = match forte
+  const tb = significantTokens(b);
+  if (ta.length === 0 || tb.length === 0) return false;
+  const tbSet = new Set(tb);
+  const hit = ta.filter((t) => tbSet.has(t)).length;
+  // ≥2 token significativi in comune
   if (hit >= 2) return true;
-  // 1 token solo se distintivo (≥6) — evita «porto» → Il Porto vs Oasi del porto
+  // 1 token solo se distintivo e presente come unico segnale forte sul lato corto
   if (hit === 1) {
-    const shared = ta.find((t) => tb.has(t));
-    return !!shared && shared.length >= 6;
+    const shared = ta.find((t) => tbSet.has(t));
+    if (!shared || shared.length < 6 || WEAK_NAME_TOKENS.has(shared)) return false;
+    const shorterToks = ta.length <= tb.length ? ta : tb;
+    return shorterToks.length === 1 && shorterToks[0] === shared;
   }
   return false;
+}
+
+function cityCompatible(wantCity, restaurant) {
+  const want = normalizeName(wantCity || '');
+  if (!want) return true;
+  const city = normalizeName(restaurant?.address?.city || restaurant?.city || '');
+  const addr = normalizeName(restaurant?.address?.formattedAddress || '');
+  const name = normalizeName(restaurant?.name || '');
+  return (
+    (city && (city.includes(want) || want.includes(city))) ||
+    (addr && addr.includes(want)) ||
+    (name && name.includes(want))
+  );
 }
 
 /** Pulisce prefissi/virgolette tipici degli ancora import. */
@@ -199,23 +226,23 @@ function toStats(restaurant) {
 }
 
 function pickBestHit(name, city, restaurants) {
-  const hits = (restaurants || []).filter((r) => nameLooseMatch(name, r.name));
+  let hits = (restaurants || []).filter((r) => nameLooseMatch(name, r.name));
+  // Se abbiamo la città del lead, scarta match fuori zona (es. Giardino Firenze vs Taormina)
+  if (city) {
+    const local = hits.filter((r) => cityCompatible(city, r));
+    if (local.length) hits = local;
+    else return null;
+  }
   hits.sort((a, b) => {
-    const ca = normalizeName(a.address?.city || '');
-    const cb = normalizeName(b.address?.city || '');
-    const want = normalizeName(city || '');
-    const sa = want && ca && (ca.includes(want) || want.includes(ca)) ? 1 : 0;
-    const sb = want && cb && (cb.includes(want) || want.includes(cb)) ? 1 : 0;
-    if (sa !== sb) return sb - sa;
-    const addrA = normalizeName(a.address?.formattedAddress || '');
-    const addrB = normalizeName(b.address?.formattedAddress || '');
-    const inNameA = want && normalizeName(a.name).includes(want) ? 1 : 0;
-    const inNameB = want && normalizeName(b.name).includes(want) ? 1 : 0;
-    if (inNameA !== inNameB) return inNameB - inNameA;
-    const addrHitA = want && addrA.includes(want) ? 1 : 0;
-    const addrHitB = want && addrB.includes(want) ? 1 : 0;
-    if (addrHitA !== addrHitB) return addrHitB - addrHitA;
-    return (b.reviewsGained || 0) - (a.reviewsGained || 0);
+    const ta = significantTokens(name);
+    const score = (r) => {
+      const tr = new Set(significantTokens(r.name));
+      const hit = ta.filter((t) => tr.has(t)).length;
+      const exact = normalizeName(r.name) === normalizeName(name) ? 10 : 0;
+      const cityBonus = cityCompatible(city, r) ? 3 : 0;
+      return exact * 100 + hit * 10 + cityBonus + (r.reviewsGained || 0) / 10000;
+    };
+    return score(b) - score(a);
   });
   return hits[0] || null;
 }
