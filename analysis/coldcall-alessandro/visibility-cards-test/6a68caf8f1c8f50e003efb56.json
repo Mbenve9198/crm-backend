@@ -1,0 +1,132 @@
+{
+  "contact": {
+    "id": "6a68caf8f1c8f50e003efb56",
+    "name": "Da Vinci Bisteccheria",
+    "status": "da contattare",
+    "city": "Latina",
+    "category": "Ristorante",
+    "address": "Via Ciro Menotti, 10, 04100 Latina LT, Italia",
+    "clienteVicino": "L’ Euro & gluten free",
+    "distM": 24,
+    "placeIdImport": "ChIJg9UjioAMJRMRTIHg9LrAhFk",
+    "ratingImport": 4.6,
+    "reviewsImport": 533
+  },
+  "keyword": {
+    "keyword": "ristorante di carne Latina",
+    "keyword_lang": "it",
+    "audience": "local",
+    "rationale": "Latina è città medio-piccola non turistica. Italiani cercano così quando vogliono carne di qualità. Intent locale forte.",
+    "alt_keywords": [
+      "steakhouse Latina",
+      "bisteccheria Latina",
+      "dove mangiare carne Latina"
+    ],
+    "neighborhood": null,
+    "touristCity": false
+  },
+  "place": {
+    "source": "place_id",
+    "name": "Da Vinci Bisteccheria",
+    "placeId": "ChIJg9UjioAMJRMRTIHg9LrAhFk",
+    "dataId": "0x13250c808a23d583:0x5984c0baf4e0814c",
+    "address": "Via Ciro Menotti, 10, 04100 Latina LT, Italia",
+    "rating": 4.6,
+    "reviews": 533,
+    "type": "Ristorante",
+    "lat": 41.4700955,
+    "lng": 12.900371999999999,
+    "thumbnail": "https://lh3.googleusercontent.com/gps-cs-s/AHRPTWl3Xn5FnZfuLbJF_BDjJZRKWf2oeS2kaAUgpP7VBNV8UQnNVO_1OsY4iJCUMgObM908cWpzCWuMPXBBHpeQh4SakOhFXYl4f7QzmFS9aywI2gxdVIqMo4xfGsNOVfW-IbKBYEI=w1000-h1000-c-n"
+  },
+  "ranking": {
+    "keyword": "ristorante di carne Latina",
+    "userRank": 1,
+    "resultsReturned": 20,
+    "user": {
+      "rating": 4.6,
+      "reviews": 533,
+      "type": "Ristorante"
+    },
+    "competitorsAhead": [],
+    "top3": [
+      {
+        "rank": 1,
+        "name": "Da Vinci Bisteccheria",
+        "rating": 4.6,
+        "reviews": 533
+      },
+      {
+        "rank": 2,
+        "name": "MERAGRIGLIA | carne e cucina",
+        "rating": 4.8,
+        "reviews": 68
+      },
+      {
+        "rank": 3,
+        "name": "MEAT",
+        "rating": 4.5,
+        "reviews": 191
+      }
+    ],
+    "found": true,
+    "keywordTried": [
+      {
+        "keyword": "ristorante di carne Latina",
+        "resultsReturned": 20,
+        "userRank": 1
+      }
+    ],
+    "selectedKeyword": "ristorante di carne Latina"
+  },
+  "velocity": {
+    "fetched": 28,
+    "pages": 3,
+    "placeInfo": null,
+    "byMonth": {
+      "2026-03": 2,
+      "2026-04": 2,
+      "2025-09": 1,
+      "2026-05": 1,
+      "2026-06": 1,
+      "2025-07": 1,
+      "2017-11": 1,
+      "2023-09": 1,
+      "2025-05": 1,
+      "2022-02": 1,
+      "2021-09": 1,
+      "2023-03": 1,
+      "2023-01": 1,
+      "2024-03": 1,
+      "2019-12": 1,
+      "2025-08": 1,
+      "2025-12": 2,
+      "2026-01": 1,
+      "2021-06": 1,
+      "2022-09": 1,
+      "2024-10": 1,
+      "2025-10": 1,
+      "2022-03": 1,
+      "2024-06": 1,
+      "2020-10": 1
+    },
+    "recentMonths": [
+      {
+        "month": "2026-04",
+        "reviews": 2
+      },
+      {
+        "month": "2026-05",
+        "reviews": 1
+      },
+      {
+        "month": "2026-06",
+        "reviews": 1
+      }
+    ],
+    "avgPerMonthRecent": 1.33,
+    "windowNote": "Velocity stimata sulle recensioni newest scaricate (paginate).",
+    "oldestFetched": "2020-10-17T21:48:09Z",
+    "newestFetched": "2026-03-15T12:57:04Z"
+  },
+  "generatedAt": "2026-08-11T13:57:00.221Z"
+}

@@ -1,0 +1,35 @@
+[
+  {
+    "contactId": "6a68caf7f1c8f50e003efb4d",
+    "name": "Perú Pisco Bar/Restaurant",
+    "city": "Livorno",
+    "keyword": "peruvian restaurant Livorno",
+    "rank": 2,
+    "rating": 4.3,
+    "reviews": 35,
+    "velocityAvg": 1,
+    "competitorsAhead": 1
+  },
+  {
+    "contactId": "6a68caf8f1c8f50e003efb56",
+    "name": "Da Vinci Bisteccheria",
+    "city": "Latina",
+    "keyword": "ristorante di carne Latina",
+    "rank": 1,
+    "rating": 4.6,
+    "reviews": 533,
+    "velocityAvg": 1.33,
+    "competitorsAhead": 0
+  },
+  {
+    "contactId": "6a68caf8f1c8f50e003efb5f",
+    "name": "Tacos kings-Rome San lorenzo",
+    "city": "Roma",
+    "keyword": "tacos Roma San Lorenzo",
+    "rank": 2,
+    "rating": 4.8,
+    "reviews": 320,
+    "velocityAvg": 1.33,
+    "competitorsAhead": 1
+  }
+]

@@ -115,3 +115,7 @@ out/
 scripts/test_whisper_transcription.js
 scripts/test_*
 scripts/probe_*
+
+analysis/coldcall-alessandro/transcripts/
+analysis/coldcall-alessandro/new-long-transcripts/
+analysis/coldcall-alessandro/bundle-*.md
