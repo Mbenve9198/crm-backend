@@ -22,6 +22,11 @@ Contact (CRM)
 **Nota Serper:** `SERPER_API_KEY` presente ma account **senza crediti** (`Not enough credits`).  
 Per il test usiamo **SerpAPI** (già usato in `agentToolsService.js`). Stesso disegno è portabile a Serper Maps/Reviews quando ricaricato.
 
+## Codice
+- Pipeline: `services/visibilityCardPipeline.js` (`buildVisibilityCard`)
+- Batch persistenza: `scripts/enrich-visibility-cards-batch.js`
+- CLI test/markdown: `scripts/test-visibility-card.js` (thin; hook da `coldCallScriptService.mapsHookFromCard`)
+
 ## Script test
 `scripts/test-visibility-card.js`
 

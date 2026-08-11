@@ -1,0 +1,328 @@
+/**
+ * Pipeline scheda visibilità cold call (Claude keyword → SerpAPI place/rank/velocity).
+ * Usata da script CLI di test e da batch enrich — non dal path dialer runtime.
+ */
+
+import axios from 'axios';
+import Anthropic from '@anthropic-ai/sdk';
+
+const TOURIST_CITIES = new Set([
+  'roma', 'rome', 'milano', 'milan', 'firenze', 'florence', 'venezia', 'venice',
+  'napoli', 'naples', 'torino', 'turin', 'bologna', 'verona', 'genova', 'genoa',
+  'palermo', 'catania', 'pisa', 'siena', 'amalfi', 'capri', 'como', 'rimini',
+  'livorno', 'la spezia', 'cinque terre',
+]);
+
+function requireEnv(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`${name} mancante`);
+  return v;
+}
+
+async function serp(params) {
+  const { data } = await axios.get('https://serpapi.com/search.json', {
+    params: { api_key: requireEnv('SERPAPI_KEY'), hl: 'it', ...params },
+    timeout: 45000,
+  });
+  return data;
+}
+
+function normalize(s) {
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function nameMatch(a, b) {
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  const ta = new Set(na.split(' ').filter((t) => t.length > 2));
+  const tb = nb.split(' ').filter((t) => t.length > 2);
+  const hit = tb.filter((t) => ta.has(t)).length;
+  return hit >= Math.min(2, tb.length);
+}
+
+function guessNeighborhood(address = '', city = '') {
+  const known = [
+    'Trastevere', 'San Lorenzo', 'Testaccio', 'Prati', 'Ostiense', 'Centocelle',
+    'Pigneto', 'Monti', 'Esquilino', 'Flaminio', 'Parioli', 'Eur', 'Navigli',
+    'Brera', 'Isola', 'Porta Venezia', 'San Salvario', 'Centro',
+  ];
+  const blob = `${address || ''} ${city || ''}`;
+  return known.find((k) => new RegExp(k, 'i').test(blob)) || null;
+}
+
+function isTouristCity(city = '') {
+  const c = normalize(city);
+  return TOURIST_CITIES.has(c) || [...TOURIST_CITIES].some((t) => c.includes(t));
+}
+
+export function contactBaseFromDoc(contact) {
+  const props = contact.properties || {};
+  return {
+    id: String(contact._id),
+    name: contact.name,
+    status: contact.status,
+    city: props.city,
+    category: props.category,
+    address: props.address,
+    clienteVicino: props.cliente_vicino,
+    distM: props.dist_m,
+    placeIdImport: props.place_id,
+    ratingImport: props.rating,
+    reviewsImport: props.reviews_count,
+  };
+}
+
+export async function pickKeyword({ name, category, city, address }) {
+  const anthropic = new Anthropic({ apiKey: requireEnv('ANTHROPIC_API_KEY') });
+  const neighborhood = guessNeighborhood(`${name} ${address}`, city);
+  const tourist = isTouristCity(city);
+  const prompt = `Devi scegliere query Google Maps REALI: cosa digita qualcuno col telefono quando ha fame e vuole un posto come questo.
+
+Locale: ${name}
+Categoria Google: ${category || 'n/d'}
+Città: ${city || 'n/d'}
+Quartiere (se noto): ${neighborhood || 'n/d'}
+Indirizzo: ${address || 'n/d'}
+Contesto domanda: ${tourist
+    ? 'CITTÀ TURISTICA — mix di ITALIANI + TURISTI (spesso cercano in inglese). Devi coprire entrambi i pubblici.'
+    : 'Città poco/medio turistica — priorità a come cercano gli ITALIANI; inglese solo se naturale (es. sushi, tacos, steakhouse).'}
+
+Come cercano le persone (non etichette SEO/categorie Google):
+- Italiani: "pizzeria San Lorenzo", "sushi Prati", "tacos Roma", "ristorante di carne Latina", "peruviano Livorno"
+- Turisti (EN): "pizza Trastevere", "tacos Rome", "steakhouse Rome", "peruvian restaurant Livorno", "mexican food San Lorenzo"
+- Male: "tex-mex", "bisteccheria Latina", "american restaurant", jargon da scheda Maps, categorie Google letterali
+
+Regole:
+- "keyword" = la query PRINCIPALE più utile per una cold call (quella con più intent locale reale)
+- In città turistiche: se il traffico turistico conta, la keyword principale può essere EN; metti comunque IT nelle alt
+- In città non turistiche: keyword principale in IT (parole EN ok solo se le usano anche gli italiani: sushi, tacos, steakhouse, burger)
+- Grandi città: settore + QUARTIERE quando possibile; medie: settore + città
+- Se categoria Tex-Mex/Messicano → "tacos" / "mexican" / "messicano", MAI "tex-mex"
+- Carne/bisteccheria → "steakhouse" o "ristorante di carne", non "bisteccheria" se suona falso
+- NON usare il nome del locale
+- 2-5 parole max
+
+Rispondi SOLO JSON:
+{
+  "keyword": "query principale",
+  "keyword_lang": "it|en",
+  "audience": "local|tourist|both",
+  "rationale": "max 25 parole",
+  "alt_keywords": ["alt IT o EN 1", "alt 2", "alt 3"]
+}`;
+
+  const msg = await anthropic.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 400,
+    temperature: 0.3,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  const text = msg.content?.[0]?.text || '';
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end < 0) throw new Error(`Claude keyword parse fail: ${text}`);
+  const parsed = JSON.parse(text.slice(start, end + 1));
+  parsed.neighborhood = neighborhood;
+  parsed.touristCity = tourist;
+  return parsed;
+}
+
+export async function resolvePlace(contact) {
+  const placeId = contact.properties?.place_id;
+  if (placeId) {
+    const data = await serp({ engine: 'google_maps', type: 'place', place_id: placeId });
+    if (data.place_results) {
+      const p = data.place_results;
+      return {
+        source: 'place_id',
+        name: p.title,
+        placeId: p.place_id || placeId,
+        dataId: p.data_id,
+        address: p.address,
+        rating: p.rating,
+        reviews: p.reviews,
+        type: Array.isArray(p.type) ? p.type.join(', ') : p.type,
+        lat: p.gps_coordinates?.latitude,
+        lng: p.gps_coordinates?.longitude,
+        thumbnail: p.thumbnail,
+      };
+    }
+  }
+  const q = [contact.name, contact.properties?.city].filter(Boolean).join(' ');
+  const data = await serp({ engine: 'google_maps', type: 'search', q });
+  const hit =
+    (data.local_results || []).find((r) => nameMatch(r.title, contact.name)) ||
+    data.local_results?.[0] ||
+    data.place_results;
+  if (!hit) return null;
+  return {
+    source: 'search',
+    name: hit.title,
+    placeId: hit.place_id,
+    dataId: hit.data_id,
+    address: hit.address,
+    rating: hit.rating,
+    reviews: hit.reviews,
+    type: hit.type,
+    lat: hit.gps_coordinates?.latitude,
+    lng: hit.gps_coordinates?.longitude,
+    thumbnail: hit.thumbnail,
+    positionInNameSearch: hit.position,
+  };
+}
+
+async function rankForKeywordOnce(place, keyword) {
+  if (!place?.lat || !place?.lng) return { error: 'missing coords', keyword, resultsReturned: 0 };
+  const data = await serp({
+    engine: 'google_maps',
+    type: 'search',
+    q: keyword,
+    ll: `@${place.lat},${place.lng},14z`,
+    num: 20,
+  });
+  const results = data.local_results || [];
+  let userRank = null;
+  let userRow = null;
+  const ahead = [];
+  for (const r of results) {
+    const match = (place.placeId && r.place_id === place.placeId) || nameMatch(r.title, place.name);
+    if (match && userRank == null) {
+      userRank = r.position;
+      userRow = r;
+    } else if (userRank == null) {
+      ahead.push({
+        rank: r.position,
+        name: r.title,
+        rating: r.rating ?? null,
+        reviews: r.reviews ?? null,
+        type: r.type ?? null,
+        placeId: r.place_id,
+      });
+    }
+  }
+  return {
+    keyword,
+    userRank: userRank ?? (results.length ? 'Fuori top risultati restituiti' : 'Nessun risultato'),
+    resultsReturned: results.length,
+    user: userRow ? { rating: userRow.rating, reviews: userRow.reviews, type: userRow.type } : null,
+    competitorsAhead: ahead.slice(0, 5),
+    top3: results.slice(0, 3).map((r) => ({
+      rank: r.position,
+      name: r.title,
+      rating: r.rating,
+      reviews: r.reviews,
+    })),
+    found: userRank != null,
+  };
+}
+
+/** Prova keyword principale + alt finché c'è un rank trovabile o risultati utili. */
+export async function rankForKeyword(place, keywordObj) {
+  const tried = [];
+  const queue = [keywordObj.keyword, ...(keywordObj.alt_keywords || [])].filter(Boolean);
+  let best = null;
+  for (const kw of queue) {
+    const r = await rankForKeywordOnce(place, kw);
+    tried.push({ keyword: kw, resultsReturned: r.resultsReturned, userRank: r.userRank });
+    if (!best) best = r;
+    if (r.found) {
+      best = { ...r, keywordTried: tried, selectedKeyword: kw };
+      break;
+    }
+    if ((r.resultsReturned || 0) > (best.resultsReturned || 0)) best = r;
+  }
+  return { ...best, keywordTried: tried, selectedKeyword: best.keyword };
+}
+
+function monthKey(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+export async function reviewVelocity(place, { maxPages = 3 } = {}) {
+  if (!place?.placeId && !place?.dataId) return { error: 'no place id' };
+  const all = [];
+  let nextPageToken = null;
+  for (let page = 0; page < maxPages; page++) {
+    const params = {
+      engine: 'google_maps_reviews',
+      hl: 'it',
+      sort_by: 'newest',
+    };
+    if (place.placeId) params.place_id = place.placeId;
+    if (nextPageToken) params.next_page_token = nextPageToken;
+    const data = await serp(params);
+    const batch = data.reviews || [];
+    all.push(...batch);
+    nextPageToken = data.serpapi_pagination?.next_page_token;
+    if (!nextPageToken || batch.length === 0) break;
+  }
+
+  const byMonth = {};
+  for (const r of all) {
+    const mk = monthKey(r.iso_date || r.iso_date_of_last_edit);
+    if (!mk) continue;
+    byMonth[mk] = (byMonth[mk] || 0) + 1;
+  }
+  const monthsSorted = Object.keys(byMonth).sort();
+  const recent = monthsSorted.slice(-3);
+  const recentCounts = recent.map((m) => ({ month: m, reviews: byMonth[m] }));
+  const avgRecent = recentCounts.length
+    ? recentCounts.reduce((s, x) => s + x.reviews, 0) / recentCounts.length
+    : null;
+
+  return {
+    fetched: all.length,
+    pages: Math.min(maxPages, all.length ? maxPages : 0),
+    placeInfo: null,
+    byMonth,
+    recentMonths: recentCounts,
+    avgPerMonthRecent: avgRecent != null ? Number(avgRecent.toFixed(2)) : null,
+    windowNote:
+      all.length < 20
+        ? 'Campione reviews limitato (pochi risultati newest): velocity indicativa, non censimento completo.'
+        : 'Velocity stimata sulle recensioni newest scaricate (paginate).',
+    oldestFetched: all[all.length - 1]?.iso_date,
+    newestFetched: all[0]?.iso_date,
+  };
+}
+
+/**
+ * Genera la visibility card completa per un contact document.
+ * keyword + place in parallelo, poi rank + velocity in parallelo.
+ */
+export async function buildVisibilityCard(contact) {
+  const base = contactBaseFromDoc(contact);
+  const [keyword, place] = await Promise.all([pickKeyword(base), resolvePlace(contact)]);
+  const [ranking, velocity] = place
+    ? await Promise.all([rankForKeyword(place, keyword), reviewVelocity(place, { maxPages: 3 })])
+    : [{ error: 'no place' }, { error: 'no place' }];
+  return {
+    contact: base,
+    keyword,
+    place,
+    ranking,
+    velocity,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+export default {
+  contactBaseFromDoc,
+  pickKeyword,
+  resolvePlace,
+  rankForKeyword,
+  reviewVelocity,
+  buildVisibilityCard,
+};

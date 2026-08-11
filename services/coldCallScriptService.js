@@ -17,42 +17,11 @@ function asNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function pickNearby(contact, card) {
-  const props = contact.properties || {};
-  const fromCard = card?.contact?.clienteVicino || card?.nearbyClient?.name;
-  const name = fromCard || props.cliente_vicino || null;
-
-  let distM = null;
-  if (card?.contact?.distM != null) distM = asNumber(card.contact.distM);
-  else if (card?.nearbyClient?.distM != null) distM = asNumber(card.nearbyClient.distM);
-  else if (props.dist_m != null) distM = asNumber(props.dist_m);
-  else if (props.dist_km != null) {
-    const km = asNumber(props.dist_km);
-    distM = km != null ? km * 1000 : null;
-  }
-
-  return { name, distM };
-}
-
-function pickKeyword(card) {
-  return card?.ranking?.selectedKeyword || card?.ranking?.keyword || card?.keyword?.keyword || null;
-}
-
-function pickRank(card) {
-  const r = card?.ranking?.userRank;
-  if (typeof r === 'number' && Number.isFinite(r)) return r;
-  if (typeof r === 'string' && /^\d+$/.test(r.trim())) return Number(r.trim());
-  return null;
-}
-
-function pickCompetitor(card) {
-  const ahead = card?.ranking?.competitorsAhead;
-  if (!Array.isArray(ahead) || ahead.length === 0) return null;
-  return ahead[0];
-}
-
-function pickVelocity(card) {
-  return asNumber(card?.velocity?.avgPerMonthRecent);
+function formatDist(distM) {
+  const n = asNumber(distM);
+  if (n == null) return null;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)} km`;
+  return `${Math.round(n)} metri`;
 }
 
 /** Arrotonda velocity per parlato: 1 decimale sotto 10, intero sopra. */
@@ -72,72 +41,147 @@ function isLowVelocity(v) {
   return v != null && v < 1.5;
 }
 
-function formatDist(distM) {
-  const n = asNumber(distM);
-  if (n == null) return null;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)} km`;
-  return `${Math.round(n)} metri`;
+/**
+ * Estrae una sola volta tutti gli slot usati da opening/hook/discovery/value/obiezioni.
+ */
+function extractSlots(contact, card) {
+  const props = contact.properties || {};
+  const fromCard = card?.contact?.clienteVicino || card?.nearbyClient?.name;
+  const nearbyName = fromCard || props.cliente_vicino || null;
+
+  let distM = null;
+  if (card?.contact?.distM != null) distM = asNumber(card.contact.distM);
+  else if (card?.nearbyClient?.distM != null) distM = asNumber(card.nearbyClient.distM);
+  else if (props.dist_m != null) distM = asNumber(props.dist_m);
+  else if (props.dist_km != null) {
+    const km = asNumber(props.dist_km);
+    distM = km != null ? km * 1000 : null;
+  }
+
+  const keyword =
+    card?.ranking?.selectedKeyword || card?.ranking?.keyword || card?.keyword?.keyword || null;
+
+  const rawRank = card?.ranking?.userRank;
+  let rank = null;
+  if (typeof rawRank === 'number' && Number.isFinite(rawRank)) rank = rawRank;
+  else if (typeof rawRank === 'string' && /^\d+$/.test(rawRank.trim())) rank = Number(rawRank.trim());
+
+  const ahead = card?.ranking?.competitorsAhead;
+  const competitor = Array.isArray(ahead) && ahead.length > 0 ? ahead[0] : null;
+
+  const rating = asNumber(
+    card?.place?.rating ?? card?.ranking?.user?.rating ?? props.rating
+  );
+  const reviews = asNumber(
+    card?.place?.reviews ?? card?.ranking?.user?.reviews ?? props.reviews_count
+  );
+  const velocity = asNumber(card?.velocity?.avgPerMonthRecent);
+
+  return {
+    locale: card?.place?.name || contact.name,
+    nearby: { name: nearbyName, distM },
+    keyword,
+    rank,
+    competitor,
+    rating,
+    reviews,
+    velocity,
+    velocityRounded: roundVelocity(velocity),
+    lowVelocity: isLowVelocity(velocity),
+    address: card?.place?.address || props.address || null,
+    city: card?.contact?.city || props.city || null,
+    category: card?.contact?.category || props.category || null,
+    placeId: card?.place?.placeId || props.place_id || null,
+    generatedAt: props.visibilityCardGeneratedAt || card?.generatedAt || null,
+  };
 }
 
-function buildMapsHook(contact, card) {
-  const keyword = pickKeyword(card);
-  const rank = pickRank(card);
-  const competitor = pickCompetitor(card);
-  const rating = card?.place?.rating ?? card?.ranking?.user?.rating;
-  const reviews = card?.place?.reviews ?? card?.ranking?.user?.reviews;
+/** rank1 | trailing | ranked | none — una sola decisione di posizione Maps. */
+function positionKind(slots) {
+  const { keyword, rank, competitor } = slots;
+  if (keyword && rank === 1) return 'rank1';
+  if (keyword && rank != null && competitor) return 'trailing';
+  if (keyword && rank != null) return 'ranked';
+  return 'none';
+}
 
-  if (keyword && rank === 1 && !competitor) {
-    return `Su Maps, per «${keyword}» risultate #1${reviews != null ? ` con ${reviews} recensioni` : ''}${rating != null ? ` (⭐ ${rating})` : ''} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
+function ratingReviewsSuffix(slots) {
+  const { reviews, rating } = slots;
+  return `${reviews != null ? ` con ${reviews} recensioni` : ''}${rating != null ? ` (⭐ ${rating})` : ''}`;
+}
+
+/** Una sola generatrice del pezzo Maps (usata da hook e da render markdown test). */
+export function buildMapsHookLine(slots) {
+  const { keyword, rank, competitor } = slots;
+  const kind = positionKind(slots);
+  const suffix = ratingReviewsSuffix(slots);
+
+  if (kind === 'rank1') {
+    return `Su Maps, per «${keyword}» risultate #1${suffix} — ottima posizione; spesso il gap è il volume di recensioni vere al mese.`;
   }
-
-  if (keyword && rank != null && competitor) {
-    return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${competitor.reviews ? `, ${competitor.reviews} rec` : ''}). Voi risultate #${rank}${reviews != null ? ` con ${reviews} recensioni` : ''}${rating != null ? ` (⭐ ${rating})` : ''}.`;
+  if (kind === 'trailing') {
+    return `Su Maps, chi cerca «${keyword}» vede prima ${competitor.name} (#${competitor.rank}${competitor.reviews ? `, ${competitor.reviews} rec` : ''}). Voi risultate #${rank}${suffix}.`;
   }
-
-  if (keyword && rank != null) {
-    return `Su Maps, per «${keyword}» risultate #${rank}${reviews != null ? ` con ${reviews} recensioni` : ''}${rating != null ? ` (⭐ ${rating})` : ''}.`;
+  if (kind === 'ranked') {
+    return `Su Maps, per «${keyword}» risultate #${rank}${suffix}.`;
   }
-
   return null;
 }
 
-/**
- * Hook post-permesso: ancora vicino + numeri del lead + domanda discovery.
- */
-function buildHook(contact, card) {
-  const nearby = pickNearby(contact, card);
-  const rating = card?.place?.rating ?? card?.ranking?.user?.rating ?? contact.properties?.rating;
-  const reviews = card?.place?.reviews ?? card?.ranking?.user?.reviews ?? contact.properties?.reviews_count;
-  const velocity = pickVelocity(card);
-  const mapsHook = buildMapsHook(contact, card);
+function buildOpening(slots) {
+  const lines = [`Buongiorno, ${slots.locale}? Sono Alessandro di Menu Chat.`];
 
+  if (slots.nearby.name) {
+    const distLabel = formatDist(slots.nearby.distM);
+    lines.push(
+      `Lavoriamo con ${slots.nearby.name}${distLabel ? `, qui a ${distLabel}` : ' qui vicino'}, sulle recensioni Google vere.`
+    );
+  } else {
+    lines.push(`Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
+  }
+
+  const leadBits = [];
+  if (slots.reviews != null) leadBits.push(`circa ${slots.reviews} recensioni`);
+  if (slots.rating != null) leadBits.push(`media ${slots.rating}`);
+  if (slots.keyword && slots.rank != null) leadBits.push(`#${slots.rank} su «${slots.keyword}»`);
+  if (leadBits.length) {
+    lines.push(`Voi su Maps siete a ${leadBits.join(', ')}.`);
+  }
+
+  const velocityLine = formatVelocityPerMonth(slots.velocity);
+  if (velocityLine) lines.push(velocityLine);
+
+  lines.push(
+    `Vi chiamo per lo stesso motivo — capire in trenta secondi se anche a voi può servire. Due domande al volo, va bene?`
+  );
+  return lines.join(' ');
+}
+
+function buildHook(slots) {
   const parts = [];
 
-  if (nearby.name) {
-    const distLabel = formatDist(nearby.distM);
+  if (slots.nearby.name) {
+    const distLabel = formatDist(slots.nearby.distM);
     parts.push(
-      `Perfetto. Vi chiamo perché siete vicini a ${nearby.name}${distLabel ? ` (${distLabel})` : ''}, con cui lavoriamo sulle recensioni Google vere.`
+      `Perfetto. Vi chiamo perché siete vicini a ${slots.nearby.name}${distLabel ? ` (${distLabel})` : ''}, con cui lavoriamo sulle recensioni Google vere.`
     );
   } else {
     parts.push(`Perfetto. Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
   }
 
-  if (reviews != null || rating != null) {
+  if (slots.reviews != null || slots.rating != null) {
     parts.push(
-      `Voi su Maps siete a circa ${reviews != null ? `${reviews} recensioni` : 'poche recensioni'}${rating != null ? `, media ${rating}` : ''}.`
+      `Voi su Maps siete a circa ${slots.reviews != null ? `${slots.reviews} recensioni` : 'poche recensioni'}${slots.rating != null ? `, media ${slots.rating}` : ''}.`
     );
   }
 
-  const velocityLine = formatVelocityPerMonth(velocity);
-  if (velocityLine) {
-    parts.push(velocityLine);
-  }
+  const velocityLine = formatVelocityPerMonth(slots.velocity);
+  if (velocityLine) parts.push(velocityLine);
 
-  if (mapsHook) {
-    parts.push(mapsHook);
-  }
+  const mapsHook = buildMapsHookLine(slots);
+  if (mapsHook) parts.push(mapsHook);
 
-  if (isLowVelocity(velocity)) {
+  if (slots.lowVelocity) {
     parts.push(`Dai dati recenti sembra che le recensioni arrivino più «al naturale» — poche al mese.`);
   }
 
@@ -145,64 +189,20 @@ function buildHook(contact, card) {
   return parts.join(' ');
 }
 
-/**
- * Apertura: vicino + numeri lead + motivo call + permesso.
- * (I numeri dell'ancora "in X mesi +Z" servono dati ancora non in CRM → usiamo lead + nome vicino.)
- */
-function buildOpening(contact, card) {
-  const locale = card?.place?.name || contact.name;
-  const nearby = pickNearby(contact, card);
-  const rating = card?.place?.rating ?? card?.ranking?.user?.rating ?? contact.properties?.rating;
-  const reviews = card?.place?.reviews ?? card?.ranking?.user?.reviews ?? contact.properties?.reviews_count;
-  const keyword = pickKeyword(card);
-  const rank = pickRank(card);
+function buildDiscovery(slots) {
+  const kind = positionKind(slots);
+  const { velocityRounded, lowVelocity, competitor, keyword, rank, rating } = slots;
 
-  const lines = [`Buongiorno, ${locale}? Sono Alessandro di Menu Chat.`];
-
-  if (nearby.name) {
-    const distLabel = formatDist(nearby.distM);
-    lines.push(
-      `Lavoriamo con ${nearby.name}${distLabel ? `, qui a ${distLabel}` : ' qui vicino'}, sulle recensioni Google vere.`
-    );
-  } else {
-    lines.push(`Lavoriamo con locali della vostra zona sulle recensioni Google vere.`);
-  }
-
-  const velocity = pickVelocity(card);
-  const leadBits = [];
-  if (reviews != null) leadBits.push(`circa ${reviews} recensioni`);
-  if (rating != null) leadBits.push(`media ${rating}`);
-  if (keyword && rank != null) leadBits.push(`#${rank} su «${keyword}»`);
-  if (leadBits.length) {
-    lines.push(`Voi su Maps siete a ${leadBits.join(', ')}.`);
-  }
-
-  const velocityLine = formatVelocityPerMonth(velocity);
-  if (velocityLine) {
-    lines.push(velocityLine);
-  }
-
-  lines.push(
-    `Vi chiamo per lo stesso motivo — capire in trenta secondi se anche a voi può servire. Due domande al volo, va bene?`
-  );
-
-  return lines.join(' ');
-}
-
-function buildDiscovery(contact, card) {
-  const rating = asNumber(card?.place?.rating ?? card?.ranking?.user?.rating ?? contact.properties?.rating);
-  const velocity = pickVelocity(card);
-  const velocityRounded = roundVelocity(velocity);
-  const lowVelocity = isLowVelocity(velocity);
-  const competitor = pickCompetitor(card);
-  const keyword = pickKeyword(card);
-  const rank = pickRank(card);
-
-  const q1Line = lowVelocity
-    ? 'Dai dati Maps sembra che le recensioni arrivino più al naturale — state facendo qualcosa per incentivarle?'
-    : 'State già facendo qualcosa per le recensioni?';
-
-  const q2 =
+  const questions = [
+    {
+      id: 'q1',
+      label: 'Recensioni oggi',
+      mode: 'ask',
+      line: lowVelocity
+        ? 'Dai dati Maps sembra che le recensioni arrivino più al naturale — state facendo qualcosa per incentivarle?'
+        : 'State già facendo qualcosa per le recensioni?',
+      ...(lowVelocity ? { knownFact: 'velocity bassa — al naturale' } : {}),
+    },
     velocityRounded != null
       ? {
           id: 'q2',
@@ -219,20 +219,10 @@ function buildDiscovery(contact, card) {
           label: 'Volume / stack',
           mode: 'ask',
           line: 'Quante ne entrano più o meno al mese, a occhio? (Se hanno già QR/agenzia: vi sta portando quante al mese?)',
-        };
-
-  const questions = [
-    {
-      id: 'q1',
-      label: 'Recensioni oggi',
-      mode: 'ask',
-      line: q1Line,
-      ...(lowVelocity ? { knownFact: 'velocity bassa — al naturale' } : {}),
-    },
-    q2,
+        },
   ];
 
-  if (competitor?.name && keyword && rank != null && rank > 1) {
+  if (kind === 'trailing') {
     questions.push({
       id: 'q_competitor',
       label: 'Gap Maps',
@@ -240,7 +230,7 @@ function buildDiscovery(contact, card) {
       line: `Su «${keyword}» Maps mostra prima ${competitor.name}${competitor.reviews != null ? ` (${competitor.reviews} rec)` : ''} e voi #${rank} — lo sapevate, o vi interessa chiudere quel gap?`,
       knownFact: `${competitor.name} #${competitor.rank ?? 1} · voi #${rank}`,
     });
-  } else if (rank === 1 && keyword) {
+  } else if (kind === 'rank1') {
     questions.push({
       id: 'q_rank1',
       label: 'Difesa #1',
@@ -278,33 +268,27 @@ function buildDiscovery(contact, card) {
   return questions;
 }
 
-function buildValue(contact, card) {
-  const velocity = pickVelocity(card);
-  const velocityRounded = roundVelocity(velocity);
-  const competitor = pickCompetitor(card);
-  const keyword = pickKeyword(card);
-  const rank = pickRank(card);
-  const lowVelocity = isLowVelocity(velocity);
-
+function buildValue(slots) {
+  const kind = positionKind(slots);
   const parts = [
     `In pratica facciamo una cosa sola: più recensioni vere su Google Maps.`,
     `Menù digitale / QR a tavola → WhatsApp → richiesta recensione al momento giusto.`,
     `Non compriamo recensioni: massimizziamo quelle dei clienti che avete già.`,
   ];
 
-  if (competitor?.name && rank != null && rank > 1 && keyword) {
+  if (kind === 'trailing') {
     parts.push(
-      `L’obiettivo concreto su «${keyword}» è avvicinarvi a ${competitor.name} (oggi davanti a voi) con volume vero, non con trucchi.`
+      `L’obiettivo concreto su «${slots.keyword}» è avvicinarvi a ${slots.competitor.name} (oggi davanti a voi) con volume vero, non con trucchi.`
     );
-  } else if (rank === 1 && keyword) {
+  } else if (kind === 'rank1') {
     parts.push(
-      `Siete già #1 su «${keyword}»: il pezzo utile è tenere/accelerare il ritmo di recensioni vere, così non vi superano.`
+      `Siete già #1 su «${slots.keyword}»: il pezzo utile è tenere/accelerare il ritmo di recensioni vere, così non vi superano.`
     );
   }
 
-  if (lowVelocity && velocityRounded != null) {
+  if (slots.lowVelocity && slots.velocityRounded != null) {
     parts.push(
-      `Oggi il ritmo recente è ~${velocityRounded}/mese: nei locali simili vediamo ordine di grandezza 50–100 recensioni vere al mese, in base alle scansioni.`
+      `Oggi il ritmo recente è ~${slots.velocityRounded}/mese: nei locali simili vediamo ordine di grandezza 50–100 recensioni vere al mese, in base alle scansioni.`
     );
   } else {
     parts.push(
@@ -315,13 +299,9 @@ function buildValue(contact, card) {
   return parts.join(' ');
 }
 
-function buildObjections(contact, card) {
-  const nearby = pickNearby(contact, card);
-  const ancora = nearby.name || 'il locale vicino con cui lavoriamo';
-  const competitor = pickCompetitor(card);
-  const keyword = pickKeyword(card);
-  const rank = pickRank(card);
-  const velocityRounded = roundVelocity(pickVelocity(card));
+function buildObjections(slots) {
+  const kind = positionKind(slots);
+  const { nearby, keyword, competitor, velocityRounded } = slots;
 
   const objections = [
     {
@@ -358,7 +338,7 @@ function buildObjections(contact, card) {
     },
   ];
 
-  if (rank === 1 && keyword) {
+  if (kind === 'rank1') {
     objections.push({
       id: 'already_first',
       short: 'Siamo #1',
@@ -367,7 +347,7 @@ function buildObjections(contact, card) {
     });
   }
 
-  if (competitor?.name && rank != null && rank > 1) {
+  if (kind === 'trailing') {
     const compShort =
       competitor.name.replace(/^Ristorante\s+/i, '').trim().split(/\s+/).slice(0, 2).join(' ') ||
       'Competitor';
@@ -388,38 +368,34 @@ function buildObjections(contact, card) {
     });
   }
 
-  // ancora usata solo come contesto (gate/busy la usano a parte)
-  void ancora;
   return objections;
 }
 
-function buildCardSummary(contact, card) {
-  const nearby = pickNearby(contact, card);
-  const competitor = pickCompetitor(card);
+function buildCardSummary(slots, hook) {
   return {
-    name: card?.place?.name || contact.name,
-    keyword: pickKeyword(card),
-    rank: pickRank(card),
-    rating: asNumber(card?.place?.rating ?? card?.ranking?.user?.rating ?? contact.properties?.rating),
-    reviews: asNumber(card?.place?.reviews ?? card?.ranking?.user?.reviews ?? contact.properties?.reviews_count),
-    velocityPerMonth: pickVelocity(card),
-    competitorAhead: competitor
+    name: slots.locale,
+    keyword: slots.keyword,
+    rank: slots.rank,
+    rating: slots.rating,
+    reviews: slots.reviews,
+    velocityPerMonth: slots.velocity,
+    competitorAhead: slots.competitor
       ? {
-          name: competitor.name,
-          rank: competitor.rank,
-          rating: competitor.rating,
-          reviews: competitor.reviews,
+          name: slots.competitor.name,
+          rank: slots.competitor.rank,
+          rating: slots.competitor.rating,
+          reviews: slots.competitor.reviews,
         }
       : null,
-    nearbyClient: nearby.name
-      ? { name: nearby.name, distM: nearby.distM }
+    nearbyClient: slots.nearby.name
+      ? { name: slots.nearby.name, distM: slots.nearby.distM }
       : null,
-    address: card?.place?.address || contact.properties?.address || null,
-    city: card?.contact?.city || contact.properties?.city || null,
-    category: card?.contact?.category || contact.properties?.category || null,
-    placeId: card?.place?.placeId || contact.properties?.place_id || null,
-    hook: buildHook(contact, card),
-    generatedAt: contact.properties?.visibilityCardGeneratedAt || card?.generatedAt || null,
+    address: slots.address,
+    city: slots.city,
+    category: slots.category,
+    placeId: slots.placeId,
+    hook,
+    generatedAt: slots.generatedAt,
   };
 }
 
@@ -429,15 +405,16 @@ function buildCardSummary(contact, card) {
  */
 export function buildColdCallScript(contact) {
   const card = asCard(contact);
-  const nearby = pickNearby(contact, card);
-  const summary = buildCardSummary(contact, card);
-  const ancora = nearby.name || 'il locale vicino con cui lavoriamo';
+  const slots = extractSlots(contact, card);
+  const hook = buildHook(slots);
+  const summary = buildCardSummary(slots, hook);
+  const ancora = slots.nearby.name || 'il locale vicino con cui lavoriamo';
 
   return {
-    opening: buildOpening(contact, card),
-    hook: summary.hook,
-    discovery: buildDiscovery(contact, card),
-    value: buildValue(contact, card),
+    opening: buildOpening(slots),
+    hook,
+    discovery: buildDiscovery(slots),
+    value: buildValue(slots),
     busy:
       `Hai ragione, non ti rubo un secondo. Quando richiamo il titolare — o te? Meglio mattina prima delle 11 o dopo le 15? ` +
       `Lascia solo il nome: Alessandro di Menu Chat, recensioni Google come ${ancora}.`,
@@ -450,26 +427,34 @@ export function buildColdCallScript(contact) {
       `Quello che vi consiglio è la prova di due settimane: montiamo i QR, guardiamo i numeri insieme. ` +
       `Per creare e spedirvi circa 50 QR c’è solo il setup 25€ + IVA. ` +
       `Ti mando ora su WhatsApp brochure + esempio. Partiamo da [data] — ti va?`,
-    objections: buildObjections(contact, card),
+    objections: buildObjections(slots),
     cardSummary: summary,
     hasVisibilityCard: !!card,
     listHint: DEFAULT_LIST,
   };
 }
 
+/** Hook Maps monolinea da card grezza (CLI markdown test). */
+export function mapsHookFromCard(card) {
+  if (!card) return null;
+  const slots = extractSlots({ name: card?.place?.name || card?.contact?.name || '', properties: {} }, card);
+  return buildMapsHookLine(slots);
+}
+
 export function summarizeVisibilityCard(contact) {
   const card = asCard(contact);
+  const slots = extractSlots(contact, card);
+  const hook = buildHook(slots);
   if (!card) {
-    const nearby = pickNearby(contact, null);
     return {
       hasVisibilityCard: false,
       keyword: null,
       rank: null,
-      nearbyClient: nearby.name ? nearby : null,
-      hook: buildHook(contact, null),
+      nearbyClient: slots.nearby.name ? slots.nearby : null,
+      hook,
     };
   }
-  const summary = buildCardSummary(contact, card);
+  const summary = buildCardSummary(slots, hook);
   return {
     hasVisibilityCard: true,
     keyword: summary.keyword,
@@ -488,5 +473,7 @@ export const COLD_CALL_DEFAULT_LIST = DEFAULT_LIST;
 export default {
   buildColdCallScript,
   summarizeVisibilityCard,
+  mapsHookFromCard,
+  buildMapsHookLine,
   COLD_CALL_DEFAULT_LIST,
 };

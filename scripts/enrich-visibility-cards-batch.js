@@ -11,15 +11,9 @@
 
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { buildVisibilityCard } from '../services/visibilityCardPipeline.js';
 
 dotenv.config();
-
-const {
-  pickKeyword,
-  resolvePlace,
-  rankForKeyword,
-  reviewVelocity,
-} = await import('./test-visibility-card.js');
 
 const LIST = 'Cold Call - Vicini Clienti';
 const DEFAULT_N = 10;
@@ -35,39 +29,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function contactBase(contact) {
-  const props = contact.properties || {};
-  return {
-    id: String(contact._id),
-    name: contact.name,
-    status: contact.status,
-    city: props.city,
-    category: props.category,
-    address: props.address,
-    clienteVicino: props.cliente_vicino,
-    distM: props.dist_m,
-    placeIdImport: props.place_id,
-    ratingImport: props.rating,
-    reviewsImport: props.reviews_count,
-  };
-}
-
-async function buildVisibilityCard(contact) {
-  const base = contactBase(contact);
-  const keyword = await pickKeyword(base);
-  const place = await resolvePlace(contact);
-  const ranking = place ? await rankForKeyword(place, keyword) : { error: 'no place' };
-  const velocity = place ? await reviewVelocity(place, { maxPages: 3 }) : { error: 'no place' };
-  return {
-    contact: base,
-    keyword,
-    place,
-    ranking,
-    velocity,
-    generatedAt: new Date().toISOString(),
-  };
-}
-
 async function main() {
   const mongo = process.env.MONGODB_URI || process.env.MONGO_URI;
   if (!mongo) throw new Error('MONGODB_URI / MONGO_URI mancante');
@@ -81,7 +42,7 @@ async function main() {
     lists: LIST,
     status: 'da contattare',
     phone: { $regex: '^\\+' },
-    'properties.place_id': { $exists: true, $nin: [null, '' ] },
+    'properties.place_id': { $exists: true, $nin: [null, ''] },
   };
 
   if (!FORCE) {
