@@ -87,8 +87,14 @@ async function fetchSimilar({ city, type, limit = 100 } = {}) {
   return data?.restaurants || [];
 }
 
-/** Lookup approfondito per nome (senza filtro menu≥10). */
-async function fetchLookup({ name, city, includeInactive = true, limit = 15 } = {}) {
+/** Lookup approfondito per nome / placeId (senza filtro menu≥10). */
+async function fetchLookup({
+  name,
+  city,
+  placeId,
+  includeInactive = true,
+  limit = 15,
+} = {}) {
   const base = backendUrl();
   const key = apiKey();
   if (!base || !key) {
@@ -96,7 +102,8 @@ async function fetchLookup({ name, city, includeInactive = true, limit = 15 } = 
   }
   const { data } = await axios.get(`${base}/api/restaurants/lookup`, {
     params: {
-      name,
+      name: name || undefined,
+      placeId: placeId || undefined,
       city: city || undefined,
       limit,
       includeInactive: includeInactive ? '1' : undefined,
@@ -105,6 +112,49 @@ async function fetchLookup({ name, city, includeInactive = true, limit = 15 } = 
     timeout: 45000,
   });
   return data?.restaurants || [];
+}
+
+/** Risolve place Google dell’ancora (spesso in place_results, non local_results). */
+async function resolveAnchorPlace(name, city) {
+  const key = process.env.SERPAPI_KEY;
+  if (!key) return null;
+  const cleaned = cleanAnchorName(name);
+  const q = [cleaned || name, city].filter(Boolean).join(' ');
+  try {
+    const { data } = await axios.get('https://serpapi.com/search.json', {
+      params: {
+        api_key: key,
+        engine: 'google_maps',
+        type: 'search',
+        q,
+        hl: 'it',
+      },
+      timeout: 45000,
+    });
+    const place = data.place_results;
+    if (place?.place_id || place?.title) {
+      return {
+        title: place.title || name,
+        placeId: place.place_id || null,
+        reviews: place.reviews ?? null,
+        rating: place.rating ?? null,
+        address: place.address || null,
+      };
+    }
+    const hit = (data.local_results || []).find(
+      (r) => nameLooseMatch(r.title, name) || nameLooseMatch(r.title, cleaned)
+    );
+    if (!hit) return null;
+    return {
+      title: hit.title,
+      placeId: hit.place_id || null,
+      reviews: hit.reviews ?? null,
+      rating: hit.rating ?? null,
+      address: hit.address || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function toStats(restaurant) {
@@ -223,14 +273,44 @@ export async function fetchNearbyClientStatsMap(anchors) {
           const deep = await fetchLookup({ name: q, city, includeInactive: true, limit: 20 });
           best = pickBestHit(name, city, deep) || pickBestHit(q, city, deep);
           if (best) break;
-          // retry senza city
           if (city) {
-            const deep2 = await fetchLookup({ name: q, city: null, includeInactive: true, limit: 20 });
+            const deep2 = await fetchLookup({
+              name: q,
+              city: null,
+              includeInactive: true,
+              limit: 20,
+            });
             best = pickBestHit(name, city, deep2) || pickBestHit(q, city, deep2);
             if (best) break;
           }
         } catch (err) {
           console.warn(`lookup fail «${q}»:`, err.message || err);
+        }
+      }
+    }
+
+    // Ultimo tentativo: SerpAPI → placeId → lookup prodotto
+    if (!best) {
+      const place = await resolveAnchorPlace(name, city);
+      if (place?.placeId) {
+        try {
+          const byPlace = await fetchLookup({
+            placeId: place.placeId,
+            includeInactive: true,
+            limit: 5,
+          });
+          best = byPlace[0] || null;
+          if (best) {
+            console.log(
+              `lookup via placeId «${name}» → ${best.name} (${place.placeId})`
+            );
+          } else {
+            console.warn(
+              `ancora «${name}» su Maps (${place.title}, ${place.reviews} rec) ma assente nel prodotto`
+            );
+          }
+        } catch (err) {
+          console.warn(`lookup placeId fail «${name}»:`, err.message || err);
         }
       }
     }
