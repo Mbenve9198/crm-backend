@@ -8,9 +8,10 @@
   "filters": "duration>30, exclude no-answer/busy/failed/canceled",
   "totals": {
     "answeredGt30": 118,
-    "withTranscript": 113,
-    "withoutTranscript": 5,
-    "withCallAnalysis": 118
+    "withTranscript": 117,
+    "withoutTranscript": 1,
+    "withCallAnalysis": 118,
+    "newlyTranscribedLong": 4
   },
   "strata": {
     "long_top25": [
@@ -90,11 +91,13 @@
       "6a75cf8b77f0ed625a0f8cdf"
     ],
     "no_transcript": [
+      "6a75feed77f0ed625a0f98b5"
+    ],
+    "newly_transcribed_long": [
       "6a73338777f0ed625a0f35a5",
       "6a73633d77f0ed625a0f4f83",
       "6a71bcc577f0ed625a0ef38e",
-      "6a75a99f77f0ed625a0f8607",
-      "6a75feed77f0ed625a0f98b5"
+      "6a75a99f77f0ed625a0f8607"
     ]
   },
   "durationStats": {
@@ -108,5 +111,6 @@
     "voicemail": 2,
     "null": 2,
     "not-logged": 2
-  }
+  },
+  "recoveryNote": "2026-08-11: 4 long calls transcribed via Twilio MP3 + Gemini 2.5 Flash; all 4 are trial-path wins mislabeled as callback"
 }

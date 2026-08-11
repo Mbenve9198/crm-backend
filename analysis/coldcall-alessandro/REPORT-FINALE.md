@@ -1,21 +1,21 @@
 # Report finale — Cold call Alessandro Totti
 
 **Lista:** Cold Call - Vicini Clienti  
-**Filtro:** chiamate con risposta, durata > 30s (N=118; 113 con transcript)  
+**Filtro:** chiamate con risposta, durata > 30s (N=118; **117 con transcript** dopo recovery)  
 **Periodo corpus:** 29 luglio – 7 agosto 2026  
-**Metodo:** corpus esportato da Mongo → 3 analisi parallele (Composer/Grok) su *cosa funziona / cosa fallisce / processo-funnel* → piano esperimenti → sintesi orchestratore  
+**Metodo:** corpus esportato da Mongo → 3 analisi parallele (Composer/Grok) su *cosa funziona / cosa fallisce / processo-funnel* → piano esperimenti → sintesi orchestratore → **recovery trascrizione 4 long call**  
 
-**Fonti dettagliate:** `agent-outputs/01-what-works.md`, `02-what-fails.md`, `03-process-funnel.md`, `04-experiments-improvements.md`
+**Fonti dettagliate:** `agent-outputs/01-what-works.md`, `02-what-fails.md`, `03-process-funnel.md`, `04-experiments-improvements.md`, **`05-new-long-transcripts.md`**
 
 ---
 
 ## Verdetto in 30 secondi
 
-Ale è bravo a **aprire e creare un motivo per richiamare**. Non sta ancora **vendendo** in cold call.
+Ale è bravo a **aprire e creare un motivo per richiamare**. Quando arriva al DM in una call lunga, **sa anche chiudere sul trial** — ma il CRM non lo vede.
 
-Il CRM dice `callback` nel **~95%** dei casi. Sul testo, l’impegno qualificato (DM interessato + next step concreto, o trial) è nell’ordine del **7–8%** del campione letto. La metrica attuale nasconde il collo di bottiglia vero: **chi risponde al telefono** e **quanto valore resta dopo il no**.
+Il CRM dice `callback` nel **~95%** dei casi. Sul testo, l’impegno qualificato / trial path è nell’ordine del **~10–15%** del set answered>30s (prima stimato 7–8%: le 4 long senza transcript erano proprio trial). La metrica attuale nasconde due cose: il collo **gatekeeper** *e* i **win nascosti**.
 
-La call-modello da replicare non è la più lunga: è **Spritzzeria Roma** (`6a72ffc3`, 348s) — reframe “non social / solo recensioni”, trial 2 settimane, recall lunedì pranzo con Tiziano (socio).
+**Gold standard da replicare (aggiornato):** non solo Spritzzeria Roma (`6a72ffc3`), ma anche **Tyler Ponte Milvio** (Paolo, 679s, score 5 — trial 25€ QR post-ferie), **Falabràch** (Marco, 871s — reframe “siamo piccoli”), **Conte Brillo**, **Verace/Sonny**.
 
 ---
 
@@ -27,9 +27,11 @@ La call-modello da replicare non è la più lunga: è **Spritzzeria Roma** (`6a7
 2. **Triade Vicini Clienti** — cliente vicino → N recensioni specifiche → permesso («due domande al volo»). Quando il lead conosce (o accetta) l’ancora geografica, l’engagement è alto.
 3. **Discovery killer question** — «State già facendo qualcosa per le recensioni?» Apre stack reale (nulla / agenzia / QR / media bassa) senza monologo.
 4. **Reframe complementarità** — «Non facciamo social, solo 50–100 recensioni vere/mese». Funziona **se** arriva prima del no definitivo (Spritzzeria, Meloncini).
-5. **Close con nome + giorno/ora** — unico proxy di successo ripetibile. «Mi segno il numero» / «ti faccio sapere» **non** contano.
-6. **Recall con contesto** — richiamare citando l’orario concordato (Gaia A Mare / Carmine, 611s) mantiene la linea; richiamare “a freddo” confonde.
-7. **Rispetto del servizio** — accettare la fascia proposta dal locale converte ostilità in recall (Bocciodromo / Fabio).
+5. **Close con nome + giorno/ora** — proxy di successo ripetibile. «Mi segno il numero» / «ti faccio sapere» **non** contano.
+6. **Trial pack (nuovo, 4/4 sulle long recovery)** — prova 2 settimane + **25€+IVA per QR** + invio materiali su **WhatsApp** + range annuale **990–1290€** verbalizzato dopo discovery. Micro-commitment economico > “gratis” nudo.
+7. **Reframe “siamo piccoli / non vogliamo più gente”** — massimizzare recensioni/fatturato sul giro attuale, non volume (Falabràch). Anti-pattern rispetto al pitch “più clienti” su locali saturi.
+8. **Recall con contesto + WhatsApp** — il canale post-call forte non è solo il telefono.
+9. **Rispetto del servizio / ferie** — busy → fascia; ferie → start post-riapertura (anche spedizione QR a casa, Tyler).
 
 ### Cosa *non* è un successo (anche se sembra)
 
@@ -81,10 +83,10 @@ Connect → Hook Maps/Vicino → (spesso) Gatekeeper → Nome DM + ora
 | Permesso | «due domande» / interesse | ~2/3 degli engaged |
 | DM path | DM in linea **o** nome+ora | ~70% (molto è solo gatekeeper) |
 | Discovery | ≥1 domanda su pratica recensioni | ~1/3 del DM path |
-| Impegno qualificato (S7) | interesse + next step col DM / trial | **~7–8%** |
-| Trial setup (S8) | prova avviata | quasi assente |
+| Impegno qualificato (S7) | interesse + next step col DM / trial | **~10–15%** (era ~7–8%; +4 trial-path dalle long recovery) |
+| Trial setup (S8) | prova accettata / QR in spedizione | **presente** (Tyler, Verace, Falabràch path, Conte Brillo sett.) |
 
-**Value prop ricostruita dal pitch di Ale:** Menu Chat = recensioni Google vere via menù digitale/QR, 50–100/mese, prova 2 settimane → piano annuale, complementare alle agenzie social, vendita solo al telefono.
+**Value prop ricostruita dal pitch di Ale:** Menu Chat = recensioni Google vere via menù digitale/QR + WhatsApp, 50–100/mese, prova 2 settimane (setup QR ~25€+IVA) → piano annuale tipicamente 990–1290€, complementare ad agenzie/TheFork, vendita voce + follow-up WhatsApp.
 
 ---
 
@@ -162,15 +164,31 @@ Campi post-call (30s): `dmName`, `recallAt`, `hookRecognized`, `nextStepLevel` (
 - Piano esperimenti falsificabile con metriche e campioni.
 
 **Cosa resta debole / da non over-interpretare**
-- Nessuna verifica post-call (quanti recall diventano trial/contratto).
-- Stime % funnel su ~55 transcript, non sui 113.
+- Nessuna verifica post-call (quanti trial WhatsApp diventano setup/contratto).
+- Stime % funnel ancora campionarie; le 4 long alzano S7/S8 ma non cancellano il collo gatekeeper sulle short.
 - Stagionalità agosto distorce i next step.
-- Outcome CRM inutilizzabile → i “win” sono proxy testuali.
+- Outcome CRM inutilizzabile → i “win” (incluse queste 4) sono ancora etichettati `callback`.
 
 **Decisione operativa consigliata**
-1. Questa settimana: QW1–QW4 + rilabel CRM minimo (`no-hard` vs `cb-gatekeeper` vs `cb-dm-*`).  
-2. Settimana successiva: E1+E2 in parallelo + coaching scorecard.  
-3. Solo dopo: volume e ottimizzazione lista ancore.
+1. Questa settimana: QW1–QW4 + rilabel CRM (`no-hard` / `cb-gatekeeper` / `cb-dm-*` / **`cb-trial-*` / `cb-whatsapp-sent`**).  
+2. Industrializzare il **trial pack** visto sulle 4 long (25€ QR + WhatsApp + data start).  
+3. Coaching: gold tape = Tyler + Falabràch + Spritzzeria; worst tape invariati.  
+4. Poi: E1+E2 + volume lista.
+
+---
+
+## 7. Addendum recovery trascrizioni (2026-08-11)
+
+Dettaglio in `agent-outputs/05-new-long-transcripts.md`.
+
+| Contatto | Durata | Win testuale |
+|----------|--------|--------------|
+| Falabràch / Marco | 871s | Trial + WhatsApp + lunedì post-socio |
+| Conte Brillo / Vincenzo | 694s | Trial settembre + WhatsApp |
+| Tyler Ponte Milvio / Paolo | 679s | Trial accettato 25€ QR post-ferie (score 5) |
+| Verace / Sonny | 651s | Trial accettato; supera prezzo + “di persona” |
+
+**Lezione metodologica:** in outbound, le call lunghe *senza* transcript sono spesso i win — trascriverle prima di chiudere il giudizio sul close rate.
 
 ---
 
@@ -185,6 +203,7 @@ Campi post-call (30s): `dmName`, `recallAt`, `hookRecognized`, `nextStepLevel` (
 | `agent-outputs/02-what-fails.md` | 12 failure modes + worst 8 |
 | `agent-outputs/03-process-funnel.md` | Talk track reale + funnel S0–S8 |
 | `agent-outputs/04-experiments-improvements.md` | Quick wins, A/B, coaching, CRM |
+| `agent-outputs/05-new-long-transcripts.md` | Recovery 4 long + implicazioni |
 | `REPORT-FINALE.md` | Questo documento |
 
 > I transcript grezzi (`transcripts/`, `bundle-*.md`) restano in working tree per analisi locali; **non** vanno in git (PII / contenuti chiamata).
