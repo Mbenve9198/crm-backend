@@ -272,22 +272,33 @@ function buildValueTemplate(slots) {
   const keyword = slots.keyword || 'in zona';
   const ancora = slots.nearby.name || 'il locale vicino con cui lavoriamo';
   const reviews = slots.reviews != null ? String(slots.reviews) : 'quelle che avete';
-  let mapsGoal =
-    'ed essere primi nei risultati su Google Maps quando uno cerca «' + keyword + '»';
+  const rank = slots.rank != null ? String(slots.rank) : '…';
+
+  let line1 =
+    `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno.`;
   if (slots.rankKind === 'rank1') {
-    mapsGoal =
-      'e restare saldamente primi su Google Maps quando uno cerca «' + keyword + '»';
+    line1 =
+      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e restare saldamente primi su «${keyword}».`;
+  } else if (slots.rankKind === 'ranked') {
+    line1 =
+      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e stringere su chi è davanti su «${keyword}» — oggi siete intorno al ${rank}° posto.`;
   } else if (slots.rankKind === 'out_of_top') {
-    mapsGoal =
-      'e tornare visibili nei risultati su Google Maps quando uno cerca «' + keyword + '»';
+    line1 =
+      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e tornare visibili su Maps quando uno cerca «${keyword}».`;
+  } else if (slots.keyword) {
+    // unknown ma con keyword: obiettivo generico di primato, senza fingere il rank
+    line1 =
+      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, ed essere più forti su Maps quando uno cerca «${keyword}».`;
   }
+
+  const line2 =
+    'Nella prova di due settimane, se i QR stanno sui tavoli, di solito vediamo intorno a {{twoWeekPotential}} recensioni nuove.';
+  const cta =
+    `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane, senza impegno?`;
+
   return {
     needsCovers: true,
-    lines: [
-      `In base a quello che mi hai detto, con il nostro sistema potreste raccogliere circa {{potentialMonthly}} recensioni al mese, e quindi fra un anno avreste circa {{yearReviews}} recensioni (oggi ${reviews} + {{potentialMonthly}}×12) ${mapsGoal}.`,
-      `A quel punto — con circa {{yearReviews}} recensioni e tra le prime posizioni quando uno cerca «${keyword}» — cosa cambia per il locale?`,
-      `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane senza impegno?`,
-    ],
+    lines: [line1, line2, cta],
   };
 }
 
@@ -306,10 +317,18 @@ function buildTrialSteps(slots) {
         id: 'start_timing',
         title: 'Partenza prova',
         line:
-          'Se ti torna il conto, la prova di due settimane la apriamo questa settimana — o siete in un momento in cui non toccate nulla?',
+          'Perfetto. Allora apriamo la prova: ti spedisco i QR e le due settimane partono quando li metti sui tavoli. Me la confermi per questa settimana?',
         choiceOptions: [
           { id: 'this_week', label: 'Questa settimana' },
-          { id: 'later', label: 'Non ora' },
+          { id: 'next_week', label: 'La prossima' },
+          { id: 'other_date', label: 'Altra data' },
+        ],
+        fields: [
+          {
+            id: 'trial_start_date_note',
+            label: 'Se altra data / nota',
+            placeholder: 'es. dopo Pasqua, dal 20…',
+          },
         ],
       },
       {
@@ -329,7 +348,7 @@ function buildTrialSteps(slots) {
         id: 'invoice',
         title: 'Fattura setup',
         line:
-          'Ok, te li spediamo in giornata. Intanto ti mando la fattura dei 25€ + IVA: basta la paghi entro un paio di giorni. Mi servirebbe P.IVA, ragione sociale, sede legale e codice univoco.',
+          'Ok, li metto in spedizione oggi: di solito arrivano in circa due giorni lavorativi. Intanto ti mando la fattura dei 25€ + IVA: basta la paghi entro un paio di giorni. Mi servirebbe P.IVA, ragione sociale, sede legale e codice univoco.',
         fields: [
           {
             id: 'trial_ragione_sociale',
@@ -383,17 +402,17 @@ function buildTrialSteps(slots) {
         id: 'go_live',
         title: 'Messa live + check',
         line:
-          'Quando riesci a metterli sui tavoli? Così so da quando partono le due settimane. E fissiamo un check veloce dopo che sono arrivati.',
+          'Dalla spedizione i QR arrivano in genere in circa due giorni lavorativi: appena li ricevi li metti sui tavoli e da lì partono le due settimane. Che giorno li mettiamo live dopo l’arrivo? Fissiamo anche un check veloce il giorno dopo che sono arrivati.',
         fields: [
           {
             id: 'trial_qr_live',
-            label: 'Data messa QR sui tavoli',
+            label: 'Data messa QR sui tavoli (post-arrivo)',
             placeholder: 'es. giovedì dopo pranzo',
           },
           {
             id: 'trial_check_call',
             label: 'Check post-arrivo',
-            placeholder: 'es. lunedì 11:30',
+            placeholder: 'es. venerdì 11:30',
           },
           {
             id: 'trial_ops_owner',
