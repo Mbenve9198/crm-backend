@@ -1,11 +1,12 @@
 /**
- * Pipeline scheda visibilità cold call (Claude keyword → SerpAPI place/rank/velocity).
- * Usata da script CLI di test e da batch enrich — non dal path dialer runtime.
+ * Pipeline scheda visibilità cold call (Claude keyword → Maps place/rank/velocity).
+ * Provider: Serper (preferito) o SerpAPI. Usata da CLI/batch enrich — non dal dialer runtime.
  */
 
 import axios from 'axios';
 import Anthropic from '@anthropic-ai/sdk';
 import { isUsableVisibilityCard } from './visibilityCardUtils.js';
+import { mapsSearch, mapsProviderName } from './mapsSearchProvider.js';
 
 export { isUsableVisibilityCard };
 
@@ -23,11 +24,7 @@ function requireEnv(name) {
 }
 
 async function serp(params) {
-  const { data } = await axios.get('https://serpapi.com/search.json', {
-    params: { api_key: requireEnv('SERPAPI_KEY'), hl: 'it', ...params },
-    timeout: 45000,
-  });
-  return data;
+  return mapsSearch(params);
 }
 
 function normalize(s) {
@@ -141,48 +138,101 @@ Rispondi SOLO JSON:
   return parsed;
 }
 
+function placeFromRow(row, source, placeIdFallback = null) {
+  if (!row) return null;
+  return {
+    source,
+    name: row.title,
+    placeId: row.place_id || placeIdFallback || null,
+    dataId: row.data_id,
+    address: row.address,
+    rating: row.rating,
+    reviews: row.reviews,
+    type: Array.isArray(row.type) ? row.type.join(', ') : row.type,
+    lat: row.gps_coordinates?.latitude,
+    lng: row.gps_coordinates?.longitude,
+    thumbnail: row.thumbnail,
+    positionInNameSearch: row.position,
+  };
+}
+
+/** Google Places Details (quando Serper non risolve place_id). */
+async function resolvePlaceViaGoogle(placeId) {
+  const key = process.env.GOOGLE_PLACES_API_KEY;
+  if (!key || !placeId) return null;
+  try {
+    const { data } = await axios.get(
+      'https://maps.googleapis.com/maps/api/place/details/json',
+      {
+        params: {
+          place_id: placeId,
+          fields: 'name,geometry,rating,user_ratings_total,formatted_address,types,photos',
+          language: 'it',
+          key,
+        },
+        timeout: 30000,
+      }
+    );
+    if (data.status !== 'OK' || !data.result) return null;
+    const r = data.result;
+    const photo = r.photos?.[0]?.photo_reference;
+    return {
+      source: 'google_places',
+      name: r.name,
+      placeId,
+      dataId: null,
+      address: r.formatted_address || null,
+      rating: r.rating ?? null,
+      reviews: r.user_ratings_total ?? null,
+      type: Array.isArray(r.types) ? r.types.slice(0, 3).join(', ') : null,
+      lat: r.geometry?.location?.lat,
+      lng: r.geometry?.location?.lng,
+      // non persistere URL photo con API key
+      thumbnail: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function resolvePlace(contact) {
   const placeId = contact.properties?.place_id;
+  const address = contact.properties?.address;
+  const q = [contact.name, address || contact.properties?.city].filter(Boolean).join(' ');
+
+  // 1) Google Places Details per place_id (affidabile; Serper non ha lookup by id)
   if (placeId) {
-    const data = await serp({ engine: 'google_maps', type: 'place', place_id: placeId });
-    if (data.place_results) {
-      const p = data.place_results;
-      return {
-        source: 'place_id',
-        name: p.title,
-        placeId: p.place_id || placeId,
-        dataId: p.data_id,
-        address: p.address,
-        rating: p.rating,
-        reviews: p.reviews,
-        type: Array.isArray(p.type) ? p.type.join(', ') : p.type,
-        lat: p.gps_coordinates?.latitude,
-        lng: p.gps_coordinates?.longitude,
-        thumbnail: p.thumbnail,
-      };
-    }
+    const fromGoogle = await resolvePlaceViaGoogle(placeId);
+    if (fromGoogle?.lat != null && fromGoogle?.lng != null) return fromGoogle;
   }
-  // Senza place_id: solo match per nome fidato — mai local_results[0] cieco
-  const q = [contact.name, contact.properties?.city].filter(Boolean).join(' ');
-  if (!q) return null;
-  const data = await serp({ engine: 'google_maps', type: 'search', q });
-  const hit =
-    (data.local_results || []).find((r) => nameMatch(r.title, contact.name)) || null;
-  if (!hit) return null;
-  return {
-    source: 'search',
-    name: hit.title,
-    placeId: hit.place_id,
-    dataId: hit.data_id,
-    address: hit.address,
-    rating: hit.rating,
-    reviews: hit.reviews,
-    type: hit.type,
-    lat: hit.gps_coordinates?.latitude,
-    lng: hit.gps_coordinates?.longitude,
-    thumbnail: hit.thumbnail,
-    positionInNameSearch: hit.position,
-  };
+
+  // 2) Maps search (Serper/SerpAPI): match place_id o nome
+  if (placeId || q) {
+    const data = await serp({
+      engine: 'google_maps',
+      type: placeId ? 'place' : 'search',
+      place_id: placeId || undefined,
+      q: q || placeId,
+    });
+    if (data.place_results) {
+      return placeFromRow(data.place_results, 'place_id', placeId);
+    }
+    const hit =
+      (data.local_results || []).find(
+        (r) => (placeId && r.place_id === placeId) || nameMatch(r.title, contact.name)
+      ) || null;
+    if (hit) return placeFromRow(hit, placeId ? 'place_id+search' : 'search', placeId);
+  }
+
+  // 3) Ultimo tentativo: solo nome+città
+  const q2 = [contact.name, contact.properties?.city].filter(Boolean).join(' ');
+  if (q2 && q2 !== q) {
+    const data = await serp({ engine: 'google_maps', type: 'search', q: q2 });
+    const hit =
+      (data.local_results || []).find((r) => nameMatch(r.title, contact.name)) || null;
+    if (hit) return placeFromRow(hit, 'search', placeId);
+  }
+  return null;
 }
 
 function rowMatchesPlace(place, row) {
@@ -289,6 +339,16 @@ function monthKey(iso) {
 
 export async function reviewVelocity(place, { maxPages = 3 } = {}) {
   if (!place?.placeId && !place?.dataId) return { error: 'no place id' };
+  // Serper non supporta google_maps_reviews: salta senza fallire l'enrich.
+  if (mapsProviderName() === 'serper' || maxPages <= 0) {
+    return {
+      error: 'reviews_unsupported',
+      provider: mapsProviderName(),
+      avgPerMonthRecent: null,
+      recentMonths: [],
+      sampleSize: 0,
+    };
+  }
   const all = [];
   let nextPageToken = null;
   for (let page = 0; page < maxPages; page++) {

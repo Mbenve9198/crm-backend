@@ -32,16 +32,27 @@ dotenv.config();
 
 const LIST = 'Cold Call - Vicini Clienti';
 const DEFAULT_N = 50;
-const SLEEP_MS = 2500;
+const DEFAULT_STATUSES = ['da contattare', 'da richiamare'];
+// Serper: override con ENRICH_SLEEP_MS
+const SLEEP_MS = Number(process.env.ENRICH_SLEEP_MS) || 2000;
 
 const argv = process.argv.slice(2);
 const nArg = argv.find((a) => a.startsWith('--n='));
 const distArg = argv.find((a) => a.startsWith('--max-dist-m='));
-const N = nArg ? Number(nArg.split('=')[1]) : DEFAULT_N;
+const statusArg = argv.find((a) => a.startsWith('--status='));
+const ALL = argv.includes('--all');
+const N = ALL ? null : nArg ? Number(nArg.split('=')[1]) : DEFAULT_N;
 const MAX_DIST_M = distArg ? Number(distArg.split('=')[1]) : NEARBY_DEFAULT_MAX_DIST_M;
 const DRY_RUN = argv.includes('--dry-run');
 const FORCE = argv.includes('--force');
 const VERIFY_ONLY = argv.includes('--verify-only');
+const STATUSES = statusArg
+  ? statusArg
+      .split('=')[1]
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  : DEFAULT_STATUSES;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,7 +73,9 @@ function importDistM(props = {}) {
 async function main() {
   const mongo = process.env.MONGODB_URI || process.env.MONGO_URI;
   if (!mongo) throw new Error('MONGODB_URI / MONGO_URI mancante');
-  if (!process.env.SERPAPI_KEY) throw new Error('SERPAPI_KEY mancante');
+  if (!process.env.SERPER_API_KEY && !process.env.SERPER_KEY && !process.env.SERPAPI_KEY) {
+    throw new Error('SERPER_API_KEY (o SERPAPI_KEY) mancante');
+  }
   if (!VERIFY_ONLY && !process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY mancante');
   }
@@ -72,7 +85,7 @@ async function main() {
 
   const query = {
     lists: LIST,
-    status: 'da contattare',
+    status: { $in: STATUSES },
     phone: { $regex: '^\\+' },
     'properties.place_id': { $exists: true, $nin: [null, ''] },
     'properties.cliente_vicino': { $exists: true, $nin: [null, ''] },
@@ -99,10 +112,12 @@ async function main() {
         { 'properties.visibilityCard': null },
         { 'properties.visibilityCard.place': { $exists: false } },
         { 'properties.visibilityCard.place': null },
+        { 'properties.visibilityCard.place.name': { $exists: false } },
+        { 'properties.visibilityCard.place.name': null },
+        { 'properties.visibilityCard.place.name': '' },
         { 'properties.visibilityCard.ranking.error': 'no place' },
       ];
     } else {
-      // verify-only: skip già verificati ok
       query.$or = [
         { 'properties.nearbyVerified': { $exists: false } },
         { 'properties.nearbyVerified': null },
@@ -110,11 +125,18 @@ async function main() {
     }
   }
 
-  // Preload pool (più ampio di N) per costruire ancore dalle città presenti
+  const totalNeed = await Contact.countDocuments(query);
+  const targetN = ALL ? totalNeed : N;
+  if (!targetN || targetN < 1) {
+    console.log(`Nessun contatto da processare (match=${totalNeed}).`);
+    await mongoose.disconnect();
+    return;
+  }
+
   const pool = await Contact.find(query)
     .select('name status phone properties')
     .sort({ 'properties.dist_m': 1, updatedAt: -1 })
-    .limit(Math.max(N * 3, N))
+    .limit(ALL ? targetN : Math.max(targetN * 3, targetN))
     .lean();
 
   const cityHintByAnchor = {};
@@ -127,7 +149,7 @@ async function main() {
   const uniqueAnchors = [...new Set(pool.map((c) => c.properties?.cliente_vicino).filter(Boolean))];
 
   console.log(
-    `Pool ${pool.length} (n=${N}, maxDist=${MAX_DIST_M}m, dry-run=${DRY_RUN}, force=${FORCE}, verify-only=${VERIFY_ONLY})`
+    `Pool ${pool.length}/${totalNeed} (n=${targetN}${ALL ? ' --all' : ''}, provider=${process.env.SERPER_API_KEY || process.env.SERPER_KEY ? 'serper' : 'serpapi'}, statuses=${STATUSES.join(',')}, maxDist=${MAX_DIST_M}m, dry-run=${DRY_RUN}, force=${FORCE}, verify-only=${VERIFY_ONLY})`
   );
   console.log(`Ancore uniche da risolvere: ${uniqueAnchors.length}`);
 
@@ -142,7 +164,7 @@ async function main() {
     );
   }
 
-  const contacts = pool.slice(0, N);
+  const contacts = pool.slice(0, targetN);
   let ok = 0;
   let skippedNearby = 0;
   let fail = 0;
