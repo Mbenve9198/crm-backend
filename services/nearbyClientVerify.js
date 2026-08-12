@@ -1,17 +1,11 @@
 /**
  * Verifica che un lead cold-call sia davvero vicino a un cliente Menu Chat (ancora).
- * Usa coords won CRM se presenti, altrimenti risolve l'ancora via SerpAPI (cache in-process).
+ * Usa coords won CRM se presenti, altrimenti risolve l'ancora via Maps provider (Serper/SerpAPI).
  */
 
-import axios from 'axios';
+import { mapsSearch, mapsProviderName } from './mapsSearchProvider.js';
 
 const DEFAULT_MAX_DIST_M = 1000;
-
-function requireEnv(name) {
-  const v = process.env[name];
-  if (!v) throw new Error(`${name} mancante`);
-  return v;
-}
 
 export function normalizeName(s) {
   return String(s || '')
@@ -71,11 +65,7 @@ function nameLooseMatch(a, b) {
 }
 
 async function serp(params) {
-  const { data } = await axios.get('https://serpapi.com/search.json', {
-    params: { api_key: requireEnv('SERPAPI_KEY'), hl: 'it', ...params },
-    timeout: 45000,
-  });
-  return data;
+  return mapsSearch({ hl: 'it', ...params });
 }
 
 /**
@@ -170,7 +160,7 @@ export async function buildAnchorIndex(Contact, { anchors, cityHintByAnchor = {}
         lat: hit.gps_coordinates.latitude,
         lng: hit.gps_coordinates.longitude,
         placeId: hit.place_id || null,
-        source: 'serpapi',
+        source: mapsProviderName() || 'maps',
       });
     } catch (err) {
       index.set(key, {
