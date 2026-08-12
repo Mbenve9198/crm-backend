@@ -49,7 +49,7 @@ async function main() {
     {
       $group: {
         _id: '$properties.cliente_vicino',
-        cities: { $addToSet: '$properties.city' },
+        cities: { $push: '$properties.city' },
         n: { $sum: 1 },
         ids: { $push: '$_id' },
       },
@@ -57,9 +57,27 @@ async function main() {
     { $sort: { n: -1 } },
   ]);
 
+  function majorityCity(cities) {
+    const counts = new Map();
+    for (const c of cities || []) {
+      const t = typeof c === 'string' ? c.trim() : '';
+      if (!t) continue;
+      counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    let best = null;
+    let bestN = 0;
+    for (const [c, n] of counts) {
+      if (n > bestN) {
+        best = c;
+        bestN = n;
+      }
+    }
+    return best;
+  }
+
   const anchors = grouped.map((g) => ({
     name: g._id,
-    city: (g.cities || []).filter(Boolean)[0] || null,
+    city: majorityCity(g.cities),
   }));
 
   console.log(`Ancore uniche: ${anchors.length} (dry-run=${DRY_RUN}, only-verified=${ONLY_VERIFIED})`);

@@ -437,10 +437,7 @@ function buildTrialSteps(slots) {
 }
 
 function buildEarlyObjections(slots) {
-  const agent = slots.agentName || '{{agentName}}';
-  const nearbyBit = slots.nearby.name
-    ? `, come facciamo già con ${slots.nearby.name}`
-    : '';
+  void slots;
   return [
     {
       id: 'busy',
@@ -448,7 +445,7 @@ function buildEarlyObjections(slots) {
       trigger: 'Siamo in servizio / non posso parlare ora',
       placement: 'early',
       line:
-        `Capito, non vi rubo tempo. Sono ${agent} di Menu Chat. Vi richiamo quando siete più tranquilli: preferite oggi dopo servizio o domani mattina prima delle 11? Intanto lasci pure solo il nome: ${agent}, recensioni Google${nearbyBit}.`,
+        'Capito, non vi rubo altro tempo, quando posso chiamarla che è più tranquillo? Volevo giusto farle due brevi domande, ci vogliono 5 minuti al telefono.',
     },
     {
       id: 'gate',
@@ -456,11 +453,7 @@ function buildEarlyObjections(slots) {
       trigger: 'Non sono io che decido / chi parla?',
       placement: 'early',
       line:
-        `Capito. Sono ${agent} di Menu Chat${
-          slots.nearby.name
-            ? `: lavoriamo già con ${slots.nearby.name} qui vicino`
-            : ''
-        }. Chi decide di solito su menu e recensioni? Preferisce che lo richiami io domani mattina o nel pomeriggio? Se ha un cellulare lo segno e non disturbo più la sala.`,
+        'Capito, a che ora devo chiamare per trovare il titolare? Come si chiama il titolare?',
     },
   ];
 }
