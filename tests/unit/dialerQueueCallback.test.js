@@ -3,6 +3,7 @@ import {
   applyCallbackQueueRules,
   dueCallbackClause,
   notFutureCallbackClause,
+  dueFirstExpr,
 } from '../../services/dialerQueueService.js';
 
 const NOW = '2026-08-13T10:00:00.000Z';
@@ -36,5 +37,17 @@ describe('applyCallbackQueueRules', () => {
     const clause = dueCallbackClause(NOW);
     expect(clause.status).toBe('da richiamare');
     expect(clause['properties.callbackAt'].$lte).toBe(NOW);
+  });
+
+  it('dueFirstExpr mette i richiami scaduti in testa', () => {
+    const expr = dueFirstExpr(NOW);
+    expect(expr.$cond[1]).toBe(0);
+    expect(expr.$cond[2]).toBe(1);
+    expect(expr.$cond[0].$and).toEqual(
+      expect.arrayContaining([
+        { $eq: ['$status', 'da richiamare'] },
+        { $lte: ['$properties.callbackAt', NOW] },
+      ])
+    );
   });
 });

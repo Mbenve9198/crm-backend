@@ -160,14 +160,55 @@ function mapQueueContact(c) {
   };
 }
 
-function queueFind(filter, { sort, skip = 0, limit }) {
-  let q = Contact.find(filter)
-    .select(QUEUE_CONTACT_SELECT)
-    .populate('owner', 'firstName lastName email role')
-    .sort(sort);
-  if (skip) q = q.skip(skip);
-  if (limit != null) q = q.limit(limit);
-  return q.lean();
+function queueProjectStage() {
+  const fields = QUEUE_CONTACT_SELECT.split(/\s+/).filter(Boolean);
+  const project = { _id: 1 };
+  for (const field of fields) {
+    project[field] = 1;
+  }
+  return { $project: project };
+}
+
+/** 0 = richiamo già scaduto (in testa), 1 = resto della coda. */
+export function dueFirstExpr(nowIso) {
+  return {
+    $cond: [
+      {
+        $and: [
+          { $eq: ['$status', 'da richiamare'] },
+          { $ne: [{ $ifNull: ['$properties.callbackAt', null] }, null] },
+          { $ne: ['$properties.callbackAt', ''] },
+          { $lte: ['$properties.callbackAt', nowIso] },
+        ],
+      },
+      0,
+      1,
+    ],
+  };
+}
+
+async function queueAggregate(filter, { nowIso, dueFirst, sort, skip = 0, limit }) {
+  const pipeline = [{ $match: filter }];
+  if (dueFirst) {
+    pipeline.push({ $addFields: { _dueFirst: dueFirstExpr(nowIso) } });
+    pipeline.push({
+      $sort: {
+        _dueFirst: 1,
+        'properties.callbackAt': 1,
+        'properties.dist_m': 1,
+        updatedAt: -1,
+      },
+    });
+  } else {
+    pipeline.push({ $sort: sort });
+  }
+  if (skip) pipeline.push({ $skip: skip });
+  if (limit != null) pipeline.push({ $limit: limit });
+  pipeline.push(queueProjectStage());
+
+  const rows = await Contact.aggregate(pipeline);
+  await Contact.populate(rows, { path: 'owner', select: 'firstName lastName email role' });
+  return rows;
 }
 
 /**
@@ -191,46 +232,20 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
 
   const distSort = { 'properties.dist_m': 1, updatedAt: -1 };
   const callbackSort = { 'properties.callbackAt': 1, 'properties.dist_m': 1, updatedAt: -1 };
-  const includeDueFirst =
-    resolvedOffset === 0 &&
-    (resolvedStatus === 'da contattare' || resolvedStatus === 'all');
+  const dueFirst =
+    resolvedStatus === 'da contattare' || resolvedStatus === 'all';
+  const sort = resolvedStatus === 'da richiamare' ? callbackSort : distSort;
 
-  let total;
-  let contacts;
-
-  if (includeDueFirst) {
-    const withoutStatus = { ...baseFilter };
-    delete withoutStatus.status;
-    const dueFilter = applyCityFilter(
-      { ...withoutStatus, ...dueCallbackClause(nowIso) },
-      resolvedCity
-    );
-
-    const dueContacts = await queueFind(dueFilter, {
-      sort: { 'properties.callbackAt': 1 },
+  const [total, contacts] = await Promise.all([
+    Contact.countDocuments(filter),
+    queueAggregate(filter, {
+      nowIso,
+      dueFirst,
+      sort,
+      skip: resolvedOffset,
       limit: resolvedLimit,
-    });
-    const dueIds = dueContacts.map((c) => c._id);
-    const restLimit = Math.max(resolvedLimit - dueContacts.length, 0);
-    const restFilter = dueIds.length ? { ...filter, _id: { $nin: dueIds } } : filter;
-
-    const [restTotal, restContacts, dueTotal] = await Promise.all([
-      Contact.countDocuments(restFilter),
-      restLimit > 0
-        ? queueFind(restFilter, { sort: distSort, limit: restLimit })
-        : Promise.resolve([]),
-      Contact.countDocuments(dueFilter),
-    ]);
-
-    contacts = [...dueContacts, ...restContacts];
-    total = dueTotal + restTotal;
-  } else {
-    const sort = resolvedStatus === 'da richiamare' ? callbackSort : distSort;
-    [total, contacts] = await Promise.all([
-      Contact.countDocuments(filter),
-      queueFind(filter, { sort, skip: resolvedOffset, limit: resolvedLimit }),
-    ]);
-  }
+    }),
+  ]);
 
   const cityFacet = await Contact.aggregate([
     { $match: callbackAwareBase },
@@ -278,4 +293,5 @@ export default {
   applyCallbackQueueRules,
   dueCallbackClause,
   notFutureCallbackClause,
+  dueFirstExpr,
 };

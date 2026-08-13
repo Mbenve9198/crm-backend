@@ -4,6 +4,10 @@ import Call from '../models/callModel.js';
 import Contact from '../models/contactModel.js';
 import Activity from '../models/activityModel.js';
 import User from '../models/userModel.js';
+import {
+  mapTwilioStatusToOutcome,
+  syncCallActivity,
+} from '../services/callActivitySyncService.js';
 
 /**
  * Controller per la gestione delle chiamate Twilio
@@ -27,115 +31,11 @@ function createTwilioClient() {
   return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
-const formatCallDuration = (seconds) => {
-  const s = parseInt(seconds, 10) || 0;
-  if (!s) return '';
-  return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-};
-
-const mapTwilioStatusToOutcome = (status) => {
-  const map = {
-    completed: 'not-logged',
-    'no-answer': 'no-answer',
-    busy: 'busy',
-    failed: 'not-logged',
-    canceled: 'not-logged',
-  };
-  return map[status] || 'not-logged';
-};
-
 async function findCallByTwilioSid(callSid, parentCallSid) {
   const ids = [...new Set([callSid, parentCallSid].filter(Boolean))];
   if (ids.length === 0) return null;
   if (ids.length === 1) return Call.findOne({ twilioCallSid: ids[0] });
   return Call.findOne({ twilioCallSid: { $in: ids } });
-}
-
-/**
- * Crea o aggiorna l'activity timeline del contatto per una chiamata Twilio.
- * Viene chiamata automaticamente a fine chiamata / arrivo registrazione.
- */
-async function syncCallActivity(call, {
-  callOutcome,
-  callDuration,
-  recordingUrl,
-  recordingSid,
-  recordingDuration,
-  notes,
-  finalStatus,
-} = {}) {
-  const twilioCallSid = call.twilioCallSid;
-  let activity = await Activity.findOne({ type: 'call', 'data.twilioCallSid': twilioCallSid });
-
-  const duration = callDuration ?? call.duration ?? 0;
-  const resolvedOutcome = callOutcome || mapTwilioStatusToOutcome(finalStatus || call.status);
-
-  const mergeData = (existing = {}) => {
-    const next = {
-      ...existing,
-      twilioCallSid,
-      direction: 'outbound',
-      callDuration: duration,
-    };
-
-    if (callOutcome) {
-      if (callOutcome !== 'not-logged' || !existing.callOutcome || existing.callOutcome === 'not-logged') {
-        next.callOutcome = callOutcome;
-      } else {
-        next.callOutcome = existing.callOutcome;
-      }
-    } else if (existing.callOutcome) {
-      next.callOutcome = existing.callOutcome;
-    } else {
-      next.callOutcome = resolvedOutcome;
-    }
-
-    if (recordingUrl) next.recordingUrl = recordingUrl;
-    if (recordingSid) next.recordingSid = recordingSid;
-    if (recordingDuration !== undefined && recordingDuration !== null) {
-      next.recordingDuration = parseInt(recordingDuration, 10) || 0;
-    }
-    if (finalStatus) next.finalStatus = finalStatus;
-    if (notes !== undefined && notes !== null && String(notes).trim()) {
-      next.notes = String(notes).trim();
-    }
-
-    return next;
-  };
-
-  const notesText = notes !== undefined && notes !== null && String(notes).trim()
-    ? String(notes).trim()
-    : '';
-  const descriptionBase = `Chiamata completata - ${resolvedOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
-  const description = notesText
-    ? `${descriptionBase}\n\n${notesText}`.slice(0, 5000)
-    : descriptionBase;
-
-  if (activity) {
-    activity.data = mergeData(activity.data?.toObject?.() || activity.data || {});
-    activity.status = 'completed';
-    const outcomeLabel = activity.data.callOutcome || resolvedOutcome;
-    const base = `Chiamata completata - ${outcomeLabel}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
-    activity.description = notesText ? `${base}\n\n${notesText}`.slice(0, 5000) : base;
-    activity.markModified('data');
-    await activity.save();
-    console.log(`📝 Activity chiamata aggiornata: ${activity._id}`);
-    return activity;
-  }
-
-  const data = mergeData();
-  activity = new Activity({
-    type: 'call',
-    contact: call.contact,
-    createdBy: call.initiatedBy,
-    status: 'completed',
-    title: 'Chiamata effettuata',
-    description,
-    data,
-  });
-  await activity.save();
-  console.log(`📝 Activity chiamata creata automaticamente: ${activity._id} (${twilioCallSid})`);
-  return activity;
 }
 
 /**
