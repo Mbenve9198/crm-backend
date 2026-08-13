@@ -274,25 +274,26 @@ function buildValueTemplate(slots) {
   const reviews = slots.reviews != null ? String(slots.reviews) : 'quelle che avete';
   const rank = slots.rank != null ? String(slots.rank) : '…';
 
+  // Niente QR/WhatsApp qui: il meccanismo si spiega solo nello step Trial.
   let line1 =
-    `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno.`;
+    `In base a quello che mi hai detto, con il nostro sistema potreste arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno.`;
   if (slots.rankKind === 'rank1') {
     line1 =
-      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e restare saldamente primi su «${keyword}».`;
+      `In base a quello che mi hai detto, con il nostro sistema potreste arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e restare saldamente primi su «${keyword}».`;
   } else if (slots.rankKind === 'ranked') {
     line1 =
-      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e stringere su chi è davanti su «${keyword}» — oggi siete intorno al ${rank}° posto.`;
+      `In base a quello che mi hai detto, con il nostro sistema potreste arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e stringere su chi è davanti su «${keyword}» — oggi siete intorno al ${rank}° posto.`;
   } else if (slots.rankKind === 'out_of_top') {
     line1 =
-      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e tornare visibili su Maps quando uno cerca «${keyword}».`;
+      `In base a quello che mi hai detto, con il nostro sistema potreste arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, e tornare visibili su Maps quando uno cerca «${keyword}».`;
   } else if (slots.keyword) {
     // unknown ma con keyword: obiettivo generico di primato, senza fingere il rank
     line1 =
-      `Con i QR e WhatsApp potete arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, ed essere più forti su Maps quando uno cerca «${keyword}».`;
+      `In base a quello che mi hai detto, con il nostro sistema potreste arrivare a circa {{potentialMonthly}} recensioni al mese: da ${reviews} a circa {{yearReviews}} entro un anno, ed essere più forti su Maps quando uno cerca «${keyword}».`;
   }
 
   const line2 =
-    'Nella prova di due settimane, se i QR stanno sui tavoli, di solito vediamo intorno a {{twoWeekPotential}} recensioni nuove.';
+    'Nella prova di due settimane di solito vediamo intorno a {{twoWeekPotential}} recensioni nuove.';
   const cta =
     `Come abbiamo fatto per ${ancora}: ti andrebbe di provare gratis lo stesso sistema per due settimane, senza impegno?`;
 
