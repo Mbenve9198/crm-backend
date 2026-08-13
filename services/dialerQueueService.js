@@ -6,24 +6,26 @@ import {
 } from './coldCallScriptService.js';
 
 /**
- * Owner filter allineato a getContacts (agent / manager|admin / else).
+ * Il Power Dialer è sempre personale: ogni utente vede solo i contatti
+ * assegnati a sé, anche se è manager/admin.
+ * (La lista contatti del CRM resta visibile a tutto il team per quei ruoli.)
  */
-export function buildContactOwnerFilter(user, ownerQuery) {
-  if (user.role === 'agent') {
-    return { owner: user._id };
+export function toOwnerObjectId(userId) {
+  if (!userId) {
+    const err = new Error('Utente non autenticato');
+    err.statusCode = 401;
+    throw err;
   }
-  if (user.role === 'manager' || user.role === 'admin') {
-    if (ownerQuery && ownerQuery !== 'all') {
-      if (!mongoose.Types.ObjectId.isValid(ownerQuery)) {
-        const err = new Error('owner non valido');
-        err.statusCode = 400;
-        throw err;
-      }
-      return { owner: new mongoose.Types.ObjectId(ownerQuery) };
-    }
-    return {};
-  }
-  return { owner: user._id };
+  return new mongoose.Types.ObjectId(String(userId));
+}
+
+export function buildContactOwnerFilter(user) {
+  return { owner: toOwnerObjectId(user?._id) };
+}
+
+export function isContactOwnedByUser(contact, user) {
+  const ownerId = contact?.owner && (contact.owner._id || contact.owner);
+  return !!ownerId && !!user?._id && ownerId.toString() === user._id.toString();
 }
 
 /** Telefono dialabile: + seguito da almeno una cifra (spazi ignorati). */
@@ -78,7 +80,7 @@ export function applyCallbackQueueRules(filter, resolvedStatus, nowIso) {
   return andFilter(filter, notFutureCallbackClause(nowIso));
 }
 
-function buildBaseQueueFilter({ user, list, status, owner }) {
+function buildBaseQueueFilter({ user, list, status }) {
   const resolvedList = (list || COLD_CALL_DEFAULT_LIST).toString();
   const resolvedStatus = (status || 'da contattare').toString();
 
@@ -86,7 +88,7 @@ function buildBaseQueueFilter({ user, list, status, owner }) {
     lists: resolvedList,
     phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
     'properties.nearbyVerified': { $ne: false },
-    ...buildContactOwnerFilter(user, owner),
+    ...buildContactOwnerFilter(user),
   };
 
   if (resolvedStatus && resolvedStatus !== 'all') {
@@ -214,7 +216,7 @@ async function queueAggregate(filter, { nowIso, dueFirst, sort, skip = 0, limit 
 /**
  * @returns {{ contacts: object[], total: number, list: string, status: string, city: string, cities: {name:string,count:number}[], limit: number, offset: number }}
  */
-export async function fetchDialerQueue({ user, list, status, limit, offset, owner, city }) {
+export async function fetchDialerQueue({ user, list, status, limit, offset, city }) {
   const resolvedLimit = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200);
   const resolvedOffset = Math.max(parseInt(offset, 10) || 0, 0);
   const cityTrim = city != null ? String(city).trim() : '';
@@ -225,7 +227,6 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
     user,
     list,
     status,
-    owner,
   });
   const callbackAwareBase = applyCallbackQueueRules(baseFilter, resolvedStatus, nowIso);
   const filter = applyCityFilter(callbackAwareBase, resolvedCity);
@@ -288,6 +289,8 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, owne
 
 export default {
   buildContactOwnerFilter,
+  isContactOwnedByUser,
+  toOwnerObjectId,
   isDialablePhone,
   fetchDialerQueue,
   applyCallbackQueueRules,

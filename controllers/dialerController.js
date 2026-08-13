@@ -3,7 +3,7 @@ import Contact from '../models/contactModel.js';
 import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 import { buildColdCallScript } from '../services/coldCallScriptService.js';
-import { fetchDialerQueue } from '../services/dialerQueueService.js';
+import { fetchDialerQueue, isContactOwnedByUser } from '../services/dialerQueueService.js';
 import { syncCallActivity } from '../services/callActivitySyncService.js';
 
 const CONTACT_STATUSES = [
@@ -59,12 +59,11 @@ export const getDialerQueue = async (req, res) => {
       city: req.query.city,
       limit: req.query.limit,
       offset: req.query.offset,
-      owner: req.query.owner,
     });
     res.json({ success: true, data });
   } catch (error) {
-    if (error.statusCode === 400) {
-      return res.status(400).json({ success: false, message: error.message });
+    if (error.statusCode === 400 || error.statusCode === 401) {
+      return res.status(error.statusCode).json({ success: false, message: error.message });
     }
     console.error('Errore getDialerQueue:', error);
     res.status(500).json({ success: false, message: 'Errore interno del server' });
@@ -86,7 +85,7 @@ export const getColdCallScript = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contatto non trovato' });
     }
 
-    if (!req.user.canAccessContact(contact)) {
+    if (!isContactOwnedByUser(contact, req.user)) {
       return res.status(403).json({ success: false, message: 'Non hai accesso a questo contatto' });
     }
 
@@ -134,7 +133,7 @@ export const upsertVisibilityCard = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Contatto non trovato' });
     }
 
-    if (!req.user.canModifyContact(contact)) {
+    if (!isContactOwnedByUser(contact, req.user)) {
       return res.status(403).json({ success: false, message: 'Non hai i permessi per modificare questo contatto' });
     }
 
@@ -217,7 +216,7 @@ export const wrapUpDialer = async (req, res) => {
     if (!contact) {
       return res.status(404).json({ success: false, message: 'Contatto non trovato' });
     }
-    if (!req.user.canModifyContact(contact)) {
+    if (!isContactOwnedByUser(contact, req.user)) {
       return res.status(403).json({ success: false, message: 'Non hai i permessi per modificare questo contatto' });
     }
 
