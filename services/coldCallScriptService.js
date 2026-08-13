@@ -447,6 +447,13 @@ function buildEarlyObjections(slots) {
       placement: 'early',
       line:
         'Capito, non vi rubo altro tempo, quando posso chiamarla che è più tranquillo? Volevo giusto farle due brevi domande, ci vogliono 5 minuti al telefono.',
+      fields: [
+        {
+          id: 'early_busy_callback_time',
+          label: 'Quando richiamare',
+          placeholder: 'es. domani 15:00 / dopo cena',
+        },
+      ],
     },
     {
       id: 'gate',
@@ -455,6 +462,18 @@ function buildEarlyObjections(slots) {
       placement: 'early',
       line:
         'Capito, a che ora devo chiamare per trovare il titolare? Come si chiama il titolare?',
+      fields: [
+        {
+          id: 'early_gate_callback_time',
+          label: 'Quando richiamare',
+          placeholder: 'es. domani mattina / 16:30',
+        },
+        {
+          id: 'early_gate_owner_name',
+          label: 'Nome titolare',
+          placeholder: 'es. Marco',
+        },
+      ],
     },
   ];
 }
