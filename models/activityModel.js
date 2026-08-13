@@ -28,7 +28,7 @@ const activitySchema = new mongoose.Schema({
   // Descrizione/contenuto dell'activity
   description: {
     type: String,
-    maxLength: [2000, 'La descrizione non può superare 2000 caratteri']
+    maxLength: [5000, 'La descrizione non può superare 5000 caratteri']
   },
   
   // Dati specifici per tipo di activity
@@ -75,7 +75,7 @@ const activitySchema = new mongoose.Schema({
     },
     notes: {
       type: String,
-      maxLength: [2000, 'Le note non possono superare 2000 caratteri']
+      maxLength: [5000, 'Le note non possono superare 5000 caratteri']
     },
 
     // Per WhatsApp e Instagram DM

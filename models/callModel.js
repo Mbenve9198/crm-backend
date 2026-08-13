@@ -109,10 +109,10 @@ const callSchema = new mongoose.Schema({
     default: 'USD'
   },
   
-  // Note sulla chiamata
+  // Note sulla chiamata (script + extra dal dialer)
   notes: {
     type: String,
-    maxLength: [1000, 'Le note non possono superare 1000 caratteri']
+    maxLength: [5000, 'Le note non possono superare 5000 caratteri']
   },
 
   // Trascrizione automatica della registrazione

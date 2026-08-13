@@ -96,15 +96,28 @@ async function syncCallActivity(call, {
       next.recordingDuration = parseInt(recordingDuration, 10) || 0;
     }
     if (finalStatus) next.finalStatus = finalStatus;
-    if (notes) next.notes = notes;
+    if (notes !== undefined && notes !== null && String(notes).trim()) {
+      next.notes = String(notes).trim();
+    }
 
     return next;
   };
 
+  const notesText = notes !== undefined && notes !== null && String(notes).trim()
+    ? String(notes).trim()
+    : '';
+  const descriptionBase = `Chiamata completata - ${resolvedOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
+  const description = notesText
+    ? `${descriptionBase}\n\n${notesText}`.slice(0, 5000)
+    : descriptionBase;
+
   if (activity) {
     activity.data = mergeData(activity.data?.toObject?.() || activity.data || {});
     activity.status = 'completed';
-    activity.description = `Chiamata completata - ${activity.data.callOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
+    const outcomeLabel = activity.data.callOutcome || resolvedOutcome;
+    const base = `Chiamata completata - ${outcomeLabel}${duration ? ` (${formatCallDuration(duration)})` : ''}`;
+    activity.description = notesText ? `${base}\n\n${notesText}`.slice(0, 5000) : base;
+    activity.markModified('data');
     await activity.save();
     console.log(`📝 Activity chiamata aggiornata: ${activity._id}`);
     return activity;
@@ -117,7 +130,7 @@ async function syncCallActivity(call, {
     createdBy: call.initiatedBy,
     status: 'completed',
     title: 'Chiamata effettuata',
-    description: `Chiamata completata - ${data.callOutcome}${duration ? ` (${formatCallDuration(duration)})` : ''}`,
+    description,
     data,
   });
   await activity.save();
@@ -871,16 +884,16 @@ export const updateCall = async (req, res) => {
     }
 
     if (notes !== undefined) call.notes = notes;
-    if (outcome !== undefined) {
-      call.outcome = outcome;
+    if (outcome !== undefined) call.outcome = outcome;
 
+    if (notes !== undefined || outcome !== undefined) {
       await syncCallActivity(call, {
-        callOutcome: outcome,
+        callOutcome: outcome || call.outcome,
         callDuration: call.duration,
         recordingUrl: call.recordingUrl,
         recordingSid: call.recordingSid,
         recordingDuration: call.recordingDuration,
-        notes,
+        notes: notes !== undefined ? notes : call.notes,
       });
     }
 
