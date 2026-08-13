@@ -126,8 +126,12 @@ async function syncCallActivity(call, {
 }
 
 /**
- * Inizia una chiamata verso un contatto
+ * Inizia una chiamata verso un contatto (click-to-call a due gambe)
  * POST /api/calls/initiate
+ *
+ * Prima gamba: Twilio chiama l'agente dal numero aziendale (from = TWILIO_PHONE_NUMBER,
+ * to = cellulare agente). Seconda gamba (TwiML Dial): collega l'agente al contatto
+ * usando il cellulare dell'agente come callerId.
  */
 export const initiateCall = async (req, res) => {
   try {
@@ -142,14 +146,38 @@ export const initiateCall = async (req, res) => {
       });
     }
 
-    // Ottieni l'utente per il numero di telefono Twilio
+    // from = numero Twilio aziendale (caller ID prima gamba)
+    // to   = cellulare dell'agente (chi suona)
     const user = await User.findById(userId);
-    const twilioPhone = user?.settings?.twilio?.phoneNumber || TWILIO_PHONE_NUMBER;
-    
-    if (!twilioPhone) {
+    const companyTwilioNumber = TWILIO_PHONE_NUMBER;
+    const agentPhoneRaw = user?.settings?.twilio?.phoneNumber || user?.phone;
+
+    if (!companyTwilioNumber) {
       return res.status(400).json({
         success: false,
-        message: 'Numero di telefono Twilio non configurato. Configura il numero nelle impostazioni.'
+        message: 'Numero Twilio aziendale non configurato. Contatta l\'amministratore per configurare TWILIO_PHONE_NUMBER.'
+      });
+    }
+
+    if (!agentPhoneRaw) {
+      return res.status(400).json({
+        success: false,
+        message: 'Numero di telefono dell\'agente non configurato. Configura il numero nelle impostazioni.'
+      });
+    }
+
+    const agentPhone = agentPhoneRaw.replace(/\s/g, '');
+    if (!agentPhone.startsWith('+')) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il numero dell\'agente deve essere in formato internazionale (+39...)'
+      });
+    }
+
+    if (companyTwilioNumber === agentPhone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Il numero Twilio aziendale coincide con il cellulare dell\'agente. Imposta TWILIO_PHONE_NUMBER sul numero Twilio aziendale, non sul cellulare dell\'agente.'
       });
     }
 
@@ -202,15 +230,16 @@ export const initiateCall = async (req, res) => {
       console.warn('⚠️  BACKEND_URL non configurato! Usando URL di default. Configura la variabile d\'ambiente per Twilio.');
     }
 
-    console.log(`📞 Chiamata verso di te: ${twilioPhone}`);
+    console.log(`📞 Prima gamba: from=${companyTwilioNumber} to=${agentPhone} (agente)`);
     console.log(`📞 Poi collegamento al contatto: ${toNumber}`);
 
-    // Inizia la chiamata verso di TE (primo leg)
-    // Quando rispondi, Twilio chiamerà answerUrl per sapere cosa fare
+    // Prima gamba: Twilio chiama l'agente dal numero aziendale.
+    // Non usare il cellulare dell'agente come from: alcuni operatori rifiutano
+    // una chiamata "da se stessi" e Twilio la marca busy.
     const call = await client.calls.create({
-      from: twilioPhone, // DA il tuo numero Twilio
-      to: twilioPhone, // VERSO il tuo numero (Twilio ti chiama!)
-      url: answerUrl, // Quando rispondi, Twilio chiama questo URL per il TwiML
+      from: companyTwilioNumber,
+      to: agentPhone,
+      url: answerUrl, // Quando l'agente risponde, Twilio chiama questo URL per il TwiML
       statusCallback: statusCallbackUrl,
       statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
       statusCallbackMethod: 'POST',
@@ -223,6 +252,7 @@ export const initiateCall = async (req, res) => {
     // Salviamo i dati della chiamata per l'endpoint answer
     const callData = {
       contactPhone: toNumber,
+      agentPhone,
       recordCall,
       callSid: call.sid
     };
@@ -236,7 +266,7 @@ export const initiateCall = async (req, res) => {
       twilioCallSid: call.sid,
       contact: contactId,
       initiatedBy: userId,
-      fromNumber: twilioPhone,
+      fromNumber: companyTwilioNumber,
       toNumber: toNumber,
       status: call.status,
       direction: 'outbound-api',
@@ -311,16 +341,19 @@ export const answerCall = async (req, res) => {
       `);
     }
 
-    const { contactPhone, recordCall } = callData;
+    const { contactPhone, agentPhone, recordCall } = callData;
     
     console.log(`📞 Collegamento in corso verso: ${contactPhone}`);
     console.log(`🎙️  Registrazione: ${recordCall ? 'attiva' : 'disattiva'}`);
 
-    // Costruisce TwiML per collegarti al contatto
+    // Seconda gamba: collega l'agente al ristorante.
+    // callerId = cellulare dell'agente, così il contatto continua a vedere
+    // il numero dell'agente (non il numero Twilio aziendale della prima gamba).
+    const dialCallerId = agentPhone ? ` callerId="${agentPhone}"` : '';
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice" language="it-IT">Collegamento in corso</Say>
-  <Dial record="${recordCall ? 'record-from-answer' : 'do-not-record'}" 
+  <Dial${dialCallerId} record="${recordCall ? 'record-from-answer' : 'do-not-record'}" 
         action="${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/dial-complete" 
         method="POST"
         recordingStatusCallback="${process.env.BACKEND_URL || 'https://menuchat-crm-backend-production.up.railway.app'}/api/calls/recording-status">

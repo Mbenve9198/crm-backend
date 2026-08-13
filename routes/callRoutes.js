@@ -186,11 +186,14 @@ export default router;
  * === FLUSSO CHIAMATA ===
  * 
  * 1. Frontend chiama POST /calls/initiate
- * 2. Backend crea chiamata Twilio con registrazione
- * 3. Twilio invia callback di stato a /calls/status-callback
- * 4. Se c'è registrazione, Twilio invia callback a /calls/recording-status
- * 5. Database viene aggiornato con stato e registrazione
- * 6. Frontend può recuperare aggiornamenti via GET /calls/my-calls
+ * 2. Backend crea chiamata Twilio: from = TWILIO_PHONE_NUMBER (numero aziendale),
+ *    to = cellulare dell'agente. Twilio chiama l'agente.
+ * 3. L'agente risponde → webhook /calls/answer restituisce TwiML Dial verso il contatto
+ *    (callerId = cellulare agente, così il ristorante vede il numero dell'agente)
+ * 4. Twilio invia callback di stato a /calls/status-callback
+ * 5. Se c'è registrazione, Twilio invia callback a /calls/recording-status
+ * 6. Database viene aggiornato con stato e registrazione
+ * 7. Frontend può recuperare aggiornamenti via GET /calls/my-calls
  * 
  * === GESTIONE ERRORI ===
  * 
