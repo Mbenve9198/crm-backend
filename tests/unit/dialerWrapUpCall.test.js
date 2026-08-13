@@ -1,6 +1,10 @@
 import mongoose from 'mongoose';
 import { describe, it, expect } from 'vitest';
-import { evaluateWrapUpCall } from '../../services/dialerWrapUpService.js';
+import {
+  evaluateWrapUpCall,
+  resolveDialerContactStatus,
+  applyDialerContactStatus,
+} from '../../services/dialerWrapUpService.js';
 
 const contactId = new mongoose.Types.ObjectId();
 const otherContactId = new mongoose.Types.ObjectId();
@@ -78,5 +82,46 @@ describe('evaluateWrapUpCall', () => {
       userRole: 'agent',
     });
     expect(result).toEqual({ ok: true, call });
+  });
+});
+
+describe('resolveDialerContactStatus', () => {
+  it('Non interessato senza status esplicito va in do_not_contact', () => {
+    expect(resolveDialerContactStatus('not-interested', undefined)).toBe('do_not_contact');
+    expect(resolveDialerContactStatus('not-interested', null)).toBe('do_not_contact');
+  });
+
+  it('lo status esplicito vince sulla mappa esito', () => {
+    expect(resolveDialerContactStatus('not-interested', 'lost before free trial')).toBe(
+      'lost before free trial'
+    );
+  });
+
+  it('mappa gli altri esiti dialer', () => {
+    expect(resolveDialerContactStatus('voicemail')).toBe('da richiamare');
+    expect(resolveDialerContactStatus('first-call')).toBe('contattato');
+    expect(resolveDialerContactStatus('free-trial-sold')).toBe('free trial iniziato');
+    expect(resolveDialerContactStatus('not-logged')).toBeNull();
+  });
+});
+
+describe('applyDialerContactStatus', () => {
+  it('Non interessato esce da da contattare senza MRR', () => {
+    const contact = { status: 'da contattare', mrr: undefined };
+    const result = applyDialerContactStatus(contact, 'do_not_contact');
+    expect(result).toEqual({ changed: true, oldStatus: 'da contattare' });
+    expect(contact.status).toBe('do_not_contact');
+  });
+
+  it('lost before free trial senza MRR usa 0', () => {
+    const contact = { status: 'da contattare' };
+    applyDialerContactStatus(contact, 'lost before free trial');
+    expect(contact.status).toBe('lost before free trial');
+    expect(contact.mrr).toBe(0);
+  });
+
+  it('non cambia se lo status è già quello', () => {
+    const contact = { status: 'do_not_contact' };
+    expect(applyDialerContactStatus(contact, 'do_not_contact').changed).toBe(false);
   });
 });

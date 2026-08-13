@@ -8,6 +8,7 @@ import {
   mapTwilioStatusToOutcome,
   syncCallActivity,
 } from '../services/callActivitySyncService.js';
+import { applyDialerContactStatus, resolveDialerContactStatus } from '../services/dialerWrapUpService.js';
 
 /**
  * Controller per la gestione delle chiamate Twilio
@@ -798,6 +799,38 @@ export const updateCall = async (req, res) => {
     }
 
     await call.save();
+
+    // Tab vecchie del dialer salvavano solo l'esito call e poi fallivano su
+    // PUT /status (MRR). Applica qui lo status così il lead esce dalla coda.
+    if (outcome) {
+      const nextStatus = resolveDialerContactStatus(outcome, null);
+      if (nextStatus) {
+        const contact = await Contact.findById(call.contact);
+        if (contact) {
+          const canEditContact =
+            (contact.owner && contact.owner.toString() === req.user._id.toString()) ||
+            req.user.role === 'admin' ||
+            req.user.role === 'manager';
+          if (canEditContact) {
+            const { changed, oldStatus } = applyDialerContactStatus(contact, nextStatus);
+            if (changed) {
+              contact.lastModifiedBy = req.user._id;
+              await contact.save({ validateModifiedOnly: true });
+              await Activity.create({
+                contact: contact._id,
+                type: 'status_change',
+                title: `Stato cambiato: ${oldStatus} → ${nextStatus}`,
+                data: {
+                  statusChange: { oldStatus, newStatus: nextStatus, mrr: contact.mrr },
+                },
+                createdBy: req.user._id,
+              });
+            }
+          }
+        }
+      }
+    }
+
     await call.populate([
       { path: 'contact', select: 'name phone' },
       { path: 'initiatedBy', select: 'firstName lastName' }

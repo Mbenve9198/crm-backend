@@ -4,7 +4,7 @@ import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 import { buildColdCallScript } from '../services/coldCallScriptService.js';
 import { fetchDialerQueue, isContactOwnedByUser } from '../services/dialerQueueService.js';
-import { evaluateWrapUpCall } from '../services/dialerWrapUpService.js';
+import { evaluateWrapUpCall, applyDialerContactStatus, resolveDialerContactStatus } from '../services/dialerWrapUpService.js';
 import { syncCallActivity } from '../services/callActivitySyncService.js';
 
 const CONTACT_STATUSES = [
@@ -21,15 +21,6 @@ const CONTACT_STATUSES = [
   'bad_data',
   'non_qualificato',
   'do_not_contact',
-];
-
-const PIPELINE_STATUSES = [
-  'interessato',
-  'qr code inviato',
-  'free trial iniziato',
-  'won',
-  'lost before free trial',
-  'lost after free trial',
 ];
 
 const CALL_OUTCOMES = [
@@ -192,6 +183,10 @@ export const wrapUpDialer = async (req, res) => {
     if (status && !CONTACT_STATUSES.includes(status)) {
       return res.status(400).json({ success: false, message: 'Status non valido' });
     }
+    const resolvedStatus = resolveDialerContactStatus(outcome, status);
+    if (resolvedStatus && !CONTACT_STATUSES.includes(resolvedStatus)) {
+      return res.status(400).json({ success: false, message: 'Status non valido' });
+    }
     if (callId && !mongoose.Types.ObjectId.isValid(callId)) {
       return res.status(400).json({ success: false, message: 'callId non valido' });
     }
@@ -268,25 +263,7 @@ export const wrapUpDialer = async (req, res) => {
     }
 
     const oldStatus = contact.status;
-    const statusChanged = Boolean(status && status !== contact.status);
-
-    if (statusChanged) {
-      if (PIPELINE_STATUSES.includes(status)) {
-        const nextMrr = mrr !== undefined && mrr !== null ? mrr : contact.mrr;
-        contact.mrr = nextMrr !== undefined && nextMrr !== null ? nextMrr : 0;
-      }
-      contact.status = status;
-      const closeDateStatuses = ['qr code inviato', 'free trial iniziato'];
-      if (closeDateStatuses.includes(status) && !closeDateStatuses.includes(oldStatus)) {
-        if (!contact.properties) contact.properties = {};
-        if (!contact.properties.closeDate) {
-          const auto = new Date();
-          auto.setDate(auto.getDate() + 25);
-          contact.properties.closeDate = auto.toISOString();
-          contact.markModified('properties');
-        }
-      }
-    }
+    const { changed: statusChanged } = applyDialerContactStatus(contact, resolvedStatus, mrr);
 
     if (!contact.properties) contact.properties = {};
     if (callbackAt === null) {
@@ -301,18 +278,18 @@ export const wrapUpDialer = async (req, res) => {
     }
     contact.markModified('properties');
     contact.lastModifiedBy = req.user._id;
-    await contact.save();
+    await contact.save({ validateModifiedOnly: true });
 
     if (statusChanged) {
       await Activity.create({
         contact: contact._id,
         type: 'status_change',
-        title: `Stato cambiato: ${oldStatus} → ${status}`,
+        title: `Stato cambiato: ${oldStatus} → ${resolvedStatus}`,
         description: contact.mrr ? `MRR impostato: €${contact.mrr}` : undefined,
         data: {
           statusChange: {
             oldStatus,
-            newStatus: status,
+            newStatus: resolvedStatus,
             mrr: contact.mrr,
           },
         },

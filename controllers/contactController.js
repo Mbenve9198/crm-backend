@@ -3229,13 +3229,14 @@ export const updateContactStatus = async (req, res) => {
       'lost after free trial'
     ];
     if (pipelineStatuses.includes(status)) {
-      if (mrr === undefined || mrr === null) {
+      const isLostStatus = status === 'lost before free trial' || status === 'lost after free trial';
+      if ((mrr === undefined || mrr === null) && !isLostStatus) {
         return res.status(400).json({
           success: false,
           message: 'MRR è obbligatorio per stati pipeline'
         });
       }
-      if (mrr < 0) {
+      if (mrr !== undefined && mrr !== null && mrr < 0) {
         return res.status(400).json({
           success: false,
           message: 'MRR non può essere negativo'
@@ -3245,11 +3246,17 @@ export const updateContactStatus = async (req, res) => {
 
     // Salva lo status precedente per l'activity
     const oldStatus = contact.status;
+    const resolvedMrr =
+      mrr !== undefined && mrr !== null
+        ? mrr
+        : (status === 'lost before free trial' || status === 'lost after free trial'
+          ? (contact.mrr ?? 0)
+          : mrr);
 
     // Aggiorna il contatto
     contact.status = status;
-    if (mrr !== undefined) {
-      contact.mrr = mrr;
+    if (resolvedMrr !== undefined && resolvedMrr !== null) {
+      contact.mrr = resolvedMrr;
     }
 
     // closeDate: se fornita dal frontend usala, altrimenti auto-set a +25gg quando si entra in QR o FT
@@ -3280,12 +3287,12 @@ export const updateContactStatus = async (req, res) => {
         contact: contact._id,
         type: 'status_change',
         title: `Stato cambiato: ${oldStatus} → ${status}`,
-        description: mrr ? `MRR impostato: €${mrr}` : undefined,
+        description: resolvedMrr ? `MRR impostato: €${resolvedMrr}` : undefined,
         data: {
           statusChange: {
             oldStatus,
             newStatus: status,
-            mrr
+            mrr: resolvedMrr
           }
         },
         createdBy: req.user._id
