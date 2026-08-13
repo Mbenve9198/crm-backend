@@ -36,20 +36,46 @@ function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Status “da lavorare” nel power dialer: mai contattati + da richiamare. */
+export const DIALER_ACTIONABLE_STATUSES = ['da contattare', 'da richiamare'];
+
+function applyStatusFilter(filter, status) {
+  const resolvedStatus = (status || 'actionable').toString().trim();
+  if (!resolvedStatus || resolvedStatus === 'all') {
+    return { filter, resolvedStatus: resolvedStatus || 'all' };
+  }
+  if (resolvedStatus === 'actionable') {
+    return {
+      filter: { ...filter, status: { $in: DIALER_ACTIONABLE_STATUSES } },
+      resolvedStatus: 'actionable',
+    };
+  }
+  if (resolvedStatus.includes(',')) {
+    const list = resolvedStatus
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return {
+      filter: { ...filter, status: { $in: list } },
+      resolvedStatus,
+    };
+  }
+  return { filter: { ...filter, status: resolvedStatus }, resolvedStatus };
+}
+
 function buildBaseQueueFilter({ user, list, status, owner }) {
   const resolvedList = (list || COLD_CALL_DEFAULT_LIST).toString();
-  const resolvedStatus = (status || 'da contattare').toString();
 
-  const filter = {
+  let filter = {
     lists: resolvedList,
     phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
     'properties.nearbyVerified': { $ne: false },
     ...buildContactOwnerFilter(user, owner),
   };
 
-  if (resolvedStatus && resolvedStatus !== 'all') {
-    filter.status = resolvedStatus;
-  }
+  const statusApplied = applyStatusFilter(filter, status);
+  filter = statusApplied.filter;
+  const resolvedStatus = statusApplied.resolvedStatus;
 
   if (resolvedList === COLD_CALL_DEFAULT_LIST) {
     filter['properties.cliente_vicino'] = { $exists: true, $nin: [null, ''] };
@@ -186,4 +212,5 @@ export default {
   buildContactOwnerFilter,
   isDialablePhone,
   fetchDialerQueue,
+  DIALER_ACTIONABLE_STATUSES,
 };
