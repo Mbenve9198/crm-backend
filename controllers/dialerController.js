@@ -4,6 +4,7 @@ import Call from '../models/callModel.js';
 import Activity from '../models/activityModel.js';
 import { buildColdCallScript } from '../services/coldCallScriptService.js';
 import { fetchDialerQueue, isContactOwnedByUser } from '../services/dialerQueueService.js';
+import { evaluateWrapUpCall } from '../services/dialerWrapUpService.js';
 import { syncCallActivity } from '../services/callActivitySyncService.js';
 
 const CONTACT_STATUSES = [
@@ -225,19 +226,26 @@ export const wrapUpDialer = async (req, res) => {
 
     if (callId) {
       call = await Call.findById(callId);
-      if (!call) {
-        return res.status(404).json({ success: false, message: 'Chiamata non trovata' });
-      }
-      if (call.contact.toString() !== contact._id.toString()) {
-        return res.status(400).json({ success: false, message: 'La chiamata non appartiene a questo contatto' });
-      }
-      const canEditCall =
-        call.initiatedBy.toString() === req.user._id.toString() ||
-        req.user.role === 'admin' ||
-        req.user.role === 'manager';
-      if (!canEditCall) {
-        return res.status(403).json({ success: false, message: 'Non hai i permessi per modificare questa chiamata' });
-      }
+    }
+
+    const callDecision = evaluateWrapUpCall({
+      call,
+      callId,
+      contactId: contact._id,
+      userId: req.user._id,
+      userRole: req.user.role,
+    });
+    if (!callDecision.ok) {
+      return res.status(callDecision.status).json({ success: false, message: callDecision.message });
+    }
+    if (callDecision.missingCall) {
+      console.warn(
+        `wrapUpDialer: call ${callId} non trovata, aggiorno comunque il contatto ${contactId}`
+      );
+    }
+    call = callDecision.call;
+
+    if (call) {
       call.outcome = outcome;
       if (notes !== undefined) call.notes = notesText;
       await syncCallActivity(call, {
