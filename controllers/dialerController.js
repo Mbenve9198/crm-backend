@@ -261,20 +261,12 @@ export const wrapUpDialer = async (req, res) => {
     }
 
     const oldStatus = contact.status;
-    const canApplyStatus = Boolean(
-      status &&
-      status !== contact.status &&
-      (
-        !PIPELINE_STATUSES.includes(status) ||
-        (mrr !== undefined && mrr !== null) ||
-        (contact.mrr !== undefined && contact.mrr !== null)
-      )
-    );
+    const statusChanged = Boolean(status && status !== contact.status);
 
-    if (canApplyStatus) {
+    if (statusChanged) {
       if (PIPELINE_STATUSES.includes(status)) {
         const nextMrr = mrr !== undefined && mrr !== null ? mrr : contact.mrr;
-        contact.mrr = nextMrr;
+        contact.mrr = nextMrr !== undefined && nextMrr !== null ? nextMrr : 0;
       }
       contact.status = status;
       const closeDateStatuses = ['qr code inviato', 'free trial iniziato'];
@@ -304,7 +296,7 @@ export const wrapUpDialer = async (req, res) => {
     contact.lastModifiedBy = req.user._id;
     await contact.save();
 
-    if (canApplyStatus) {
+    if (statusChanged) {
       await Activity.create({
         contact: contact._id,
         type: 'status_change',
