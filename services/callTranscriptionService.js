@@ -185,13 +185,13 @@ export async function analyzeExistingTranscript(transcriptText) {
   }
 }
 
-export async function transcribeCall(callId) {
+export async function transcribeCall(callId, { force = false } = {}) {
   const call = await Call.findById(callId);
   if (!call) throw new Error(`Call ${callId} not found`);
   if (!call.recordingSid) throw new Error(`Call ${callId} has no recording`);
-  if (call.transcript && call.callAnalysis) return call.transcript;
+  if (!force && call.transcript && call.callAnalysis) return call.transcript;
 
-  if (call.transcript && !call.callAnalysis) {
+  if (!force && call.transcript && !call.callAnalysis) {
     const analysis = parseCallAnalysis(call.transcript) || await analyzeExistingTranscript(call.transcript);
     if (analysis) {
       call.callAnalysis = analysis;
@@ -209,6 +209,8 @@ export async function transcribeCall(callId) {
   const analysis = parseCallAnalysis(transcript);
   if (analysis) {
     call.callAnalysis = analysis;
+  } else {
+    call.callAnalysis = undefined;
   }
 
   await call.save();
