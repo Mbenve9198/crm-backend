@@ -118,7 +118,7 @@ const callSchema = new mongoose.Schema({
   // Trascrizione automatica della registrazione
   transcript: {
     type: String,
-    maxLength: [10000, 'La trascrizione non può superare 10000 caratteri']
+    maxLength: [50000, 'La trascrizione non può superare 50000 caratteri']
   },
 
   transcriptGeneratedAt: {

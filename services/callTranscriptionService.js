@@ -78,7 +78,7 @@ async function transcribeWithGemini(audioBuffer) {
     }],
     generationConfig: {
       temperature: 0.1,
-      maxOutputTokens: 6000,
+      maxOutputTokens: 16000,
     }
   };
 
