@@ -7,6 +7,7 @@ import { resolveOwnerForSource } from '../services/assignmentService.js';
 import { sendInboundLeadNotification } from '../services/emailNotificationService.js';
 import {
   isSyntheticEmailAddress,
+  legacyPhoneLookupPattern,
   normalizePhoneToE164,
   syntheticGraderEmail
 } from '../services/phoneIdentityService.js';
@@ -28,9 +29,31 @@ const QUALIFICATION_FIELDS = [
   'estimatedMonthlyReviews'
 ];
 
+/**
+ * Il link al report finisce con il token permanente, che vale come credenziale:
+ * chi lo legge apre il report. Nei log resta la forma del link, non il token.
+ */
+const redactReportLink = (link) => String(link ?? '').replace(/[^/]+$/, '***');
+
 const normalizePhoneForSyntheticEmail = (phone, digitsOnly = false) => {
   const phoneWithoutPlus = String(phone || '').replace(/\+/g, '');
   return digitsOnly ? phoneWithoutPlus.replace(/\D/g, '') : phoneWithoutPlus;
+};
+
+/**
+ * Il numero identifica il lead finché non entra in conflitto con un'altra
+ * identità. Se il payload porta un'email vera e il contatto trovato per telefono
+ * ne ha una diversa e altrettanto vera, non sono la stessa scheda: o sono due
+ * persone che condividono il numero, o è lo stesso gestore con due locali.
+ * Scriverci sopra perderebbe il lead nuovo — nessuna scheda lo rappresenterebbe —
+ * mentre lasciarlo creare produce al massimo un doppione, che si fonde a mano.
+ * Lo stesso `placeId` invece dice che il locale è quello: lì il match tiene.
+ */
+const phoneMatchIsSameLead = (contact, { isSyntheticEmail, normalizedEmail, placeId }) => {
+  if (isSyntheticEmail) return true;
+  if (contact.email === normalizedEmail) return true;
+  if (isSyntheticEmailAddress(contact.email)) return true;
+  return Boolean(placeId) && contact.rankCheckerData?.placeId === placeId;
 };
 
 /**
@@ -39,7 +62,13 @@ const normalizePhoneForSyntheticEmail = (phone, digitsOnly = false) => {
  * l'email arriva: lo ritroviamo dall'email sintetica o dal numero e lo aggiorniamo
  * invece di creare un doppione.
  */
-const findExistingRankCheckerContact = async ({ normalizedEmail, syntheticEmail, phoneE164 }) => {
+const findExistingRankCheckerContact = async ({
+  normalizedEmail,
+  syntheticEmail,
+  phoneE164,
+  isSyntheticEmail,
+  placeId
+}) => {
   const byEmail = await Contact.findOne({ email: normalizedEmail });
   if (byEmail) return byEmail;
 
@@ -48,16 +77,56 @@ const findExistingRankCheckerContact = async ({ normalizedEmail, syntheticEmail,
     if (bySynthetic) return bySynthetic;
   }
 
-  if (phoneE164) {
-    // I contatti storici possono avere il numero in formato nazionale: cerchiamo
-    // entrambe le forme, la canonica e quella senza prefisso.
-    const nationalForm = phoneE164.startsWith('+39') ? phoneE164.slice(3) : null;
-    const phoneCandidates = [phoneE164, ...(nationalForm ? [nationalForm] : [])];
-    const byPhone = await Contact.findOne({ phone: { $in: phoneCandidates } });
-    if (byPhone) return byPhone;
+  if (!phoneE164) return null;
+
+  // Prima le due forme esatte, che usano l'indice sul telefono: la canonica e
+  // quella nazionale. Solo se non bastano ricadiamo sul pattern che tollera i
+  // separatori, perché scandisce la collezione.
+  const nationalForm = phoneE164.startsWith('+39') ? phoneE164.slice(3) : null;
+  const exactCandidates = [phoneE164, ...(nationalForm ? [nationalForm] : [])];
+  let byPhone = await Contact.findOne({ phone: { $in: exactCandidates } });
+
+  if (!byPhone) {
+    const legacyPattern = legacyPhoneLookupPattern(phoneE164);
+    if (legacyPattern) {
+      byPhone = await Contact.findOne({ phone: legacyPattern });
+    }
   }
 
-  return null;
+  if (!byPhone) return null;
+
+  if (!phoneMatchIsSameLead(byPhone, { isSyntheticEmail, normalizedEmail, placeId })) {
+    console.warn(
+      `⚠️ Telefono già su un altro contatto (${byPhone._id}) con email diversa: creo una scheda nuova invece di sovrascriverla`
+    );
+    return null;
+  }
+
+  return byPhone;
+};
+
+/**
+ * Quando vince l'email vera, il contatto sintetico nato dallo stesso numero resta
+ * lì: due schede per lo stesso ristoratore. Fondere due documenti da codice è
+ * rischioso — owner, attività e conversazioni stanno su entrambi — quindi lo
+ * segnaliamo e lasciamo decidere a chi lavora il CRM.
+ */
+const flagSyntheticDuplicate = async ({ winner, syntheticEmail }) => {
+  if (!syntheticEmail || winner.email === syntheticEmail) return;
+
+  const twin = await Contact.findOne({ email: syntheticEmail }).select('_id properties');
+  if (!twin || String(twin._id) === String(winner._id)) return;
+  if (twin.properties?.duplicateOfContactId === String(winner._id)) return;
+
+  twin.properties = {
+    ...(twin.properties || {}),
+    duplicateOfContactId: String(winner._id),
+    duplicateDetectedAt: new Date().toISOString()
+  };
+  twin.markModified('properties');
+  await twin.save();
+
+  console.warn(`⚠️ Doppioni da fondere: ${twin._id} (email sintetica) e ${winner._id}`);
 };
 
 /**
@@ -157,6 +226,12 @@ export const receiveRankCheckerLead = async (req, res) => {
     const phoneE164 = normalizedPhone?.e164 ?? null;
     const phoneRejected = Boolean(phone) && !phoneE164;
 
+    // Il worker manda la nota vuota quando non c'è, e noi la salviamo come null:
+    // se il confronto restasse fra i due valori grezzi, ogni retry identico
+    // sembrerebbe una richiesta di chiamata nuova e rimanderebbe l'email.
+    const normalizedCallNote = callNote ? String(callNote) : null;
+    const normalizedCallPreference = callPreference || null;
+
     // Validazione base
     if (!restaurantName) {
       return res.status(400).json({
@@ -183,7 +258,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     // 🆕 Determina il link al report (supporto sia nuovo formato che legacy)
     const finalReportLink = reportLink || reportLinks?.baseReport || '';
     if (finalReportLink) {
-      console.log(`🔗 Report Link: ${finalReportLink}`);
+      console.log(`🔗 Report Link: ${redactReportLink(finalReportLink)}`);
     }
     
     // 🆕 Log richiesta chiamata
@@ -264,7 +339,9 @@ export const receiveRankCheckerLead = async (req, res) => {
     let contact = await findExistingRankCheckerContact({
       normalizedEmail,
       syntheticEmail,
-      phoneE164
+      phoneE164,
+      isSyntheticEmail,
+      placeId
     });
     
     // Mappa leadSource → source CRM e lista
@@ -350,9 +427,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         // 🆕 Richiesta chiamata
         ...(callRequested && {
           callRequested: true,
-          callPreference: callPreference || null,
+          callPreference: normalizedCallPreference,
           callRequestedAt: callRequestedAt || new Date().toISOString(),
-          callNote: callNote || null
+          callNote: normalizedCallNote
         }),
         // 🆕 Link singolo al report (accesso rapido dal CRM)
         rankCheckerReport: finalReportLink,
@@ -369,6 +446,26 @@ export const receiveRankCheckerLead = async (req, res) => {
       }
     };
 
+    // Un punto solo per la notifica: i tre rami che salvano il contatto — nuovo,
+    // aggiornato, e il recupero dalla collisione in scrittura — devono avvisare
+    // il team con lo stesso payload, altrimenti una richiesta di chiamata finisce
+    // nel database senza che nessuno la legga.
+    const notifyTeam = (savedContact, { isNew }) => {
+      queueInboundLeadNotification({
+        contact: savedContact,
+        isNew,
+        leadSource: leadSource || 'organic',
+        rankCheckerData: savedContact.rankCheckerData,
+        reportLink: finalReportLink,
+        callRequest: callRequested ? {
+          requested: true,
+          preference: normalizedCallPreference,
+          requestedAt: callRequestedAt ?? savedContact.properties?.callRequestedAt ?? null,
+          note: normalizedCallNote
+        } : null
+      });
+    };
+
     if (contact) {
       // Contatto esiste → AGGIORNA i dati
       console.log(`🔄 Contatto esistente trovato, aggiorno i dati...`);
@@ -383,9 +480,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         ));
       const hasNewCallRequest = Boolean(callRequested) && (
         previousProperties.callRequested !== true
-        || (callPreference !== undefined && !valuesMatch(previousProperties.callPreference, callPreference))
+        || !valuesMatch(previousProperties.callPreference ?? null, normalizedCallPreference)
         || (callRequestedAt !== undefined && !valuesMatch(previousProperties.callRequestedAt, callRequestedAt))
-        || (callNote !== undefined && !valuesMatch(previousProperties.callNote, callNote))
+        || !valuesMatch(previousProperties.callNote ?? null, normalizedCallNote)
       );
       const shouldNotify = !isQualificationUpdate || hasNewQualification || hasNewCallRequest;
       
@@ -413,20 +510,16 @@ export const receiveRankCheckerLead = async (req, res) => {
 
       await contact.save();
 
+      if (!isSyntheticEmail && phoneE164) {
+        try {
+          await flagSyntheticDuplicate({ winner: contact, syntheticEmail });
+        } catch (duplicateErr) {
+          console.error('❌ Errore segnalazione doppione sintetico:', duplicateErr?.message);
+        }
+      }
+
       if (shouldNotify) {
-        queueInboundLeadNotification({
-          contact,
-          isNew: false,
-          leadSource: leadSource || 'organic',
-          rankCheckerData: contact.rankCheckerData,
-          reportLink: finalReportLink,
-          callRequest: callRequested ? {
-            requested: true,
-            preference: callPreference ?? null,
-            requestedAt: callRequestedAt ?? contact.properties?.callRequestedAt ?? null,
-            note: callNote ?? null
-          } : null
-        });
+        notifyTeam(contact, { isNew: false });
       }
 
       if (isQualificationUpdate) {
@@ -501,7 +594,9 @@ export const receiveRankCheckerLead = async (req, res) => {
         const raced = await findExistingRankCheckerContact({
           normalizedEmail,
           syntheticEmail,
-          phoneE164
+          phoneE164,
+          isSyntheticEmail,
+          placeId
         });
         if (!raced) {
           throw createError;
@@ -517,6 +612,8 @@ export const receiveRankCheckerLead = async (req, res) => {
         raced.lastModifiedBy = defaultOwner._id;
         await raced.save();
 
+        notifyTeam(raced, { isNew: false });
+
         console.log(`🔀 Contatto creato in parallelo, dati applicati: ${raced.name}`);
         return res.status(200).json({
           success: true,
@@ -528,19 +625,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         });
       }
 
-      queueInboundLeadNotification({
-        contact,
-        isNew: true,
-        leadSource: leadSource || 'organic',
-        rankCheckerData: contact.rankCheckerData,
-        reportLink: finalReportLink,
-        callRequest: callRequested ? {
-          requested: true,
-          preference: callPreference ?? null,
-          requestedAt: callRequestedAt ?? contact.properties?.callRequestedAt ?? null,
-          note: callNote ?? null
-        } : null
-      });
+      notifyTeam(contact, { isNew: true });
       
       // Aggiorna statistiche dell'owner
       await defaultOwner.updateStats({ newContact: true });

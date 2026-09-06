@@ -10,6 +10,7 @@ import {
 } from 'vitest';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../setup/dbSetup.js';
 import { ownerUser } from '../setup/fixtures.js';
+import { syntheticGraderEmail } from '../../services/phoneIdentityService.js';
 
 const { sendInboundLeadNotificationMock } = vi.hoisted(() => ({
   sendInboundLeadNotificationMock: vi.fn(async () => ({ success: true }))
@@ -69,6 +70,18 @@ const postLead = async (body) => {
   const res = mockResponse();
   await receiveRankCheckerLead(req, res);
   return res;
+};
+
+/** Contatto già nel database, come ce lo troviamo quando il lead arriva. */
+const seedContact = async (overrides) => {
+  const owner = await User.findOne();
+  return Contact.create({
+    name: 'Trattoria Test',
+    source: 'inbound_rank_checker',
+    owner: owner._id,
+    createdBy: owner._id,
+    ...overrides
+  });
 };
 
 beforeAll(async () => {
@@ -238,6 +251,146 @@ describe('receiveRankCheckerLead', () => {
 
     expect(res.statusCode).toBe(200);
     expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('ritrova il contatto storico che ha il numero con i separatori dentro', async () => {
+    // Prima che normalizzassimo i numeri il telefono finiva nel database come
+    // arrivava. Se il lookup cercasse solo le due forme canoniche, questo
+    // contatto sfuggirebbe e ne nascerebbe un doppione.
+    const legacy = await seedContact({
+      email: 'storico@trattoriatest.it',
+      phone: '+39 340 123 45 67',
+      source: 'manual'
+    });
+
+    const res = await postLead({ ...basePayload, placeId: 'place-test' });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.contactId.toString()).toBe(legacy._id.toString());
+    expect(await Contact.countDocuments()).toBe(1);
+    // E il numero resta normalizzato, così la volta dopo basta l'indice.
+    expect((await Contact.findById(legacy._id)).phone).toBe('+393401234567');
+  });
+
+  it('non sovrascrive un contatto che ha un\'altra email vera e un altro locale', async () => {
+    const other = await seedContact({
+      name: 'Osteria Vicina',
+      email: 'titolare@osteriavicina.it',
+      phone: '+393401234567',
+      rankCheckerData: { placeId: 'place-altro' }
+    });
+
+    const res = await postLead({
+      ...basePayload,
+      email: 'info@trattoriatest.it',
+      placeId: 'place-test'
+    });
+
+    // Scriverci sopra perderebbe il lead nuovo: nessuna scheda lo
+    // rappresenterebbe più. Meglio due schede da fondere a mano.
+    expect(res.statusCode).toBe(201);
+    expect(res.body.data.contactId.toString()).not.toBe(other._id.toString());
+    const untouched = await Contact.findById(other._id);
+    expect(untouched.email).toBe('titolare@osteriavicina.it');
+    expect(untouched.rankCheckerData.placeId).toBe('place-altro');
+  });
+
+  it('aggancia invece il lead quando il numero condiviso è dello stesso locale', async () => {
+    const existing = await seedContact({
+      email: 'vecchia@trattoriatest.it',
+      phone: '+393401234567',
+      rankCheckerData: { placeId: 'place-test' }
+    });
+
+    const res = await postLead({
+      ...basePayload,
+      email: 'nuova@trattoriatest.it',
+      placeId: 'place-test'
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.contactId.toString()).toBe(existing._id.toString());
+    expect(await Contact.countDocuments()).toBe(1);
+  });
+
+  it('non rimanda la stessa richiesta di chiamata a ogni retry', async () => {
+    const callPayload = {
+      ...basePayload,
+      isQualificationUpdate: true,
+      callRequested: true,
+      callPreference: 'Lunedì 10:00-12:00',
+      callRequestedAt: '2026-09-05T17:00:00.000Z'
+    };
+
+    await postLead(basePayload);
+    sendInboundLeadNotificationMock.mockClear();
+
+    await postLead(callPayload);
+    expect(sendInboundLeadNotificationMock).toHaveBeenCalledTimes(1);
+
+    // Il retry del worker ripete lo stesso payload: il team è già stato avvisato.
+    sendInboundLeadNotificationMock.mockClear();
+    await postLead(callPayload);
+    expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+
+    // Nemmeno con la nota vuota, che noi salviamo come null.
+    sendInboundLeadNotificationMock.mockClear();
+    await postLead({ ...callPayload, callNote: '' });
+    expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('avvisa il team anche quando la scheda nasce da un altro push in parallelo', async () => {
+    const saveSpy = vi.spyOn(Contact.prototype, 'save');
+
+    // Il contatto compare fra il nostro lookup e la nostra insert: è la
+    // collisione che il ramo di recupero deve gestire senza perdere il payload,
+    // richiesta di chiamata compresa.
+    saveSpy.mockImplementationOnce(async () => {
+      await seedContact({
+        email: syntheticGraderEmail('+393401234567'),
+        phone: '+393401234567'
+      });
+      const duplicateKeyError = new Error('E11000 duplicate key error');
+      duplicateKeyError.code = 11000;
+      throw duplicateKeyError;
+    });
+
+    const res = await postLead({
+      ...basePayload,
+      callRequested: true,
+      callPreference: 'Martedì 15:00-17:00',
+      callRequestedAt: '2026-09-05T17:00:00.000Z'
+    });
+
+    saveSpy.mockRestore();
+
+    expect(res.statusCode).toBe(200);
+    expect(await Contact.countDocuments()).toBe(1);
+    expect(sendInboundLeadNotificationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        callRequest: expect.objectContaining({ preference: 'Martedì 15:00-17:00' })
+      })
+    );
+  });
+
+  it('segnala il doppione sintetico quando vince la scheda con l\'email vera', async () => {
+    const synthetic = await seedContact({
+      email: syntheticGraderEmail('+393401234567'),
+      phone: '+393401234567',
+      rankCheckerData: { placeId: 'place-test', syntheticEmail: true }
+    });
+    const real = await seedContact({
+      email: 'info@trattoriatest.it',
+      rankCheckerData: { placeId: 'place-test' }
+    });
+
+    await postLead({ ...basePayload, email: 'info@trattoriatest.it' });
+
+    // Fondere due documenti da codice è rischioso: li segnaliamo e la fusione
+    // la fa chi lavora il CRM.
+    const flagged = await Contact.findById(synthetic._id);
+    expect(flagged.properties.duplicateOfContactId).toBe(String(real._id));
+    expect(flagged.properties.duplicateDetectedAt).toBeTruthy();
   });
 
   it('notifica una nuova qualificazione e la prima richiesta di chiamata', async () => {
