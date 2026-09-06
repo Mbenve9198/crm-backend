@@ -4,6 +4,7 @@ import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
 import Conversation from '../models/conversationModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
+import { sendInboundLeadNotification } from '../services/emailNotificationService.js';
 
 // Statuses that must NOT be reset to 'da contattare' on reactivation
 const REACTIVATION_PROTECTED_STATUSES = [
@@ -15,9 +16,37 @@ const REACTIVATION_PROTECTED_STATUSES = [
   'bad_data'
 ];
 
+const QUALIFICATION_FIELDS = [
+  'hasDigitalMenu',
+  'willingToAdoptMenu',
+  'dailyCovers',
+  'estimatedMonthlyReviews'
+];
+
+const normalizePhoneForSyntheticEmail = (phone, digitsOnly = false) => {
+  const phoneWithoutPlus = String(phone || '').replace(/\+/g, '');
+  return digitsOnly ? phoneWithoutPlus.replace(/\D/g, '') : phoneWithoutPlus;
+};
+
+const valuesMatch = (firstValue, secondValue) => {
+  if (Object.is(firstValue, secondValue)) return true;
+
+  try {
+    return JSON.stringify(firstValue) === JSON.stringify(secondValue);
+  } catch {
+    return false;
+  }
+};
+
+const queueInboundLeadNotification = (data) => {
+  sendInboundLeadNotification(data).catch((error) => {
+    console.error('❌ Errore notifica email lead inbound:', error?.message || 'errore sconosciuto');
+  });
+};
+
 /**
  * Controller per la gestione dei lead inbound da MenuChat
- * Endpoint PUBBLICO (senza autenticazione) per webhook
+ * Endpoint legacy pubblici; il Rank Checker supporta un secret opzionale
  */
 
 /**
@@ -60,14 +89,19 @@ export const receiveRankCheckerLead = async (req, res) => {
     } = req.body;
 
     // Validazione base
-    if (!email || !phone || !restaurantName) {
+    if (!restaurantName || (!email && !phone)) {
       return res.status(400).json({
         success: false,
-        message: 'Email, telefono e nome ristorante sono obbligatori'
+        message: 'Nome ristorante e almeno uno tra email e telefono sono obbligatori'
       });
     }
 
-    console.log(`📥 INBOUND LEAD: ${restaurantName} (${email})`);
+    const isSyntheticEmail = !email;
+    const normalizedEmail = isSyntheticEmail
+      ? `grader-${normalizePhoneForSyntheticEmail(phone, true)}@grader.menuchat.it` // pragma: allowlist secret
+      : email.toLowerCase();
+
+    console.log(`📥 INBOUND LEAD: ${restaurantName} (${isSyntheticEmail ? 'email sintetica' : normalizedEmail})`);
     console.log(`📊 Lead Type: ${leadType || 'N/A'} | Source: ${leadSource || 'N/A'}`);
     
     // 🆕 Determina il link al report (supporto sia nuovo formato che legacy)
@@ -94,6 +128,21 @@ export const receiveRankCheckerLead = async (req, res) => {
       willingToAdoptMenu: willingToAdoptMenu ?? qualificationData?.willingToAdoptMenu ?? null,
       qualifiedAt: qualificationData?.qualifiedAt || (hasDigitalMenu !== undefined ? new Date() : null)
     };
+    const directQualificationData = {
+      hasDigitalMenu,
+      willingToAdoptMenu,
+      dailyCovers,
+      estimatedMonthlyReviews
+    };
+    const hasQualificationPayload = QUALIFICATION_FIELDS.some((field) => {
+      const directValue = directQualificationData[field];
+      const nestedValue = qualificationData && typeof qualificationData === 'object'
+        ? qualificationData[field]
+        : undefined;
+
+      return (directValue !== undefined && directValue !== null)
+        || (nestedValue !== undefined && nestedValue !== null);
+    });
     
     if (qualData.dailyCovers) {
       console.log(`📊 Qualificazione: ${qualData.dailyCovers} coperti/giorno, ${qualData.estimatedMonthlyReviews} recensioni/mese, Menu digitale: ${qualData.hasDigitalMenu ? 'Sì' : 'No'}`);
@@ -134,7 +183,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
 
     // Verifica se esiste già un contatto con questa email
-    let contact = await Contact.findOne({ email: email.toLowerCase() });
+    let contact = await Contact.findOne({ email: normalizedEmail });
     
     // Mappa leadSource → source CRM e lista
     const crmSourceMap = {
@@ -157,6 +206,11 @@ export const receiveRankCheckerLead = async (req, res) => {
         source: 'inbound_qr_recensioni',
         list: 'Inbound - Google Ads QR Recensioni',
         log: '⭐ Lead da Google Ads QR Recensioni'
+      },
+      'grader-posizione': {
+        source: 'inbound_rank_checker',
+        list: 'Inbound - Rank Checker',
+        log: '🎯 Lead da Grader Posizione'
       }
     };
     const defaultConfig = { source: 'inbound_rank_checker', list: 'Inbound - Rank Checker', log: '🎯 Lead da Rank Checker (organic)' };
@@ -169,7 +223,7 @@ export const receiveRankCheckerLead = async (req, res) => {
 
     const leadData = {
       name: restaurantName,
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       phone: phone,
       lists: [crmList],
       status: 'da contattare',
@@ -178,6 +232,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       rankCheckerData: {
         placeId: placeId,
         keyword: keyword,
+        ...(isSyntheticEmail && { syntheticEmail: true }),
         ranking: {
           mainRank: rankingResults?.mainResult?.rank || rankingResults?.userRestaurant?.rank,
           competitorsAhead: rankingResults?.analysis?.competitorsAhead,
@@ -235,6 +290,22 @@ export const receiveRankCheckerLead = async (req, res) => {
     if (contact) {
       // Contatto esiste → AGGIORNA i dati
       console.log(`🔄 Contatto esistente trovato, aggiorno i dati...`);
+
+      const previousRankCheckerData = contact.rankCheckerData || {};
+      const previousProperties = contact.properties || {};
+      const hasNewQualification = hasQualificationPayload
+        && QUALIFICATION_FIELDS.some((field) => (
+          qualData[field] !== undefined
+          && qualData[field] !== null
+          && !valuesMatch(previousRankCheckerData[field], qualData[field])
+        ));
+      const hasNewCallRequest = Boolean(callRequested) && (
+        previousProperties.callRequested !== true
+        || (callPreference !== undefined && !valuesMatch(previousProperties.callPreference, callPreference))
+        || (callRequestedAt !== undefined && !valuesMatch(previousProperties.callRequestedAt, callRequestedAt))
+        || (callNote !== undefined && !valuesMatch(previousProperties.callNote, callNote))
+      );
+      const shouldNotify = !isQualificationUpdate || hasNewQualification || hasNewCallRequest;
       
       // Aggiungi alla lista se non già presente
       if (!contact.lists.includes(crmList)) {
@@ -267,6 +338,22 @@ export const receiveRankCheckerLead = async (req, res) => {
       contact.lastModifiedBy = defaultOwner._id;
 
       await contact.save();
+
+      if (shouldNotify) {
+        queueInboundLeadNotification({
+          contact,
+          isNew: false,
+          leadSource: leadSource || 'organic',
+          rankCheckerData: contact.rankCheckerData,
+          reportLink: finalReportLink,
+          callRequest: callRequested ? {
+            requested: true,
+            preference: callPreference ?? null,
+            requestedAt: callRequestedAt ?? contact.properties?.callRequestedAt ?? null,
+            note: callNote ?? null
+          } : null
+        });
+      }
 
       if (isQualificationUpdate) {
         console.log(`ℹ️ Aggiornamento qualificazione per ${contact.name}, nessuna activity di riattivazione creata`);
@@ -327,12 +414,26 @@ export const receiveRankCheckerLead = async (req, res) => {
       
       contact = new Contact(leadData);
       await contact.save();
+
+      queueInboundLeadNotification({
+        contact,
+        isNew: true,
+        leadSource: leadSource || 'organic',
+        rankCheckerData: contact.rankCheckerData,
+        reportLink: finalReportLink,
+        callRequest: callRequested ? {
+          requested: true,
+          preference: callPreference ?? null,
+          requestedAt: callRequestedAt ?? contact.properties?.callRequestedAt ?? null,
+          note: callNote ?? null
+        } : null
+      });
       
       // Aggiorna statistiche dell'owner
       await defaultOwner.updateStats({ newContact: true });
       await defaultOwner.save();
       
-      console.log(`✅ Nuovo contatto creato: ${contact.name} (${contact.email})`);
+      console.log(`✅ Nuovo contatto creato: ${contact.name} (${isSyntheticEmail ? 'email sintetica' : contact.email})`);
       
       return res.status(201).json({
         success: true,
@@ -387,7 +488,7 @@ export const receiveAcquisitionLead = async (req, res) => {
       });
     }
 
-    console.log(`📥 INBOUND ACQUISITION LEAD: ${restaurantName} (${funnelType}) — ${phone}`);
+    console.log(`📥 INBOUND ACQUISITION LEAD: ${restaurantName} (${funnelType})`);
 
     let defaultOwner;
     if (process.env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL) {
@@ -405,7 +506,7 @@ export const receiveAcquisitionLead = async (req, res) => {
       return res.status(500).json({ success: false, message: 'Nessun owner disponibile' });
     }
 
-    const syntheticEmail = `acq-${funnelType?.toLowerCase() || 'unknown'}-${phone.replace(/\+/g, '')}@acquisition.menuchat.it`;
+    const syntheticEmail = `acq-${funnelType?.toLowerCase() || 'unknown'}-${normalizePhoneForSyntheticEmail(phone)}@acquisition.menuchat.it`; // pragma: allowlist secret
     const listName = `Inbound - WhatsApp Acquisition - ${funnelType || 'UNKNOWN'}`;
 
     let contact = await Contact.findOne({ email: syntheticEmail.toLowerCase() });

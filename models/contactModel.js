@@ -100,6 +100,7 @@ const contactSchema = new mongoose.Schema({
   rankCheckerData: {
     placeId: String,
     keyword: String,
+    syntheticEmail: Boolean,
     ranking: mongoose.Schema.Types.Mixed, // Contiene mainRank, competitorsAhead, strategicResults, etc
     // Dati ristorante da Google Maps
     restaurantData: {

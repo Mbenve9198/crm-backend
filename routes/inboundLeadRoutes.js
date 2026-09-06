@@ -2,15 +2,16 @@ import express from 'express';
 import { receiveRankCheckerLead, receiveAcquisitionLead, receiveSmartleadLead, pushLandingMessage, receiveOnboardingEvent } from '../controllers/inboundLeadController.js';
 import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
 import { handleResendInbound } from '../controllers/resendWebhookController.js';
+import { requireInboundLeadSecret } from '../middleware/inboundLeadSecretMiddleware.js';
 
 const router = express.Router();
 
 /**
  * Routes per la ricezione di lead inbound
- * PUBBLICHE - non richiedono autenticazione (webhook da sistemi esterni)
+ * PUBBLICHE - il Rank Checker usa un secret opzionale e retro-compatibile
  */
 
-router.post('/rank-checker-lead', receiveRankCheckerLead);
+router.post('/rank-checker-lead', requireInboundLeadSecret, receiveRankCheckerLead);
 router.post('/onboarding-event', receiveOnboardingEvent);
 router.post('/acquisition-lead', receiveAcquisitionLead);
 router.post('/smartlead-lead', receiveSmartleadLead);
