@@ -160,6 +160,61 @@ describe('receiveRankCheckerLead', () => {
     expect(updatedContact.status).toBe('won');
   });
 
+  it('normalizza il telefono e riconosce lo stesso numero in formati diversi', async () => {
+    const first = await postLead({ ...basePayload, phone: '3401234567' });
+    expect(first.statusCode).toBe(201);
+    const contact = await Contact.findById(first.body.data.contactId);
+    expect(contact.phone).toBe('+393401234567');
+
+    const second = await postLead({ ...basePayload, phone: '+39 340 123 4567' });
+    expect(second.statusCode).toBe(200);
+    expect(second.body.data.contactId.toString()).toBe(contact._id.toString());
+    expect(await Contact.countDocuments()).toBe(1);
+  });
+
+  it('aggancia al contatto esistente il lead che poi porta la sua email vera', async () => {
+    const first = await postLead(basePayload);
+    const contactId = first.body.data.contactId;
+
+    const second = await postLead({ ...basePayload, email: 'info@trattoriatest.it' });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.body.data.contactId.toString()).toBe(contactId.toString());
+    expect(await Contact.countDocuments()).toBe(1);
+    const updated = await Contact.findById(contactId);
+    expect(updated.email).toBe('info@trattoriatest.it');
+    expect(updated.rankCheckerData.syntheticEmail).not.toBe(true);
+  });
+
+  it('rifiuta un telefono di soli spazi senza email', async () => {
+    const res = await postLead({ ...basePayload, phone: '   ' });
+
+    expect(res.statusCode).toBe(400);
+    expect(await Contact.countDocuments()).toBe(0);
+    expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('rifiuta un telefono troppo corto per essere vero', async () => {
+    const res = await postLead({ ...basePayload, phone: '12345' });
+
+    expect(res.statusCode).toBe(400);
+    expect(await Contact.countDocuments()).toBe(0);
+  });
+
+  it('accetta il lead con email valida scartando un telefono non normalizzabile', async () => {
+    const res = await postLead({
+      ...basePayload,
+      phone: 'non un numero',
+      email: 'info@trattoriatest.it'
+    });
+
+    expect(res.statusCode).toBe(201);
+    const contact = await Contact.findById(res.body.data.contactId);
+    expect(contact.email).toBe('info@trattoriatest.it');
+    expect(contact.phone).toBeUndefined();
+    expect(contact.properties.phoneWarning).toContain('E.164');
+  });
+
   it('rifiuta un lead senza email e senza telefono', async () => {
     const res = await postLead({
       restaurantName: 'Trattoria Senza Recapito',

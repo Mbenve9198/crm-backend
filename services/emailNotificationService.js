@@ -103,6 +103,55 @@ const getStrategicPointRank = (point) => {
   return null;
 };
 
+// Etichette dei punti quando Places non ci ha dato un nome: il grader legge il
+// local pack dal locale e da quattro POI intorno, e il tipo basta a orientarsi.
+const STRATEGIC_POINT_LABELS = {
+  venue: 'Dal locale',
+  station: 'Dalla stazione',
+  lodging: 'Da un hotel in zona',
+  landmark: 'Da un punto d\u2019interesse',
+  bar: 'Da un bar in zona'
+};
+
+const strategicPointLabel = (pointData, index) => (
+  toSafeString(
+    pointData.placeName
+    ?? pointData.label
+    ?? pointData.name
+    ?? STRATEGIC_POINT_LABELS[toSafeString(pointData.kind, 20)],
+    80
+  ) || `Punto ${index + 1}`
+);
+
+/**
+ * Esito di un punto di ricerca. «Non disponibile» e «fuori dal pack» sono due
+ * cose diverse: la prima è una lettura fallita, la seconda un dato vero.
+ */
+const strategicPointOutcome = (pointData) => {
+  if (pointData.unavailable === true) {
+    return 'lettura non disponibile';
+  }
+
+  const rank = getStrategicPointRank(pointData);
+  if (rank) {
+    const packSize = normalizeRank(pointData.packSize);
+    return packSize ? `#${rank} su ${packSize}` : `#${rank}`;
+  }
+
+  return pointData.outOfPack === true ? 'fuori dal pack' : 'N/D';
+};
+
+const renderStrategicResults = (strategicResults) => {
+  if (strategicResults.length === 0) {
+    return '<li style="margin:4px 0;">Nessun punto letto</li>';
+  }
+
+  return strategicResults.map((point, index) => {
+    const pointData = asObject(point);
+    return `<li style="margin:4px 0;"><strong>${escapeHtml(strategicPointLabel(pointData, index))}:</strong> ${strategicPointOutcome(pointData)}</li>`;
+  }).join('');
+};
+
 const extractCity = (address) => {
   const safeAddress = toSafeString(address, 500).trim();
   if (!safeAddress) return '';
@@ -187,6 +236,21 @@ export const sendSmartleadInterestedNotification = async (data) => {
 
   const confidencePercent = ((aiClassification?.confidence || 0) * 100).toFixed(0);
 
+  // Tutto quello che segue arriva dal webhook Smartlead, risposta del lead
+  // compresa: interpolarlo grezzo lascerebbe chiudere il markup e infilare
+  // link arbitrari in un'email che noi leggiamo come attendibile.
+  const safeReason = escapeHtml(aiClassification?.reason, 500);
+  const safeName = escapeHtml(name, 200);
+  const safeEmail = escapeHtml(email, 320);
+  const emailHref = escapeHtml(toSafeString(email, 320).replace(/[\s"'<>]/g, ''), 320);
+  const safePhone = escapeHtml(phone, 100);
+  const phoneHref = escapeHtml(toSafeString(phone, 100).replace(/[^\d+]/g, ''), 100);
+  const safeLocation = escapeHtml(location, 200);
+  const safeWebsite = escapeHtml(toSafeHttpUrl(website), 2000);
+  const safeCampaignName = escapeHtml(campaignName, 200);
+  const safeSubject = escapeHtml(subject, 300);
+  const safeReplyText = escapeHtml(replyText, 1000);
+
   const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f4f4;">
@@ -203,37 +267,37 @@ export const sendSmartleadInterestedNotification = async (data) => {
       🤖 AI: INTERESTED (${confidencePercent}% confidence)
     </span>
   </div>
-  <p style="text-align: center; color: #6b7280; font-size: 13px; margin-top: 5px;">${aiClassification?.reason || ''}</p>
+  <p style="text-align: center; color: #6b7280; font-size: 13px; margin-top: 5px;">${safeReason}</p>
 
   <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
     <h2 style="color: #059669; margin: 0 0 15px 0; font-size: 20px;">👤 Dati Contatto</h2>
-    <p style="margin: 5px 0;"><strong>Nome:</strong> ${name || 'N/A'}</p>
-    <p style="margin: 5px 0;"><strong>Email:</strong> <a href="mailto:${email}" style="color: #059669;">${email}</a></p>
-    ${phone ? `<p style="margin: 5px 0;"><strong>Telefono:</strong> <a href="tel:${phone}" style="color: #059669; font-size: 18px; font-weight: bold;">${phone}</a></p>` : ''}
-    ${location ? `<p style="margin: 5px 0;"><strong>Località:</strong> ${location}</p>` : ''}
-    ${website ? `<p style="margin: 5px 0;"><strong>Sito:</strong> <a href="${website}" style="color: #059669;" target="_blank">${website}</a></p>` : ''}
+    <p style="margin: 5px 0;"><strong>Nome:</strong> ${safeName || 'N/A'}</p>
+    <p style="margin: 5px 0;"><strong>Email:</strong> <a href="mailto:${emailHref}" style="color: #059669;">${safeEmail}</a></p>
+    ${safePhone ? `<p style="margin: 5px 0;"><strong>Telefono:</strong> <a href="tel:${phoneHref}" style="color: #059669; font-size: 18px; font-weight: bold;">${safePhone}</a></p>` : ''}
+    ${safeLocation ? `<p style="margin: 5px 0;"><strong>Località:</strong> ${safeLocation}</p>` : ''}
+    ${safeWebsite ? `<p style="margin: 5px 0;"><strong>Sito:</strong> <a href="${safeWebsite}" style="color: #059669;" target="_blank">${safeWebsite}</a></p>` : ''}
   </div>
 
   <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
     <h2 style="color: #d97706; margin: 0 0 10px 0; font-size: 18px;">📧 Campagna</h2>
-    <p style="margin: 5px 0;"><strong>Nome:</strong> ${campaignName || 'N/A'}</p>
-    ${subject ? `<p style="margin: 5px 0;"><strong>Oggetto:</strong> ${subject}</p>` : ''}
+    <p style="margin: 5px 0;"><strong>Nome:</strong> ${safeCampaignName || 'N/A'}</p>
+    ${safeSubject ? `<p style="margin: 5px 0;"><strong>Oggetto:</strong> ${safeSubject}</p>` : ''}
   </div>
 
   <div style="background-color: #ede9fe; border-left: 4px solid #8b5cf6; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
     <h2 style="color: #7c3aed; margin: 0 0 10px 0; font-size: 18px;">💬 Risposta del Lead</h2>
-    <div style="background-color: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd6fe; font-style: italic; white-space: pre-wrap;">${(replyText || 'Nessun testo').substring(0, 1000)}</div>
+    <div style="background-color: white; padding: 15px; border-radius: 8px; border: 1px solid #ddd6fe; font-style: italic; white-space: pre-wrap;">${safeReplyText || 'Nessun testo'}</div>
   </div>
 
   ${customFields && Object.keys(customFields).length > 0 ? `
   <div style="background-color: #f8f9fa; border-left: 4px solid #6366f1; padding: 15px; margin-bottom: 20px; border-radius: 4px;">
     <h2 style="color: #4f46e5; margin: 0 0 10px 0; font-size: 18px;">📋 Campi Custom Smartlead</h2>
-    ${Object.entries(customFields).map(([k, v]) => `<p style="margin: 3px 0;"><strong>${k}:</strong> ${v}</p>`).join('')}
+    ${Object.entries(customFields).map(([k, v]) => `<p style="margin: 3px 0;"><strong>${escapeHtml(k, 100)}:</strong> ${escapeHtml(v, 500)}</p>`).join('')}
   </div>` : ''}
 
   <div style="text-align: center; margin-top: 30px;">
-    ${phone ? `<a href="tel:${phone}" style="display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 16px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 18px; box-shadow: 0 4px 12px rgba(16,185,129,0.4);">📞 CHIAMA ORA</a><br><br>` : ''}
-    <a href="mailto:${email}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 14px;">✉️ Rispondi via Email</a>
+    ${phoneHref ? `<a href="tel:${phoneHref}" style="display: inline-block; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 16px 40px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 18px; box-shadow: 0 4px 12px rgba(16,185,129,0.4);">📞 CHIAMA ORA</a><br><br>` : ''}
+    <a href="mailto:${emailHref}" style="display: inline-block; background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; font-weight: bold; font-size: 14px;">✉️ Rispondi via Email</a>
   </div>
 
   <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center;">
@@ -244,7 +308,7 @@ export const sendSmartleadInterestedNotification = async (data) => {
 </div></body></html>`;
 
   return sendTeamNotification({
-    subject: `✨ SMARTLEAD INTERESTED: ${name || email} ${location ? `(${location})` : ''} — risposta positiva!`,
+    subject: sanitizeSubjectPart(`✨ SMARTLEAD INTERESTED: ${toSafeString(name, 200) || toSafeString(email, 320)}${location ? ` (${toSafeString(location, 200)})` : ''} — risposta positiva!`, 240),
     html,
     logLabel: `Notifica email inviata al team per ${name || email}`
   });
@@ -326,21 +390,15 @@ export const sendInboundLeadNotification = async ({
     const strategicResults = Array.isArray(ranking.strategicResults)
       ? ranking.strategicResults
       : [];
-    const strategicResultsHtml = Array.from({ length: 5 }, (_, index) => {
-      const point = strategicResults[index];
-      const pointData = asObject(point);
-      const pointLabel = toSafeString(
-        pointData.label
-        ?? pointData.name
-        ?? pointData.direction,
-        80
-      ) || `Punto ${index + 1}`;
-      const pointRank = getStrategicPointRank(point);
-
-      return `<li style="margin:4px 0;"><strong>${escapeHtml(pointLabel)}:</strong> ${pointRank ? `#${pointRank}` : 'fuori top 20'}</li>`;
-    }).join('');
+    const strategicResultsHtml = renderStrategicResults(strategicResults);
 
     const preference = callData.preference ?? callData.callPreference;
+    // Il worker manda la preferenza già formattata in una stringa sola; i
+    // payload legacy la spezzavano in giorno e fascia. Teniamo entrambi i casi,
+    // ma senza far finire una stringa intera sotto «Fascia».
+    const preferenceText = typeof preference === 'string'
+      ? toSafeString(preference, 300)
+      : '';
     const preferenceData = asObject(preference);
     const callDay = toSafeString(
       preferenceData.day
@@ -354,8 +412,7 @@ export const sendInboundLeadNotification = async ({
       ?? preferenceData.slot
       ?? preferenceData.time
       ?? preferenceData.window
-      ?? callData.timeSlot
-      ?? (typeof preference === 'string' ? preference : ''),
+      ?? callData.timeSlot,
       200
     );
     const callNote = toSafeString(callData.note ?? callData.callNote, 1000);
@@ -412,8 +469,10 @@ export const sendInboundLeadNotification = async ({
     ${hasCallRequest ? `
     <div style="background:#fff7ed;border-left:4px solid #f97316;padding:14px;margin-bottom:16px;border-radius:4px;">
       <h2 style="color:#c2410c;margin:0 0 10px;font-size:18px;">🔥 Richiesta di chiamata</h2>
-      <p style="margin:4px 0;"><strong>Giorno:</strong> ${escapeHtml(callDay || 'N/D')}</p>
-      <p style="margin:4px 0;"><strong>Fascia:</strong> ${escapeHtml(callSlot || 'N/D')}</p>
+      ${preferenceText && !callDay && !callSlot
+        ? `<p style="margin:4px 0;"><strong>Preferenza:</strong> ${escapeHtml(preferenceText)}</p>`
+        : `<p style="margin:4px 0;"><strong>Giorno:</strong> ${escapeHtml(callDay || 'N/D')}</p>
+      <p style="margin:4px 0;"><strong>Fascia:</strong> ${escapeHtml(callSlot || 'N/D')}</p>`}
       <p style="margin:4px 0;"><strong>Richiesta il:</strong> ${escapeHtml(formatDateTime(callRequestedAt))}</p>
       ${callNote ? `<p style="margin:4px 0;"><strong>Nota:</strong> ${escapeHtml(callNote, 1000)}</p>` : ''}
     </div>` : ''}

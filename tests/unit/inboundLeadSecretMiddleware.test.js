@@ -26,8 +26,12 @@ const runMiddleware = (providedSecret) => {
   return { res, next };
 };
 
+const originalNodeEnv = process.env.NODE_ENV;
+
 afterEach(() => {
   delete process.env.INBOUND_LEAD_SECRET;
+  delete process.env.INBOUND_LEAD_ALLOW_PUBLIC;
+  process.env.NODE_ENV = originalNodeEnv;
 });
 
 describe('requireInboundLeadSecret', () => {
@@ -57,8 +61,29 @@ describe('requireInboundLeadSecret', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('resta pubblico senza INBOUND_LEAD_SECRET', () => {
+  it('resta pubblico senza INBOUND_LEAD_SECRET fuori produzione', () => {
     delete process.env.INBOUND_LEAD_SECRET;
+    process.env.NODE_ENV = 'test';
+
+    const { next } = runMiddleware();
+
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('chiude il webhook in produzione se il secret non è configurato', () => {
+    delete process.env.INBOUND_LEAD_SECRET;
+    process.env.NODE_ENV = 'production';
+
+    const { res, next } = runMiddleware();
+
+    expect(res.statusCode).toBe(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('in produzione l’accesso pubblico va dichiarato a mano', () => {
+    delete process.env.INBOUND_LEAD_SECRET;
+    process.env.NODE_ENV = 'production';
+    process.env.INBOUND_LEAD_ALLOW_PUBLIC = 'true';
 
     const { next } = runMiddleware();
 

@@ -5,6 +5,11 @@ import AssignmentState from '../models/assignmentStateModel.js';
 import Conversation from '../models/conversationModel.js';
 import { resolveOwnerForSource } from '../services/assignmentService.js';
 import { sendInboundLeadNotification } from '../services/emailNotificationService.js';
+import {
+  isSyntheticEmailAddress,
+  normalizePhoneToE164,
+  syntheticGraderEmail
+} from '../services/phoneIdentityService.js';
 
 // Statuses that must NOT be reset to 'da contattare' on reactivation
 const REACTIVATION_PROTECTED_STATUSES = [
@@ -26,6 +31,64 @@ const QUALIFICATION_FIELDS = [
 const normalizePhoneForSyntheticEmail = (phone, digitsOnly = false) => {
   const phoneWithoutPlus = String(phone || '').replace(/\+/g, '');
   return digitsOnly ? phoneWithoutPlus.replace(/\D/g, '') : phoneWithoutPlus;
+};
+
+/**
+ * Cerca il contatto già noto per questo lead. L'email vera vince sul telefono,
+ * così un lead che prima è arrivato senza email non resta orfano quando poi
+ * l'email arriva: lo ritroviamo dall'email sintetica o dal numero e lo aggiorniamo
+ * invece di creare un doppione.
+ */
+const findExistingRankCheckerContact = async ({ normalizedEmail, syntheticEmail, phoneE164 }) => {
+  const byEmail = await Contact.findOne({ email: normalizedEmail });
+  if (byEmail) return byEmail;
+
+  if (syntheticEmail && syntheticEmail !== normalizedEmail) {
+    const bySynthetic = await Contact.findOne({ email: syntheticEmail });
+    if (bySynthetic) return bySynthetic;
+  }
+
+  if (phoneE164) {
+    // I contatti storici possono avere il numero in formato nazionale: cerchiamo
+    // entrambe le forme, la canonica e quella senza prefisso.
+    const nationalForm = phoneE164.startsWith('+39') ? phoneE164.slice(3) : null;
+    const phoneCandidates = [phoneE164, ...(nationalForm ? [nationalForm] : [])];
+    const byPhone = await Contact.findOne({ phone: { $in: phoneCandidates } });
+    if (byPhone) return byPhone;
+  }
+
+  return null;
+};
+
+/**
+ * Riporta sul contatto i dati del lead appena arrivato: liste, dati rank checker,
+ * properties e i recapiti canonici.
+ */
+const applyLeadDataToContact = (contact, { leadData, crmList, normalizedEmail, isSyntheticEmail, phoneE164 }) => {
+  if (!contact.lists.includes(crmList)) {
+    contact.lists.push(crmList);
+  }
+
+  // L'email vera prende il posto di quella sintetica: è lo stesso ristoratore,
+  // e tenersi l'indirizzo finto vorrebbe dire scrivere a un recapito inesistente.
+  if (!isSyntheticEmail && contact.email !== normalizedEmail && isSyntheticEmailAddress(contact.email)) {
+    contact.email = normalizedEmail;
+  }
+
+  // Il numero canonico ha la precedenza: è la chiave con cui ritroveremo il
+  // contatto ai push successivi.
+  if (phoneE164 && contact.phone !== phoneE164) {
+    contact.phone = phoneE164;
+  }
+
+  contact.rankCheckerData = leadData.rankCheckerData;
+  contact.markModified('rankCheckerData');
+
+  contact.properties = {
+    ...contact.properties,
+    ...leadData.properties
+  };
+  contact.markModified('properties');
 };
 
 const valuesMatch = (firstValue, secondValue) => {
@@ -88,18 +151,31 @@ export const receiveRankCheckerLead = async (req, res) => {
       isQualificationUpdate
     } = req.body;
 
+    // Il numero diventa la chiave d'identità del lead, quindi va normalizzato
+    // prima di ogni controllo: una stringa di soli spazi non è un telefono.
+    const normalizedPhone = normalizePhoneToE164(phone);
+    const phoneE164 = normalizedPhone?.e164 ?? null;
+    const phoneRejected = Boolean(phone) && !phoneE164;
+
     // Validazione base
-    if (!restaurantName || (!email && !phone)) {
+    if (!restaurantName) {
       return res.status(400).json({
         success: false,
-        message: 'Nome ristorante e almeno uno tra email e telefono sono obbligatori'
+        message: 'Nome ristorante obbligatorio'
+      });
+    }
+    if (!email && !phoneE164) {
+      return res.status(400).json({
+        success: false,
+        message: phoneRejected
+          ? 'Numero di telefono non valido e nessuna email: impossibile identificare il lead'
+          : 'Nome ristorante e almeno uno tra email e telefono sono obbligatori'
       });
     }
 
     const isSyntheticEmail = !email;
-    const normalizedEmail = isSyntheticEmail
-      ? `grader-${normalizePhoneForSyntheticEmail(phone, true)}@grader.menuchat.it` // pragma: allowlist secret
-      : email.toLowerCase();
+    const syntheticEmail = phoneE164 ? syntheticGraderEmail(phoneE164) : null;
+    const normalizedEmail = isSyntheticEmail ? syntheticEmail : email.toLowerCase();
 
     console.log(`📥 INBOUND LEAD: ${restaurantName} (${isSyntheticEmail ? 'email sintetica' : normalizedEmail})`);
     console.log(`📊 Lead Type: ${leadType || 'N/A'} | Source: ${leadSource || 'N/A'}`);
@@ -116,8 +192,10 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
     
     // ⚠️ Log warning se numero invalido
-    if (phoneWarning) {
-      console.warn(`⚠️ PHONE WARNING: ${phoneWarning}`);
+    const effectivePhoneWarning = phoneWarning
+      || (phoneRejected ? 'Numero non normalizzabile in E.164: scartato' : null);
+    if (effectivePhoneWarning) {
+      console.warn(`⚠️ PHONE WARNING: ${effectivePhoneWarning}`);
     }
     
     // 🆕 Dati qualificazione (priorità ai campi diretti, fallback a qualificationData)
@@ -182,8 +260,12 @@ export const receiveRankCheckerLead = async (req, res) => {
       });
     }
 
-    // Verifica se esiste già un contatto con questa email
-    let contact = await Contact.findOne({ email: normalizedEmail });
+    // Verifica se conosciamo già questo lead, per email vera o per numero
+    let contact = await findExistingRankCheckerContact({
+      normalizedEmail,
+      syntheticEmail,
+      phoneE164
+    });
     
     // Mappa leadSource → source CRM e lista
     const crmSourceMap = {
@@ -224,7 +306,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     const leadData = {
       name: restaurantName,
       email: normalizedEmail,
-      phone: phone,
+      phone: phoneE164 ?? undefined,
       lists: [crmList],
       status: 'da contattare',
       source: crmSource,
@@ -275,7 +357,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         // 🆕 Link singolo al report (accesso rapido dal CRM)
         rankCheckerReport: finalReportLink,
         // ⚠️ Warning se numero telefono invalido
-        phoneWarning: phoneWarning || null,
+        phoneWarning: effectivePhoneWarning,
         // Menu landing data (link al menu creato + ID per accesso rapido)
         ...(menuPreviewUrl && { menuPreviewUrl }),
         ...(menuId && { menuId }),
@@ -307,26 +389,18 @@ export const receiveRankCheckerLead = async (req, res) => {
       );
       const shouldNotify = !isQualificationUpdate || hasNewQualification || hasNewCallRequest;
       
-      // Aggiungi alla lista se non già presente
-      if (!contact.lists.includes(crmList)) {
-        contact.lists.push(crmList);
-      }
-
       // Aggiorna source solo se era manual
       if (contact.source === 'manual') {
         contact.source = crmSource;
       }
 
-      // Aggiorna sempre i dati rank checker (più recenti)
-      contact.rankCheckerData = leadData.rankCheckerData;
-      contact.markModified('rankCheckerData');
-
-      // Merge properties
-      contact.properties = {
-        ...contact.properties,
-        ...leadData.properties
-      };
-      contact.markModified('properties');
+      applyLeadDataToContact(contact, {
+        leadData,
+        crmList,
+        normalizedEmail,
+        isSyntheticEmail,
+        phoneE164
+      });
 
       const previousStatus = contact.status;
 
@@ -412,8 +486,47 @@ export const receiveRankCheckerLead = async (req, res) => {
       leadData.owner = ownerForNewContact?._id ?? null;
       leadData.createdBy = ownerForNewContact?._id ?? defaultOwner._id;
       
-      contact = new Contact(leadData);
-      await contact.save();
+      try {
+        contact = new Contact(leadData);
+        await contact.save();
+      } catch (createError) {
+        if (createError?.code !== 11000) {
+          throw createError;
+        }
+
+        // Due push identici in parallelo: uno dei due arriva dopo che l'altro
+        // ha già creato il contatto. Rispondere 409 butterebbe via questo
+        // payload, quindi riprendiamo il contatto appena creato e ci scriviamo
+        // sopra i nostri dati.
+        const raced = await findExistingRankCheckerContact({
+          normalizedEmail,
+          syntheticEmail,
+          phoneE164
+        });
+        if (!raced) {
+          throw createError;
+        }
+
+        applyLeadDataToContact(raced, {
+          leadData,
+          crmList,
+          normalizedEmail,
+          isSyntheticEmail,
+          phoneE164
+        });
+        raced.lastModifiedBy = defaultOwner._id;
+        await raced.save();
+
+        console.log(`🔀 Contatto creato in parallelo, dati applicati: ${raced.name}`);
+        return res.status(200).json({
+          success: true,
+          message: 'Lead ricevuto e contatto aggiornato',
+          data: {
+            contactId: raced._id,
+            action: 'updated'
+          }
+        });
+      }
 
       queueInboundLeadNotification({
         contact,

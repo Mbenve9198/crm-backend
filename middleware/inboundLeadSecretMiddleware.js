@@ -12,12 +12,26 @@ const secretsMatch = (providedSecret, expectedSecret) => {
 };
 
 /**
- * Protegge opzionalmente il webhook rank checker con X-Inbound-Secret.
- * Senza INBOUND_LEAD_SECRET configurata mantiene il comportamento pubblico legacy.
+ * Protegge il webhook rank checker con X-Inbound-Secret.
+ *
+ * In produzione il secret è obbligatorio: senza, chiunque conosca l'URL potrebbe
+ * creare o sovrascrivere lead e farci arrivare email interne. Il vecchio
+ * comportamento pubblico resta raggiungibile solo dichiarandolo a mano con
+ * INBOUND_LEAD_ALLOW_PUBLIC=true, e lo scriviamo nei log a ogni avvio.
  */
 export const requireInboundLeadSecret = (req, res, next) => {
   const expectedSecret = process.env.INBOUND_LEAD_SECRET;
   if (!expectedSecret) {
+    const allowsPublic = String(process.env.INBOUND_LEAD_ALLOW_PUBLIC || '').toLowerCase() === 'true';
+    if (process.env.NODE_ENV === 'production' && !allowsPublic) {
+      console.error('❌ INBOUND_LEAD_SECRET non configurata: webhook rank checker chiuso');
+      return res.status(503).json({
+        success: false,
+        message: 'Webhook inbound non configurato'
+      });
+    }
+
+    console.warn('⚠️ Webhook rank checker senza secret: accesso pubblico');
     return next();
   }
 

@@ -64,8 +64,87 @@ describe('sendInboundLeadNotification', () => {
     expect(email.subject).toContain('Nuovo lead grader');
     expect(email.html).toContain('indirizzo sintetico, non scrivere');
     const pointsSection = email.html.match(/<ol[^>]*>(.*?)<\/ol>/)?.[1] || '';
-    expect(pointsSection.match(/fuori top 20/g)).toHaveLength(5);
+    expect(pointsSection).toContain('Nessun punto letto');
     expect(email.html).not.toContain('javascript:alert');
+  });
+
+  it('rende i punti strategici col payload vero del worker', async () => {
+    const { sendInboundLeadNotification } = await importNotificationService();
+
+    await sendInboundLeadNotification({
+      contact: {
+        _id: 'contact-strategic',
+        name: 'Trattoria da Mario',
+        phone: '+393401112233',
+        email: 'grader-393401112233@grader.[REDACTED].it', // pragma: allowlist secret
+        properties: {}
+      },
+      isNew: true,
+      leadSource: 'grader-posizione',
+      rankCheckerData: {
+        syntheticEmail: true,
+        keyword: 'ristorante bologna',
+        ranking: {
+          mainRank: 4,
+          strategicResults: [
+            { kind: 'venue', placeName: null, rank: 4, packSize: 10, outOfPack: false, unavailable: false },
+            { kind: 'station', placeName: 'Bologna Centrale', rank: 7, packSize: 10, outOfPack: false, unavailable: false },
+            { kind: 'lodging', placeName: 'Hotel Centrale', rank: null, packSize: 10, outOfPack: true, unavailable: false },
+            { kind: 'landmark', placeName: 'Due Torri', rank: null, packSize: 0, outOfPack: false, unavailable: true }
+          ]
+        },
+        restaurantData: { address: 'Via Saragozza 12, Bologna, BO' }
+      },
+      reportLink: 'https://grader.[REDACTED].it/posizione/r/tok', // pragma: allowlist secret
+      callRequest: {
+        requested: true,
+        preference: 'lunedì 7 settembre 2026, ore 10-12',
+        requestedAt: '2026-09-05T17:00:00.000Z',
+        note: null
+      }
+    });
+
+    const email = resendSendMock.mock.calls[0][0];
+    const pointsSection = email.html.match(/<ol[^>]*>(.*?)<\/ol>/)?.[1] || '';
+
+    // Il punto senza nome da Places prende l'etichetta del tipo, non «Punto N».
+    expect(pointsSection).toContain('Dal locale');
+    expect(pointsSection).not.toContain('Punto 1');
+    expect(pointsSection).toContain('Bologna Centrale');
+    expect(pointsSection).toContain('#7 su 10');
+    // Fuori dal pack e lettura fallita restano due esiti distinti.
+    expect(pointsSection).toContain('fuori dal pack');
+    expect(pointsSection).toContain('lettura non disponibile');
+    // Solo i punti davvero letti: nessun riempimento a cinque.
+    expect(pointsSection.match(/<li/g)).toHaveLength(4);
+
+    // La preferenza arriva già formattata: non va spezzata in Giorno/Fascia.
+    expect(email.html).toContain('lunedì 7 settembre 2026, ore 10-12');
+    expect(email.html).not.toContain('<strong>Giorno:</strong> N/D');
+  });
+
+  it('neutralizza HTML e header injection nel template Smartlead', async () => {
+    const { sendSmartleadInterestedNotification } = await importNotificationService();
+
+    await sendSmartleadInterestedNotification({
+      email: 'lead@example.com',
+      name: 'Mario\r\nBcc: attaccante@example.com',
+      phone: '+39 340 111 2233',
+      campaignName: 'Campagna <b>bold</b>',
+      replyText: '</div><a href="https://phishing.example">clicca qui</a>',
+      aiClassification: { confidence: 0.8, reason: '<script>alert(1)</script>' },
+      subject: 'Re: offerta',
+      website: 'javascript:alert(1)',
+      location: 'Bologna',
+      customFields: { '<b>chiave</b>': '<img src=x onerror=alert(1)>' }
+    });
+
+    const email = resendSendMock.mock.calls[0][0];
+    expect(email.html).not.toContain('<script>');
+    expect(email.html).not.toContain('<a href="https://phishing.example"');
+    expect(email.html).not.toContain('<img src=x');
+    expect(email.html).not.toContain('javascript:alert');
+    expect(email.subject).not.toMatch(/[\r\n]/);
   });
 
   it('usa i destinatari Smartlead e crea la variante richiesta chiamata', async () => {

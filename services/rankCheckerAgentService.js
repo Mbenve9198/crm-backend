@@ -1,5 +1,6 @@
 import Contact from '../models/contactModel.js';
 import Conversation from '../models/conversationModel.js';
+import { isSyntheticEmailAddress } from './phoneIdentityService.js';
 import { runAgentLoop, resolveIdentity } from './salesAgentService.js';
 
 /**
@@ -53,7 +54,17 @@ const processRankCheckerOutreach = async () => {
   const existingConvContactIds = await Conversation.distinct('contact');
   const existingSet = new Set(existingConvContactIds.map(id => id.toString()));
 
-  const eligibleLeads = leads.filter(l => !existingSet.has(l._id.toString()));
+  // I lead grader senza email hanno un indirizzo sintetico costruito dal numero:
+  // non è un recapito, quindi questo outreach — che parte via email — non li
+  // riguarda. Vanno raggiunti su WhatsApp.
+  const eligibleLeads = leads.filter(l => (
+    !existingSet.has(l._id.toString()) && !isSyntheticEmailAddress(l.email)
+  ));
+
+  const skippedSynthetic = leads.filter(l => isSyntheticEmailAddress(l.email)).length;
+  if (skippedSynthetic > 0) {
+    console.log(`📵 Rank Checker Outreach: ${skippedSynthetic} lead senza email reale, saltati`);
+  }
 
   if (eligibleLeads.length === 0) return;
 
