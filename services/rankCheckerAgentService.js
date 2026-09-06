@@ -55,8 +55,11 @@ const processRankCheckerOutreach = async () => {
   const existingSet = new Set(existingConvContactIds.map(id => id.toString()));
 
   // I lead grader senza email hanno un indirizzo sintetico costruito dal numero:
-  // non è un recapito, quindi questo outreach — che parte via email — non li
-  // riguarda. Vanno raggiunti su WhatsApp.
+  // non è un recapito, e questo job apre una conversazione via email. Restano
+  // fuori del tutto — non esiste (ancora) un ramo WhatsApp qui: il primo
+  // messaggio business-initiated richiede un template approvato, che va scelto
+  // insieme al testo. Nel frattempo il report gli arriva comunque su WhatsApp
+  // dal worker del grader, e in CRM sono visibili come lead da lavorare a mano.
   const eligibleLeads = leads.filter(l => (
     !existingSet.has(l._id.toString()) && !isSyntheticEmailAddress(l.email)
   ));
