@@ -736,11 +736,17 @@ export const receiveSmartleadLead = async (req, res) => {
 // Nessun evento onboarding imposta automaticamente "interessato" — lo AE lo fa a mano
 // dopo aver letto la conversazione WhatsApp nel dettaglio contatto.
 const ONBOARDING_STATUS_MAP = Object.freeze({
+  preview_sent: 'contattato',
+  paid: 'interessato',
   qr_shipped: 'qr code inviato',
   qr_delivered: 'qr code inviato',
   trial_pending: 'qr code inviato',
   trial_active: 'free trial iniziato',
+  trial_expired: 'free trial iniziato',
+  trial_grace: 'free trial iniziato',
+  blocked: 'free trial iniziato',
   nurturing: 'free trial iniziato',
+  sales_handoff: 'interessato',
   won: 'won'
 });
 
