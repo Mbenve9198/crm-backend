@@ -129,7 +129,7 @@ const formatDateTime = (value) => {
   }
 };
 
-const TEAM_TO = ['[REDACTED]'];
+const TEAM_TO = ['marco@midachat.com'];
 const TEAM_BCC = ['marco.benvenuti91@gmail.com', 'federico@midachat.com'];
 
 /**
