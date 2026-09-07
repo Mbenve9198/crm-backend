@@ -1,5 +1,5 @@
-# Use Node.js 18 LTS with Debian base
-FROM node:18-bullseye
+# Use Node.js 18 LTS with Debian Bookworm (bullseye security mirrors were 404ing gpgsm)
+FROM node:18-bookworm
 
 # Install Chrome secondo la documentazione OpenWA
 RUN apt-get update && apt-get install -y \
