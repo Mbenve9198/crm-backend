@@ -6,6 +6,7 @@ import Conversation from '../models/conversationModel.js';
 import Contact from '../models/contactModel.js';
 import AgentMetric from '../models/agentMetricModel.js';
 import agentLogger from './agentLogger.js';
+import { isSyntheticEmailAddress } from './phoneIdentityService.js';
 // OutboundMessageJob rimosso — WhatsApp gestito da agentWhatsAppService.js
 
 const SERPAPI_KEY = process.env.SERPAPI_KEY || process.env.SERPER_API_KEY;
@@ -398,6 +399,11 @@ async function toolSendEmail({ message, subject }, ctx) {
     result = await replyToEmailThread(campaignId, leadId, htmlBody);
   } else {
     if (!resend) return { error: 'Resend non configurato' };
+    // Gli indirizzi sintetici li generiamo noi dal numero per deduplicare i lead
+    // senza email: non esistono, quindi non ci si scrive.
+    if (isSyntheticEmailAddress(contact.email)) {
+      return { error: 'Il contatto non ha una email reale: usa WhatsApp' };
+    }
 
     const identity = conversation.agentIdentity || { name: 'Marco', surname: 'Benvenuti' };
     const fromEmail = process.env.RESEND_FROM_EMAIL || 'team@menuchat.it';
