@@ -23,13 +23,18 @@ describe('applyCallbackQueueRules', () => {
     ]);
   });
 
-  it('da richiamare nasconde i richiami futuri', () => {
+  it('da richiamare mostra anche i richiami ancora in programma', () => {
     const filter = applyCallbackQueueRules(
       { status: 'da richiamare' },
       'da richiamare',
       NOW
     );
     expect(filter.status).toBe('da richiamare');
+    expect(filter.$and).toBeUndefined();
+  });
+
+  it('all nasconde i richiami futuri', () => {
+    const filter = applyCallbackQueueRules({ status: 'all' }, 'all', NOW);
     expect(filter.$and[0]).toEqual(notFutureCallbackClause(NOW));
   });
 

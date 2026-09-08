@@ -68,6 +68,13 @@ export function notFutureCallbackClause(nowIso) {
 /**
  * Default "da contattare": include anche i richiami già scaduti (callbackAt <= now)
  * così riappaiono in coda all'orario fissato.
+ *
+ * Filtro esplicito "da richiamare": mostra tutti i richiami, anche quelli
+ * ancora in programma. Altrimenti un contatto fissato per più tardi sparisce
+ * dalla coda e l'agent non lo vede finché non scatta l'orario.
+ *
+ * Gli altri filtri (all, contattato, …) restano senza richiami futuri, così
+ * il power dialer non chiama prima del momento concordato.
  */
 export function applyCallbackQueueRules(filter, resolvedStatus, nowIso) {
   if (resolvedStatus === 'da contattare') {
@@ -76,6 +83,9 @@ export function applyCallbackQueueRules(filter, resolvedStatus, nowIso) {
     return andFilter(next, {
       $or: [{ status: 'da contattare' }, dueCallbackClause(nowIso)],
     });
+  }
+  if (resolvedStatus === 'da richiamare') {
+    return filter;
   }
   return andFilter(filter, notFutureCallbackClause(nowIso));
 }
@@ -234,7 +244,9 @@ export async function fetchDialerQueue({ user, list, status, limit, offset, city
   const distSort = { 'properties.dist_m': 1, updatedAt: -1 };
   const callbackSort = { 'properties.callbackAt': 1, 'properties.dist_m': 1, updatedAt: -1 };
   const dueFirst =
-    resolvedStatus === 'da contattare' || resolvedStatus === 'all';
+    resolvedStatus === 'da contattare' ||
+    resolvedStatus === 'all' ||
+    resolvedStatus === 'da richiamare';
   const sort = resolvedStatus === 'da richiamare' ? callbackSort : distSort;
 
   const [total, contacts] = await Promise.all([
