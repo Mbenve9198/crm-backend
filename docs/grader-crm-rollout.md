@@ -11,3 +11,20 @@ Requires the linked MenuChat v2 bootstrap and CRM frontend changes.
 - A replay of a known booking only enriches its details. Legacy callbacks without completion timestamps remain in `callbackCandidates` for review; replay never reopens a possibly completed callback.
 - Imported v2 conversations are paused/read-only for CRM automation. They remain visible on the contact and are scoped to the contact's access permissions.
 - The `propertyUpdates` field updates individual contact properties; it preserves simultaneous message/booking data. The old `properties` replacement remains for existing callers.
+# Recupero approvato del 11 settembre 2026
+
+`node scripts/recoverApprovedGraderLeads.js` esegue solo il controllo. `--apply`
+ripristina i 37 ID approvati passati in `GRADER_CRM_RECOVERY_MANIFEST`, inclusi
+i 9 con prenotazione. Il manifest è un array di `{leadId, booking?: {requestedAt,
+scheduledAt}}`, con istanti UTC. Non inserire ID di produzione nel repository.
+
+Il controllo richiede un contatto CRM univoco per ogni ID. Il reset e la relativa
+attività con i valori precedenti sono atomici in una transazione MongoDB. Gli
+owner restano invariati; tutti i contatti entrano nella lista
+`Inbound - Grader recuperati`. Il report segnala owner inattivi o numeri non
+chiamabili. Un marcatore persistente impedisce di ripetere il reset ai deploy
+successivi, anche dopo modifiche manuali degli AE. Il batch rifiuta manifest diversi.
+
+Il dialer espone la lista recuperata e mostra le prenotazioni con orario italiano;
+l'auto-dial salta quelle future. Non viene avviata alcuna chiamata o messaggio
+durante il recupero.

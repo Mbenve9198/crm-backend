@@ -39,7 +39,7 @@ function escapeRegex(s) {
 }
 
 const QUEUE_CONTACT_SELECT =
-  'name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats properties.callbackAt properties.callbackNote updatedAt createdAt';
+  'name phone email status lists owner source properties.cliente_vicino properties.dist_m properties.dist_km properties.city properties.category properties.visibilityCard properties.visibilityCardGeneratedAt properties.nearbyVerified properties.nearbyVerifiedDistM properties.nearbyClientStats properties.callbackAt properties.callbackNote properties.callRequested properties.callScheduledAt properties.callPreference updatedAt createdAt';
 
 export function andFilter(filter, clause) {
   const extra = Array.isArray(filter.$and) ? [...filter.$and] : [];
@@ -97,7 +97,6 @@ function buildBaseQueueFilter({ user, list, status }) {
   const filter = {
     lists: resolvedList,
     phone: { $exists: true, $type: 'string', $regex: /^\s*\+[0-9]/ },
-    'properties.nearbyVerified': { $ne: false },
     ...buildContactOwnerFilter(user),
   };
 
@@ -106,6 +105,7 @@ function buildBaseQueueFilter({ user, list, status }) {
   }
 
   if (resolvedList === COLD_CALL_DEFAULT_LIST) {
+    filter['properties.nearbyVerified'] = { $ne: false };
     filter['properties.cliente_vicino'] = { $exists: true, $nin: [null, ''] };
     filter.$expr = {
       $lte: [
@@ -164,6 +164,9 @@ function mapQueueContact(c) {
     city: cityName,
     callbackAt,
     callbackNote,
+    callRequested: c.properties?.callRequested === true,
+    callScheduledAt: c.properties?.callScheduledAt || null,
+    callPreference: c.properties?.callPreference || null,
     cardSummary: summary.city ? summary : { ...summary, city: cityName },
     hasVisibilityCard: summary.hasVisibilityCard,
     scriptReady: summary.hasVisibilityCard || !!summary.nearbyClient?.name,

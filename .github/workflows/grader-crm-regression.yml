@@ -16,4 +16,4 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test -- tests/unit/graderCrmFlow.test.js tests/unit/inboundLeadSecretMiddleware.test.js tests/unit/dialerQueueCallback.test.js tests/unit/dialerWrapUpCall.test.js tests/integration/inboundLeadController.test.js tests/integration/graderCrmMessages.test.js
+      - run: npm test -- tests/unit/graderCrmFlow.test.js tests/unit/inboundLeadSecretMiddleware.test.js tests/unit/dialerQueueCallback.test.js tests/unit/dialerWrapUpCall.test.js tests/integration/inboundLeadController.test.js tests/integration/graderCrmMessages.test.js tests/integration/graderRecovery.test.js
