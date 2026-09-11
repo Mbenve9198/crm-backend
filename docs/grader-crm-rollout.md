@@ -1,0 +1,30 @@
+# Grader CRM integration
+
+Requires the linked MenuChat v2 bootstrap and CRM frontend changes.
+
+- Keep `INBOUND_LEAD_SECRET` equal to worker `CRM_INBOUND_SECRET`. New message/state/landing routes fail closed; legacy callers must include `X-Inbound-Secret` too.
+- Run `node scripts/reconcileGraderCrm.js` to list candidate callbacks, ambiguous grader identities and preview-only contacted statuses. It logs IDs, never message content or phone numbers.
+- Run it with `--apply-indexes` to install the three sparse unique indexes before accepting concurrent traffic. Resolve reported duplicate identities first. This does not edit commercial states.
+- Apply v2 migration and worker before backend; frontend follows backend. Use the v2 reconciliation script to resubmit historical bookings and reconstruct retained conversations.
+- Do not bulk-reset `contattato`: legacy preview activities omitted the previous status. Review the IDs in `previewStatusNeedsReview`, since existing manual contact attempts must be preserved.
+- Production v2 emits `event=sync` with `status=preview_sent`. The audit matches this status in both the contact snapshot and historical onboarding activities, including contacts whose last event has changed. Candidate IDs still require checking both `calls` and `activities`, owner access and subsequent manual status changes before any reset.
+- A replay of a known booking only enriches its details. Legacy callbacks without completion timestamps remain in `callbackCandidates` for review; replay never reopens a possibly completed callback.
+- Imported v2 conversations are paused/read-only for CRM automation. They remain visible on the contact and are scoped to the contact's access permissions.
+- The `propertyUpdates` field updates individual contact properties; it preserves simultaneous message/booking data. The old `properties` replacement remains for existing callers.
+# Recupero approvato del 11 settembre 2026
+
+`node scripts/recoverApprovedGraderLeads.js` esegue solo il controllo. `--apply`
+ripristina i 37 ID approvati passati in `GRADER_CRM_RECOVERY_MANIFEST`, inclusi
+i 9 con prenotazione. Il manifest è un array di `{leadId, booking?: {requestedAt,
+scheduledAt}}`, con istanti UTC. Non inserire ID di produzione nel repository.
+
+Il controllo richiede un contatto CRM univoco per ogni ID. Il reset e la relativa
+attività con i valori precedenti sono atomici in una transazione MongoDB. Gli
+owner restano invariati; tutti i contatti entrano nella lista
+`Inbound - Grader recuperati`. Il report segnala owner inattivi o numeri non
+chiamabili. Un marcatore persistente impedisce di ripetere il reset ai deploy
+successivi, anche dopo modifiche manuali degli AE. Il batch rifiuta manifest diversi.
+
+Il dialer espone la lista recuperata e mostra le prenotazioni con orario italiano;
+l'auto-dial salta quelle future. Non viene avviata alcuna chiamata o messaggio
+durante il recupero.

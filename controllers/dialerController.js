@@ -266,6 +266,10 @@ export const wrapUpDialer = async (req, res) => {
     const { changed: statusChanged } = applyDialerContactStatus(contact, resolvedStatus, mrr);
 
     if (!contact.properties) contact.properties = {};
+    if (callbackAt !== undefined || callbackNote !== undefined) {
+      contact.properties.callbackUpdatedAt = new Date().toISOString();
+      contact.properties.callbackOrigin = 'manual';
+    }
     if (callbackAt === null) {
       delete contact.properties.callbackAt;
     } else if (callbackAt !== undefined) {

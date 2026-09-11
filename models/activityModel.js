@@ -5,6 +5,8 @@ import mongoose from 'mongoose';
  * Traccia tutte le interazioni con i contatti
  */
 const activitySchema = new mongoose.Schema({
+  // Stable integration event key: retries must not duplicate timeline entries.
+  externalEventId: { type: String, unique: true, sparse: true, maxLength: 240 },
   // Riferimento al contatto
   contact: {
     type: mongoose.Schema.Types.ObjectId,
@@ -297,4 +299,4 @@ activitySchema.pre('save', function(next) {
 
 const Activity = mongoose.model('Activity', activitySchema);
 
-export default Activity; 
+export default Activity;

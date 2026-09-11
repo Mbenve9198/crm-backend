@@ -505,7 +505,7 @@ export const getContactById = async (req, res) => {
 export const updateContact = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
 
     // Trova il contatto esistente per verificare i permessi
     const existingContact = await Contact.findById(id);
@@ -536,6 +536,31 @@ export const updateContact = async (req, res) => {
           success: false,
           message: 'Non hai i permessi per trasferire la ownership del contatto'
         });
+      }
+    }
+
+    // Field-level patches preserve asynchronous grader/WhatsApp updates.
+    delete updates.graderLeadId;
+    if (updates.propertyUpdates !== undefined) {
+      const patch = updates.propertyUpdates;
+      delete updates.propertyUpdates;
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length > 100
+          || Object.entries(patch).some(([key, value]) => !/^[a-zA-Z0-9_ -]{1,120}$/.test(key)
+            || ['__proto__', 'constructor', 'prototype', 'graderLeadId', 'onboardingLeadId'].includes(key)
+            || (value !== null && !['string', 'number', 'boolean'].includes(typeof value)))) {
+        return res.status(400).json({ success: false, message: 'Proprietà non valide' });
+      }
+      for (const [key, value] of Object.entries(patch)) updates[`properties.${key}`] = value;
+      if ('firstName' in patch || 'lastName' in patch) {
+        const first = patch.firstName ?? existingContact.properties?.firstName;
+        const last = patch.lastName ?? existingContact.properties?.lastName;
+        if (typeof first !== 'string' || typeof last !== 'string' || !first.trim() || !last.trim()
+            || first.length > 120 || last.length > 120 || /[\x00-\x1f\x7f]/.test(first + last)) {
+          return res.status(400).json({ success: false, message: 'Nome e cognome non validi' });
+        }
+        updates['properties.firstName'] = first.trim();
+        updates['properties.lastName'] = last.trim();
+        updates['properties.contactName'] = `${first.trim()} ${last.trim()}`;
       }
     }
 
@@ -3515,6 +3540,8 @@ export const updateContactCallback = async (req, res) => {
 
     if (!contact.properties) contact.properties = {};
 
+    contact.properties.callbackUpdatedAt = new Date().toISOString();
+    contact.properties.callbackOrigin = 'manual';
     if (callbackAt === null) {
       delete contact.properties.callbackAt;
     } else if (callbackAt !== undefined) {
