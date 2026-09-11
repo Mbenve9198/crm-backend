@@ -14,7 +14,17 @@ try {
     'properties.callbackUpdatedAt': { $exists: false },
     status: { $nin: ['won', 'do_not_contact', 'bad_data', 'lost before free trial', 'lost after free trial'] },
   }).select('_id properties.callRequestedAt properties.callScheduledAt').lean();
-  const previews = await Contact.find({ status: 'contattato', 'properties.onboardingLastEvent': 'preview_sent' })
+  // v2 emits event=sync, status=preview_sent. Later events can also replace
+  // onboardingLastEvent, so inspect persisted activities as well as the snapshot.
+  const previewContactIds = await Activity.distinct('contact', {
+    'data.kind': 'onboarding_event',
+    $or: [{ 'data.meta.status': 'preview_sent' }, { 'data.meta.event': 'preview_sent' }],
+  });
+  const previews = await Contact.find({ status: 'contattato', $or: [
+    { 'properties.onboardingStatus': 'preview_sent' },
+    { 'properties.onboardingLastEvent': 'preview_sent' },
+    { _id: { $in: previewContactIds } },
+  ] })
     .select('_id properties.onboardingLastEventAt').lean();
   const ambiguous = await Contact.aggregate([
     { $match: { graderLeadId: { $type: 'string' } } },
