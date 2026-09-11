@@ -36,6 +36,20 @@ describe('grader CRM regression', () => {
     expect(contact.status).toBe(status);
     expect(contact.properties.callbackAt).toBeUndefined();
   });
+  it('does not reopen a legacy callback when a replay adds its structured date', () => {
+    const previous = { callRequested: true, callRequestedAt: '2026-01-01T10:00:00Z' };
+    const contact = new Contact({ name: 'Test', status: 'contattato', properties: { ...booking } });
+    applyGraderCallback(contact, previous);
+    expect(contact.status).toBe('contattato');
+    expect(contact.properties.callbackAt).toBeUndefined();
+    expect(contact.properties.callScheduledAt).toBe(booking.callScheduledAt);
+  });
+  it('creates a callback for a genuinely new request after a legacy request', () => {
+    const contact = new Contact({ name: 'Test', status: 'contattato', properties: { ...booking } });
+    applyGraderCallback(contact, { callRequestedAt: '2025-12-01T10:00:00Z' });
+    expect(contact.status).toBe('da richiamare');
+    expect(contact.properties.callbackAt).toBe(booking.callScheduledAt);
+  });
   it('ignores stale bookings and preserves a more recent manual callback', () => {
     expect(withoutStaleBooking({ ...booking, firstName: 'Elisa' }, { callRequestedAt: '2026-02-01T00:00:00Z' })).toEqual({ firstName: 'Elisa' });
     const contact = new Contact({ name: 'Test', status: 'contattato', properties: { ...booking } });

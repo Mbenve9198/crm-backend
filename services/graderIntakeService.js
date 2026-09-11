@@ -57,7 +57,9 @@ export function graderContactFields(body) {
 export function applyGraderCallback(contact, previousProperties = {}) {
   const p = contact.properties || {};
   if (!p.callScheduledAt || !p.callRequestedAt || NO_CALLBACK.has(contact.status)) return;
-  if (previousProperties.callRequestedAt === p.callRequestedAt && previousProperties.callScheduledAt === p.callScheduledAt) return;
+  // Legacy requests lack callScheduledAt and completion timestamps. Enrich their
+  // booking details, but never guess whether an AE already completed the callback.
+  if (previousProperties.callRequestedAt && new Date(previousProperties.callRequestedAt).getTime() === new Date(p.callRequestedAt).getTime()) return;
   if (previousProperties.callbackUpdatedAt && new Date(previousProperties.callbackUpdatedAt) >= new Date(p.callRequestedAt)) return;
   p.callbackAt = p.callScheduledAt;
   p.callbackNote = p.callNote || 'Chiamata prenotata dal grader';

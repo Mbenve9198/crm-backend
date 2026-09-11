@@ -7,5 +7,6 @@ Requires the linked MenuChat v2 bootstrap and CRM frontend changes.
 - Run it with `--apply-indexes` to install the three sparse unique indexes before accepting concurrent traffic. Resolve reported duplicate identities first. This does not edit commercial states.
 - Apply v2 migration and worker before backend; frontend follows backend. Use the v2 reconciliation script to resubmit historical bookings and reconstruct retained conversations.
 - Do not bulk-reset `contattato`: legacy preview activities omitted the previous status. Review the IDs in `previewStatusNeedsReview`, since existing manual contact attempts must be preserved.
+- A replay of a known booking only enriches its details. Legacy callbacks without completion timestamps remain in `callbackCandidates` for review; replay never reopens a possibly completed callback.
 - Imported v2 conversations are paused/read-only for CRM automation. They remain visible on the contact and are scoped to the contact's access permissions.
 - The `propertyUpdates` field updates individual contact properties; it preserves simultaneous message/booking data. The old `properties` replacement remains for existing callers.
