@@ -38,6 +38,22 @@ function _computeModifications(original, final) {
 
 router.use(protect);
 
+// The CRM transcript has the same access boundary as its contact.
+router.use('/conversations/:id', async (req, res, next) => {
+  try {
+    const conversation = await Conversation.findById(req.params.id).select('contact externalThreadId');
+    if (!conversation) return res.status(404).json({ success: false, error: 'Conversazione non trovata' });
+    const contact = await Contact.findById(conversation.contact);
+    if (!contact || !req.user.canAccessContact(contact)) return res.status(403).json({ success: false, error: 'Accesso negato' });
+    if (conversation.externalThreadId?.startsWith('v2:') && !['GET', 'HEAD'].includes(req.method)) {
+      return res.status(409).json({ success: false, error: 'Conversazione gestita dall’agente onboarding' });
+    }
+    return next();
+  } catch {
+    return res.status(400).json({ success: false, error: 'Conversazione non valida' });
+  }
+});
+
 /**
  * GET /api/agent/conversations
  * Lista conversazioni attive dell'agente
@@ -49,6 +65,12 @@ router.get('/conversations', async (req, res) => {
     if (status !== 'all') filter.status = status;
     if (contactId) filter.contact = contactId;
     if (channel && channel !== 'all') filter.channel = channel;
+    if (req.user.role === 'agent') {
+      const accessible = await Contact.find({ owner: req.user._id }).distinct('_id');
+      filter.$and = [{ contact: { $in: accessible } }];
+    } else if (!['admin', 'manager'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'Accesso negato' });
+    }
 
     let query = Conversation.find(filter)
       .populate('contact', 'name email phone status source properties')
@@ -91,7 +113,7 @@ router.get('/conversations', async (req, res) => {
 router.get('/conversations/:id', async (req, res) => {
   try {
     const conversation = await Conversation.findById(req.params.id)
-      .populate('contact', 'name email phone status source properties rankCheckerData')
+      .populate('contact', 'name email phone status source properties rankCheckerData owner')
       .populate('assignedTo', 'firstName lastName email');
 
     if (!conversation) return res.status(404).json({ success: false, error: 'Conversazione non trovata' });

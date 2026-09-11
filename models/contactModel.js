@@ -6,6 +6,7 @@ import validator from 'validator';
  * Gestisce i contatti con proprietà dinamiche e appartenenza a liste
  */
 const contactSchema = new mongoose.Schema({
+  graderLeadId: { type: String, unique: true, sparse: true },
   // Nome del contatto (obbligatorio)
   name: {
     type: String,
@@ -343,4 +344,4 @@ contactSchema.statics.countByOwner = function(ownerId) {
 // Esporta il modello
 const Contact = mongoose.model('Contact', contactSchema);
 
-export default Contact; 
+export default Contact;

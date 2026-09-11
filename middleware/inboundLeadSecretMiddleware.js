@@ -48,3 +48,11 @@ export const requireInboundLeadSecret = (req, res, next) => {
 
   return next();
 };
+
+/** CRM event/message endpoints never allow anonymous writes, in any environment. */
+export const requireCrmSyncSecret = (req, res, next) => {
+  if (!process.env.INBOUND_LEAD_SECRET?.trim()) {
+    return res.status(503).json({ success: false, message: 'Webhook CRM non configurato' });
+  }
+  return requireInboundLeadSecret(req, res, next);
+};

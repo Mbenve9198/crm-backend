@@ -1,4 +1,5 @@
 import Contact from '../models/contactModel.js';
+import { saveGraderContact, graderContactFields, applyGraderCallback, withoutStaleBooking, recordGraderBooking } from '../services/graderIntakeService.js';
 import User from '../models/userModel.js';
 import Activity from '../models/activityModel.js';
 import AssignmentState from '../models/assignmentStateModel.js';
@@ -153,10 +154,18 @@ const applyLeadDataToContact = (contact, { leadData, crmList, normalizedEmail, i
   contact.rankCheckerData = leadData.rankCheckerData;
   contact.markModified('rankCheckerData');
 
+  const previousProperties = { ...contact.properties };
   contact.properties = {
     ...contact.properties,
-    ...leadData.properties
+    ...withoutStaleBooking(leadData.properties, contact.properties)
   };
+  if (leadData.graderLeadId) {
+    if (contact.graderLeadId && contact.graderLeadId !== leadData.graderLeadId) {
+      throw Object.assign(new Error('Contatto collegato a un altro lead grader'), { status: 409 });
+    }
+    contact.graderLeadId = leadData.graderLeadId;
+  }
+  applyGraderCallback(contact, previousProperties);
   contact.markModified('properties');
 };
 
@@ -187,6 +196,7 @@ const queueInboundLeadNotification = (data) => {
  */
 export const receiveRankCheckerLead = async (req, res) => {
   try {
+    const extraFields = graderContactFields(req.body);
     const { 
       email, 
       phone, 
@@ -336,7 +346,10 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
 
     // Verifica se conosciamo già questo lead, per email vera o per numero
-    let contact = await findExistingRankCheckerContact({
+    let contact = extraFields.graderLeadId
+      ? await Contact.findOne({ graderLeadId: extraFields.graderLeadId })
+      : null;
+    contact ??= await findExistingRankCheckerContact({
       normalizedEmail,
       syntheticEmail,
       phoneE164,
@@ -344,6 +357,9 @@ export const receiveRankCheckerLead = async (req, res) => {
       placeId
     });
     
+    if (contact?.graderLeadId && extraFields.graderLeadId && contact.graderLeadId !== extraFields.graderLeadId) {
+      return res.status(409).json({ success: false, message: 'Contatto collegato a un altro lead grader' });
+    }
     // Mappa leadSource → source CRM e lista
     const crmSourceMap = {
       'prova-gratuita': {
@@ -381,6 +397,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     console.log(crmConfig.log);
 
     const leadData = {
+      ...(extraFields.graderLeadId && { graderLeadId: extraFields.graderLeadId }),
       name: restaurantName,
       email: normalizedEmail,
       phone: phoneE164 ?? undefined,
@@ -442,7 +459,8 @@ export const receiveRankCheckerLead = async (req, res) => {
         // Agent session per conversazione WhatsApp
         ...(req.body.agentSessionId && { agentSessionId: req.body.agentSessionId }),
         // Interesse recensioni (dal form menu-landing)
-        ...(req.body.reviewInterest && { reviewInterest: req.body.reviewInterest })
+        ...(req.body.reviewInterest && { reviewInterest: req.body.reviewInterest }),
+        ...extraFields
       }
     };
 
@@ -491,6 +509,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         contact.source = crmSource;
       }
 
+      const previousStatus = contact.status;
       applyLeadDataToContact(contact, {
         leadData,
         crmList,
@@ -499,16 +518,15 @@ export const receiveRankCheckerLead = async (req, res) => {
         phoneE164
       });
 
-      const previousStatus = contact.status;
-
-      if (!isQualificationUpdate && !REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
+      if (!isQualificationUpdate && !callRequested && !REACTIVATION_PROTECTED_STATUSES.includes(contact.status)) {
         contact.status = 'da contattare';
         contact.reactivatedAt = new Date();
       }
 
       contact.lastModifiedBy = defaultOwner._id;
 
-      await contact.save();
+      contact = await saveGraderContact(contact);
+      await recordGraderBooking(contact, contact.owner || defaultOwner._id);
 
       if (!isSyntheticEmail && phoneE164) {
         try {
@@ -581,6 +599,7 @@ export const receiveRankCheckerLead = async (req, res) => {
       
       try {
         contact = new Contact(leadData);
+        applyGraderCallback(contact);
         await contact.save();
       } catch (createError) {
         if (createError?.code !== 11000) {
@@ -591,7 +610,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         // ha già creato il contatto. Rispondere 409 butterebbe via questo
         // payload, quindi riprendiamo il contatto appena creato e ci scriviamo
         // sopra i nostri dati.
-        const raced = await findExistingRankCheckerContact({
+        let raced = await findExistingRankCheckerContact({
           normalizedEmail,
           syntheticEmail,
           phoneE164,
@@ -610,7 +629,8 @@ export const receiveRankCheckerLead = async (req, res) => {
           phoneE164
         });
         raced.lastModifiedBy = defaultOwner._id;
-        await raced.save();
+        raced = await saveGraderContact(raced);
+        await recordGraderBooking(raced, raced.owner || defaultOwner._id);
 
         notifyTeam(raced, { isNew: false });
 
@@ -625,6 +645,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         });
       }
 
+      await recordGraderBooking(contact, contact.owner || defaultOwner._id);
       notifyTeam(contact, { isNew: true });
       
       // Aggiorna statistiche dell'owner
@@ -644,6 +665,7 @@ export const receiveRankCheckerLead = async (req, res) => {
     }
 
   } catch (error) {
+    if (error.status === 400 || error.status === 409) return res.status(error.status).json({ success: false, message: error.message });
     console.error('❌ Errore ricezione lead inbound:', error);
     
     // Errore duplicato email (race condition)
@@ -1032,165 +1054,7 @@ export const receiveSmartleadLead = async (req, res) => {
   }
 };
 
-// Nessun evento onboarding imposta automaticamente "interessato" — lo AE lo fa a mano
-// dopo aver letto la conversazione WhatsApp nel dettaglio contatto.
-const ONBOARDING_STATUS_MAP = Object.freeze({
-  preview_sent: 'contattato',
-  paid: 'interessato',
-  qr_shipped: 'qr code inviato',
-  qr_delivered: 'qr code inviato',
-  trial_pending: 'qr code inviato',
-  trial_active: 'free trial iniziato',
-  trial_expired: 'free trial iniziato',
-  trial_grace: 'free trial iniziato',
-  blocked: 'free trial iniziato',
-  nurturing: 'free trial iniziato',
-  sales_handoff: 'interessato',
-  won: 'won'
-});
-
-const ONBOARDING_ACTIVITY_TYPE = Object.freeze({
-  engaged: 'whatsapp',
-  autoresponder_detected: 'whatsapp'
-});
-
-const ONBOARDING_ACTIVITY_COPY = Object.freeze({
-  engaged: {
-    title: 'Risposta WhatsApp del lead',
-    description: 'Il lead ha risposto su WhatsApp — verifica la conversazione e valuta manualmente lo status.'
-  },
-  autoresponder_detected: {
-    title: 'Risposta automatica WhatsApp (non conteggiata come interesse)',
-    description: 'Auto-risposta del business WhatsApp — non implica interesse reale. Nessun cambio status.'
-  }
-});
-
-// Ordine funnel: consente solo avanzamenti (mai retrocessioni da eventi onboarding)
-const PIPELINE_RANK = Object.freeze({
-  'da contattare': 0,
-  'contattato': 1,
-  'da richiamare': 2,
-  'ghosted/bad timing': 2,
-  'interessato': 3,
-  'qr code inviato': 4,
-  'free trial iniziato': 5,
-  'won': 6
-});
-
-// Stati che nessun evento onboarding può sovrascrivere
-const ONBOARDING_IMMUTABLE_STATUSES = ['won', 'do_not_contact', 'bad_data'];
-
-function mapOnboardingStatus(fsmValue, previousStatus) {
-  if (fsmValue === 'lost') {
-    return previousStatus === 'free trial iniziato' ? 'lost after free trial' : 'lost before free trial';
-  }
-  return Object.prototype.hasOwnProperty.call(ONBOARDING_STATUS_MAP, fsmValue)
-    ? ONBOARDING_STATUS_MAP[fsmValue]
-    : undefined;
-}
-
-const DEFAULT_ONBOARDING_MRR = 1290;
-
-/**
- * Riceve eventi FSM onboarding da MenuChat backend
- * POST /api/inbound/onboarding-event
- */
-export const receiveOnboardingEvent = async (req, res) => {
-  try {
-    const { leadId, event, status, restaurantName, phone, name, meta = {} } = req.body;
-
-    if (!event) {
-      return res.status(400).json({ success: false, message: 'event obbligatorio' });
-    }
-
-    console.log(`📥 ONBOARDING EVENT: ${event} — ${restaurantName || phone || leadId}`);
-
-    let contact = null;
-    if (phone) {
-      contact = await Contact.findOne({ phone: String(phone).replace(/\s/g, '') });
-    }
-    if (!contact && req.body.email) {
-      contact = await Contact.findOne({ email: String(req.body.email).toLowerCase() });
-    }
-    if (!contact && restaurantName) {
-      contact = await Contact.findOne({ name: restaurantName }).sort({ updatedAt: -1 });
-    }
-
-    if (!contact) {
-      console.warn(`⚠️ ONBOARDING EVENT: contatto non trovato per ${restaurantName || phone}`);
-      return res.status(200).json({ success: true, message: 'Evento ricevuto, contatto non trovato' });
-    }
-
-    const previousStatus = contact.status;
-    const mappedStatus = mapOnboardingStatus(status, previousStatus) || mapOnboardingStatus(event, previousStatus);
-
-    let statusChanged = false;
-    if (mappedStatus && mappedStatus !== previousStatus
-        && !ONBOARDING_IMMUTABLE_STATUSES.includes(previousStatus)) {
-      const isLost = mappedStatus.startsWith('lost');
-      const isForward = (PIPELINE_RANK[mappedStatus] ?? -1) > (PIPELINE_RANK[previousStatus] ?? -1);
-      if (isLost || isForward) {
-        contact.status = mappedStatus;
-        contact.mrr = contact.mrr || DEFAULT_ONBOARDING_MRR;
-        statusChanged = true;
-      }
-    }
-
-    contact.properties = {
-      ...(contact.properties || {}),
-      onboardingStatus: status || event,
-      onboardingLeadId: leadId || contact.properties?.onboardingLeadId,
-      onboardingLastEvent: event,
-      onboardingLastEventAt: new Date().toISOString()
-    };
-    contact.markModified('properties');
-    await contact.save();
-
-    // Activity.createdBy è required ma contact.owner può essere null (upsert interni)
-    let activityOwner = contact.owner;
-    if (!activityOwner) {
-      const fallbackOwner = await User.findOne({
-        role: { $in: ['admin', 'manager'] },
-        isActive: true
-      }).sort({ createdAt: 1 });
-      activityOwner = fallbackOwner?._id;
-    }
-
-    if (activityOwner) {
-      const copy = ONBOARDING_ACTIVITY_COPY[event];
-      const activityType = ONBOARDING_ACTIVITY_TYPE[event] || 'status_change';
-      const activity = new Activity({
-        contact: contact._id,
-        type: activityType,
-        title: copy?.title || `Onboarding: ${event}`,
-        description: copy?.description
-          || `Stato onboarding: ${status || event}${meta?.reason ? ` — ${meta.reason}` : ''}`,
-        data: {
-          kind: 'onboarding_event',
-          origin: 'system',
-          meta: { leadId, event, status, ...meta }
-        },
-        createdBy: activityOwner
-      });
-      await activity.save();
-    } else {
-      console.warn(`⚠️ ONBOARDING EVENT: nessun owner disponibile, activity non creata per ${contact._id}`);
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Evento onboarding registrato',
-      data: { contactId: contact._id, status: contact.status }
-    });
-  } catch (error) {
-    console.error('❌ Errore onboarding-event:', error.message);
-    return res.status(500).json({
-      success: false,
-      message: 'Errore interno del server',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
-  }
-};
+export { receiveOnboardingEvent } from './onboardingEventController.js';
 
 /**
  * Riceve messaggi da landingAgentHandler e li salva nella Conversation del contatto

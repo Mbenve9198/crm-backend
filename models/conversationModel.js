@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
 const messageSchema = new mongoose.Schema({
+  externalId: { type: String, maxLength: 200 },
   role: {
     type: String,
     enum: ['lead', 'agent', 'human'],
@@ -17,6 +18,8 @@ const messageSchema = new mongoose.Schema({
     required: true
   },
   metadata: {
+    source: { type: String, maxLength: 80 },
+    isAutoresponder: Boolean,
     aiConfidence: Number,
     wasAutoSent: Boolean,
     humanEdited: Boolean,
@@ -32,6 +35,7 @@ const messageSchema = new mongoose.Schema({
 }, { _id: true });
 
 const conversationSchema = new mongoose.Schema({
+  externalThreadId: { type: String, unique: true, sparse: true, maxLength: 200 },
   contact: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Contact',
@@ -133,6 +137,7 @@ const conversationSchema = new mongoose.Schema({
 
   metrics: {
     messagesCount: { type: Number, default: 0 },
+    leadMessagesCount: { type: Number, default: 0 },
     agentMessagesCount: { type: Number, default: 0 },
     avgResponseTimeMinutes: Number,
     objectionsSolved: { type: Number, default: 0 },
