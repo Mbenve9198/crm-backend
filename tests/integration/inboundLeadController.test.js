@@ -108,6 +108,35 @@ afterAll(async () => {
 });
 
 describe('receiveRankCheckerLead', () => {
+  it('aggiorna tutte le risposte tardive sullo stesso contatto senza ripetere l’email iniziale', async () => {
+    const first = await postLead(basePayload);
+    expect(sendInboundLeadNotificationMock).toHaveBeenCalledOnce();
+    expect(sendInboundLeadNotificationMock.mock.calls[0][0].rankCheckerData.dailyCovers).toBeNull();
+    sendInboundLeadNotificationMock.mockClear();
+    // A retry whose CRM response was lost must also stay silent.
+    await postLead(basePayload);
+    for (const answers of [
+      { dailyCovers: 80 },
+      { dailyCovers: 80, hasDigitalMenu: false, willingToAdoptMenu: false },
+      { dailyCovers: 95, hasDigitalMenu: true, willingToAdoptMenu: null }
+    ]) {
+      const update = await postLead({ ...basePayload, ...answers, isQualificationUpdate: true });
+      expect(update.statusCode).toBe(200);
+      expect(String(update.body.data.contactId)).toBe(String(first.body.data.contactId));
+      const saved = await Contact.findById(first.body.data.contactId);
+      expect(saved.rankCheckerData).toMatchObject(answers);
+    }
+    expect(await Contact.countDocuments()).toBe(1);
+    expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('mantiene le notifiche di qualificazione per le altre landing', async () => {
+    await postLead({ ...basePayload, leadSource: 'menu-digitale-landing' });
+    sendInboundLeadNotificationMock.mockClear();
+    await postLead({ ...basePayload, leadSource: 'menu-digitale-landing', dailyCovers: 80, isQualificationUpdate: true });
+    expect(sendInboundLeadNotificationMock).toHaveBeenCalledOnce();
+  });
+
   it('crea un lead con solo telefono e salva email sintetica e flag', async () => {
     const res = await postLead(basePayload);
 
@@ -138,6 +167,7 @@ describe('receiveRankCheckerLead', () => {
 
     const secondResponse = await postLead({
       ...payload,
+      reportLink: 'https://grader.menuchat.it/report/second', // pragma: allowlist secret
       rankingResults: {
         ...rankingResults,
         mainResult: { rank: 5 }
@@ -393,7 +423,7 @@ describe('receiveRankCheckerLead', () => {
     expect(flagged.properties.duplicateDetectedAt).toBeTruthy();
   });
 
-  it('notifica una nuova qualificazione e la prima richiesta di chiamata', async () => {
+  it('salva una nuova qualificazione senza email e notifica la prima richiesta di chiamata', async () => {
     await postLead(basePayload);
     sendInboundLeadNotificationMock.mockClear();
 
@@ -402,7 +432,8 @@ describe('receiveRankCheckerLead', () => {
       isQualificationUpdate: true,
       dailyCovers: 80
     });
-    expect(sendInboundLeadNotificationMock).toHaveBeenCalledTimes(1);
+    expect(sendInboundLeadNotificationMock).not.toHaveBeenCalled();
+    expect((await Contact.findOne()).rankCheckerData.dailyCovers).toBe(80);
 
     sendInboundLeadNotificationMock.mockClear();
     await postLead({

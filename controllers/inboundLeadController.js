@@ -484,12 +484,9 @@ export const receiveRankCheckerLead = async (req, res) => {
       });
     };
 
-    if (contact) {
-      // Contatto esiste → AGGIORNA i dati
-      console.log(`🔄 Contatto esistente trovato, aggiorno i dati...`);
-
-      const previousRankCheckerData = contact.rankCheckerData || {};
-      const previousProperties = contact.properties || {};
+    const shouldNotifyExistingContact = (savedContact) => {
+      const previousRankCheckerData = savedContact.rankCheckerData || {};
+      const previousProperties = savedContact.properties || {};
       const hasNewQualification = hasQualificationPayload
         && QUALIFICATION_FIELDS.some((field) => (
           qualData[field] !== undefined
@@ -502,7 +499,21 @@ export const receiveRankCheckerLead = async (req, res) => {
         || (callRequestedAt !== undefined && !valuesMatch(previousProperties.callRequestedAt, callRequestedAt))
         || !valuesMatch(previousProperties.callNote ?? null, normalizedCallNote)
       );
-      const shouldNotify = !isQualificationUpdate || hasNewQualification || hasNewCallRequest;
+      // The posizione worker collects answers for five minutes before its first
+      // push. Later qualification changes update the card silently. A new call
+      // request still deserves its own notification, as do other lead sources.
+      if (leadSource === 'grader-posizione') {
+        const isNewReport = !finalReportLink || previousProperties.rankCheckerReport !== finalReportLink;
+        return hasNewCallRequest || (!isQualificationUpdate && isNewReport);
+      }
+      return !isQualificationUpdate || hasNewQualification || hasNewCallRequest;
+    };
+
+    if (contact) {
+      // Contatto esiste → AGGIORNA i dati
+      console.log(`🔄 Contatto esistente trovato, aggiorno i dati...`);
+
+      const shouldNotify = shouldNotifyExistingContact(contact);
       
       // Aggiorna source solo se era manual
       if (contact.source === 'manual') {
@@ -621,6 +632,7 @@ export const receiveRankCheckerLead = async (req, res) => {
           throw createError;
         }
 
+        const shouldNotify = shouldNotifyExistingContact(raced);
         applyLeadDataToContact(raced, {
           leadData,
           crmList,
@@ -632,7 +644,7 @@ export const receiveRankCheckerLead = async (req, res) => {
         raced = await saveGraderContact(raced);
         await recordGraderBooking(raced, raced.owner || defaultOwner._id);
 
-        notifyTeam(raced, { isNew: false });
+        if (shouldNotify) notifyTeam(raced, { isNew: false });
 
         console.log(`🔀 Contatto creato in parallelo, dati applicati: ${raced.name}`);
         return res.status(200).json({
