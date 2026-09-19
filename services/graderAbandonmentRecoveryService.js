@@ -13,6 +13,13 @@ export function parseRecoveryInput(body, sync = false) {
   if (body.phone && !phone || email && !validator.isEmail(email) || !phone && !email) {
     throw Object.assign(new Error('Recapito non valido'), { status: 400 });
   }
+  if (sync && (body.deliveryStatus !== undefined && body.deliveryStatus !== 'sent'
+    || body.provider !== undefined && !['unipile', 'smartlead'].includes(body.provider)
+    || body.provider === 'smartlead' && (body.channel !== 'email' || body.deliveryStatus !== 'sent'
+      || !Number.isSafeInteger(body.providerCampaignId) || body.providerCampaignId < 1
+      || !Number.isSafeInteger(body.providerLeadId) || body.providerLeadId < 1))) {
+    throw Object.assign(new Error('Invio provider non confermato'), { status: 400 });
+  }
   if (sync && (!['whatsapp', 'email'].includes(body.channel) || !validator.isISO8601(String(body.sentAt || ''))
     || typeof body.reportUrl !== 'string' || !validator.isURL(body.reportUrl, { protocols: ['https'], require_protocol: true })
     || typeof body.providerMessageId !== 'string' || !body.providerMessageId)) {
@@ -20,7 +27,8 @@ export function parseRecoveryInput(body, sync = false) {
   }
   return { recoveryId: body.recoveryId, placeId: body.placeId.trim(), restaurantName: body.restaurantName.trim(),
     phone: phone || null, email, channel: body.channel, reportUrl: body.reportUrl,
-    sentAt: body.sentAt, providerMessageId: body.providerMessageId };
+    sentAt: body.sentAt, providerMessageId: body.providerMessageId, deliveryStatus: body.deliveryStatus,
+    provider: body.provider, providerCampaignId: body.providerCampaignId, providerLeadId: body.providerLeadId };
 }
 export function recoveryIdentityQuery(input) {
   const alternatives = [{ graderRecoveryId: input.recoveryId }, { 'rankCheckerData.placeId': input.placeId },
@@ -44,7 +52,8 @@ export function createGraderRecoveryService(Contact, User, env = process.env) {
       if (previous?.graderRecoveryId) throw Object.assign(new Error('Recupero già collegato'), { status: 409 });
       const properties = { id: input.recoveryId, placeId: input.placeId, channel: input.channel,
         reportUrl: input.reportUrl, sentAt: input.sentAt, providerMessageId: input.providerMessageId,
-        publicPhone: input.phone, publicEmail: input.email, leadSource: 'grader-abandoned' };
+        deliveryStatus: 'sent', provider: input.provider, providerCampaignId: input.providerCampaignId,
+        providerLeadId: input.providerLeadId, publicPhone: input.phone, publicEmail: input.email, leadSource: 'grader-abandoned' };
       if (previous) {
         // A contact created between preflight and sync keeps its owner/status/verified phone.
         const updated = await Contact.findOneAndUpdate({ _id: previous._id, graderRecoveryId: { $exists: false } }, {

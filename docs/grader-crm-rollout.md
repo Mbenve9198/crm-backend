@@ -28,3 +28,27 @@ successivi, anche dopo modifiche manuali degli AE. Il batch rifiuta manifest div
 Il dialer espone la lista recuperata e mostra le prenotazioni con orario italiano;
 l'auto-dial salta quelle future. Non viene avviata alcuna chiamata o messaggio
 durante il recupero.
+
+## Recupero email Smartlead — 19 settembre 2026
+
+Il worker MenuChat importa prima il lead nella campagna dedicata e riconcilia
+successivamente la history Smartlead. L'importazione non è un invio: il CRM viene
+sincronizzato solo dopo un evento `SENT` con destinatario, sequenza e link corretti.
+L'input sync per Smartlead deve avere `channel=email`, `deliveryStatus=sent`,
+`provider=smartlead`, `providerCampaignId` e `providerLeadId` interi positivi,
+oltre a `sentAt`, `providerMessageId` e URL report già richiesti.
+Gli stati `queued`, `uncertain` e `failed` sono rifiutati con 400. Le chiamate
+WhatsApp precedenti restano compatibili. Il segreto inbound è sempre obbligatorio.
+
+I metadati provider sono salvati in `properties.graderRecovery`; source
+`grader_abandoned`, lista `Posizione — recupero abbandoni` e stato `contattato`
+non vengono creati per importazioni o invii incerti. Retry CRM e indice univoco su
+`graderRecoveryId` restano indipendenti dall'invio e non fanno reinviare email.
+
+Campagna dedicata Smartlead 3987276 in bozza, campagna interna 3987294 in bozza.
+Nessun deploy/migrazione production effettuato. Il collaudo reale è fermo prima
+dell'invio: due indirizzi interni catch-all bloccati da MillionVerifier e il
+successivo Gmail verificato escluso dalla blocklist Smartlead. Ricezione,
+risposta e inoltro a hello@menuchat.it non sono ancora verificati. I controlli
+CRM sono stati verificati con la suite locale dedicata (75 test, incluso MongoDB).
+Il runbook completo e la configurazione sono in `menuchat-v2/docs/grader-recovery.md`.

@@ -60,3 +60,21 @@ it('stops ambiguous matches, stale updates, missing owners and malformed input',
   expect(() => parseRecoveryInput({ ...input, placeId: { $ne: null } })).toThrow();
   expect(() => parseRecoveryInput({ ...input, reportUrl: 'javascript:alert(1)' }, true)).toThrow();
 });
+it('rejects queued, uncertain and incomplete Smartlead imports at the sync boundary', () => {
+  const smartlead = { ...input, channel: 'email', provider: 'smartlead', providerCampaignId: 3987276,
+    providerLeadId: 1234, deliveryStatus: 'sent' };
+  expect(parseRecoveryInput(smartlead, true).providerCampaignId).toBe(3987276);
+  for (const deliveryStatus of ['queued', 'uncertain', 'failed', undefined]) {
+    expect(() => parseRecoveryInput({ ...smartlead, deliveryStatus }, true)).toThrow('Invio provider non confermato');
+  }
+  for (const providerLeadId of [null, 0, -1, 1.5, '1234']) {
+    expect(() => parseRecoveryInput({ ...smartlead, providerLeadId }, true)).toThrow('Invio provider non confermato');
+  }
+  expect(() => parseRecoveryInput({ ...input, deliveryStatus: 'queued' }, true)).toThrow();
+});
+it('stores confirmed Smartlead delivery identifiers without changing the abandonment source', async () => {
+  await service.sync(parseRecoveryInput({ ...input, channel: 'email', provider: 'smartlead',
+    providerCampaignId: 3987276, providerLeadId: 1234, deliveryStatus: 'sent' }, true));
+  expect(Contact.create.mock.calls[0][0]).toMatchObject({ source: 'grader_abandoned', lists: [RECOVERY_LIST],
+    properties: { graderRecovery: { deliveryStatus: 'sent', provider: 'smartlead', providerCampaignId: 3987276, providerLeadId: 1234 } } });
+});
