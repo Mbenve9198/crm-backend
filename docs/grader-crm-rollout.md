@@ -45,10 +45,22 @@ I metadati provider sono salvati in `properties.graderRecovery`; source
 non vengono creati per importazioni o invii incerti. Retry CRM e indice univoco su
 `graderRecoveryId` restano indipendenti dall'invio e non fanno reinviare email.
 
-Campagna dedicata Smartlead 3987276 in bozza, campagna interna 3987294 in bozza.
-Nessun deploy/migrazione production effettuato. Il collaudo reale è fermo prima
-dell'invio: due indirizzi interni catch-all bloccati da MillionVerifier e il
-successivo Gmail verificato escluso dalla blocklist Smartlead. Ricezione,
-risposta e inoltro a hello@menuchat.it non sono ancora verificati. I controlli
-CRM sono stati verificati con la suite locale dedicata (75 test, incluso MongoDB).
+Campagna dedicata Smartlead 3987276 in bozza con zero lead; campagna interna
+3987294 in pausa dopo un solo invio confermato al destinatario interno Sendcloud
+autorizzato, verificato `ok/1` da MillionVerifier. Evento `SENT` del
+2026-09-19 alle 13:37:37.891 UTC, lead 4583736448. I precedenti destinatari catch-all
+o esclusi da Smartlead non sono stati forzati.
+
+Nessun deploy/migrazione o scrittura CRM production effettuato. Il recupero locale
+è `sent` con `crmSyncedAt=null`: la modalità test non sincronizza production.
+Il report dimostrativo HTTP localhost risponde 200 ma è correttamente rifiutato
+dal validatore HTTPS del CRM. In un MongoDB temporaneo è stata verificata la sync
+con i metadati dell'invio reale e un URL HTTPS fittizio: un solo contatto per due
+richieste concorrenti, source/lista/stato corretti e metadati provider conservati.
+Questa verifica non costituisce un collaudo completo del link pubblico.
+
+Ricezione, risposta e inoltro a hello@menuchat.it restano da verificare, insieme
+al percorso completo con URL HTTPS pubblico e CRM isolato. I controlli CRM sono
+verificati anche con la suite locale dedicata (75 test, incluso MongoDB; CI verde
+run 35445158967 su 94fe465).
 Il runbook completo e la configurazione sono in `menuchat-v2/docs/grader-recovery.md`.
