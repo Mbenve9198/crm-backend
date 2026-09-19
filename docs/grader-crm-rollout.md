@@ -59,8 +59,14 @@ con i metadati dell'invio reale e un URL HTTPS fittizio: un solo contatto per du
 richieste concorrenti, source/lista/stato corretti e metadati provider conservati.
 Questa verifica non costituisce un collaudo completo del link pubblico.
 
-Ricezione, risposta e inoltro a hello@menuchat.it restano da verificare, insieme
-al percorso completo con URL HTTPS pubblico e CRM isolato. I controlli CRM sono
+L'utente conferma la ricezione della prima email nello spam e risponde; Smartlead
+registra `REPLY` alle 14:03:10 UTC. L'inoltro delle 14:05:09 UTC a hello@menuchat.it
+è accettato e la ricezione è confermata dall'utente. L'adapter MenuChat è corretto
+per accettare l'ack reale `ok=true`, oltre a quello documentato `success=true`,
+senza ripetere l'inoltro già effettuato (62 test MenuChat passati).
+
+Restano da verificare il percorso completo con URL HTTPS pubblico e CRM isolato,
+la firma aggiunta dal provider e la deliverability finale. I controlli CRM sono
 verificati anche con la suite locale dedicata (75 test, incluso MongoDB; CI verde
 run 35445158967 su 94fe465).
 Il runbook completo e la configurazione sono in `menuchat-v2/docs/grader-recovery.md`.
