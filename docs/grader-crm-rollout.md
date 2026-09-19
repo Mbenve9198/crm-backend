@@ -28,3 +28,45 @@ successivi, anche dopo modifiche manuali degli AE. Il batch rifiuta manifest div
 Il dialer espone la lista recuperata e mostra le prenotazioni con orario italiano;
 l'auto-dial salta quelle future. Non viene avviata alcuna chiamata o messaggio
 durante il recupero.
+
+## Recupero email Smartlead — 19 settembre 2026
+
+Il worker MenuChat importa prima il lead nella campagna dedicata e riconcilia
+successivamente la history Smartlead. L'importazione non è un invio: il CRM viene
+sincronizzato solo dopo un evento `SENT` con destinatario, sequenza e link corretti.
+L'input sync per Smartlead deve avere `channel=email`, `deliveryStatus=sent`,
+`provider=smartlead`, `providerCampaignId` e `providerLeadId` interi positivi,
+oltre a `sentAt`, `providerMessageId` e URL report già richiesti.
+Gli stati `queued`, `uncertain` e `failed` sono rifiutati con 400. Le chiamate
+WhatsApp precedenti restano compatibili. Il segreto inbound è sempre obbligatorio.
+
+I metadati provider sono salvati in `properties.graderRecovery`; source
+`grader_abandoned`, lista `Posizione — recupero abbandoni` e stato `contattato`
+non vengono creati per importazioni o invii incerti. Retry CRM e indice univoco su
+`graderRecoveryId` restano indipendenti dall'invio e non fanno reinviare email.
+
+Campagna dedicata Smartlead 3987276 in bozza con zero lead; campagna interna
+3987294 in pausa dopo un solo invio confermato al destinatario interno Sendcloud
+autorizzato, verificato `ok/1` da MillionVerifier. Evento `SENT` del
+2026-09-19 alle 13:37:37.891 UTC, lead 4583736448. I precedenti destinatari catch-all
+o esclusi da Smartlead non sono stati forzati.
+
+Nessun deploy/migrazione o scrittura CRM production effettuato. Il recupero locale
+è `sent` con `crmSyncedAt=null`: la modalità test non sincronizza production.
+Il report dimostrativo HTTP localhost risponde 200 ma è correttamente rifiutato
+dal validatore HTTPS del CRM. In un MongoDB temporaneo è stata verificata la sync
+con i metadati dell'invio reale e un URL HTTPS fittizio: un solo contatto per due
+richieste concorrenti, source/lista/stato corretti e metadati provider conservati.
+Questa verifica non costituisce un collaudo completo del link pubblico.
+
+L'utente conferma la ricezione della prima email nello spam e risponde; Smartlead
+registra `REPLY` alle 14:03:10 UTC. L'inoltro delle 14:05:09 UTC a hello@menuchat.it
+è accettato e la ricezione è confermata dall'utente. L'adapter MenuChat è corretto
+per accettare l'ack reale `ok=true`, oltre a quello documentato `success=true`,
+senza ripetere l'inoltro già effettuato (62 test MenuChat passati).
+
+Restano da verificare il percorso completo con URL HTTPS pubblico e CRM isolato,
+la firma aggiunta dal provider e la deliverability finale. I controlli CRM sono
+verificati anche con la suite locale dedicata (75 test, incluso MongoDB; CI verde
+run 35445158967 su 94fe465).
+Il runbook completo e la configurazione sono in `menuchat-v2/docs/grader-recovery.md`.
