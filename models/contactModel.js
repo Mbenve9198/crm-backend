@@ -6,6 +6,7 @@ import validator from 'validator';
  * Gestisce i contatti con proprietà dinamiche e appartenenza a liste
  */
 const contactSchema = new mongoose.Schema({
+  graderRecoveryId: { type: String, unique: true, sparse: true },
   graderLeadId: { type: String, unique: true, sparse: true },
   // Nome del contatto (obbligatorio)
   name: {
@@ -92,7 +93,7 @@ const contactSchema = new mongoose.Schema({
   // Tipo di sorgente del contatto
   source: {
     type: String,
-    enum: ['manual', 'csv_import', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'smartlead_outbound', 'instagram_dm', 'whatsapp_dm', 'referral'],
+    enum: ['grader_abandoned', 'manual', 'csv_import', 'inbound_rank_checker', 'inbound_acquisition', 'inbound_prova_gratuita', 'inbound_menu_landing', 'inbound_social_proof', 'inbound_qr_recensioni', 'smartlead_outbound', 'instagram_dm', 'whatsapp_dm', 'referral'],
     default: 'manual',
     index: true
   },

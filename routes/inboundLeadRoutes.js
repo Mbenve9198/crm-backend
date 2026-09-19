@@ -1,3 +1,4 @@
+import { checkGraderRecovery, syncGraderRecovery } from '../controllers/graderRecoveryController.js';
 import express from 'express';
 import { receiveRankCheckerLead, receiveAcquisitionLead, receiveSmartleadLead, pushLandingMessage, receiveOnboardingEvent } from '../controllers/inboundLeadController.js';
 import { handleSmartleadWebhook } from '../controllers/smartleadWebhookController.js';
@@ -6,6 +7,8 @@ import { requireInboundLeadSecret, requireCrmSyncSecret } from '../middleware/in
 import { receiveGraderMessages } from '../controllers/graderMessageController.js';
 
 const router = express.Router();
+router.post('/grader-recovery/check', requireCrmSyncSecret, checkGraderRecovery);
+router.post('/grader-recovery/sync', requireCrmSyncSecret, syncGraderRecovery);
 
 /**
  * Routes per la ricezione di lead inbound
