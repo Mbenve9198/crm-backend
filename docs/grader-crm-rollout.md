@@ -51,7 +51,7 @@ autorizzato, verificato `ok/1` da MillionVerifier. Evento `SENT` del
 2026-09-19 alle 13:37:37.891 UTC, lead 4583736448. I precedenti destinatari catch-all
 o esclusi da Smartlead non sono stati forzati.
 
-Nessun deploy/migrazione o scrittura CRM production effettuato. Il recupero locale
+Il recupero locale
 è `sent` con `crmSyncedAt=null`: la modalità test non sincronizza production.
 Il report dimostrativo HTTP localhost risponde 200 ma è correttamente rifiutato
 dal validatore HTTPS del CRM. In un MongoDB temporaneo è stata verificata la sync
@@ -65,8 +65,19 @@ registra `REPLY` alle 14:03:10 UTC. L'inoltro delle 14:05:09 UTC a hello@menucha
 per accettare l'ack reale `ok=true`, oltre a quello documentato `success=true`,
 senza ripetere l'inoltro già effettuato (62 test MenuChat passati).
 
-Restano da verificare il percorso completo con URL HTTPS pubblico e CRM isolato,
-la firma aggiunta dal provider e la deliverability finale. I controlli CRM sono
-verificati anche con la suite locale dedicata (75 test, incluso MongoDB; CI verde
-run 35445158967 su 94fe465).
+Il report dimostrativo HTTPS pubblico è stato aperto nel browser senza richiesta
+di numero WhatsApp. La sync sul CRM isolato accetta questo URL e mantiene un solo
+contatto dopo due richieste concorrenti. Il messaggio originale conteneva però
+il vecchio URL localhost: la deliverability del messaggio finale resta da verificare.
+L'utente ha accettato la firma già presente sulla casella durante l'autorizzazione
+del rilascio tecnico. Suite dedicata: 75 test, incluso MongoDB; CI verde
+run 35450417449 su dcb64ba.
+
+Rilascio tecnico: PR #27 unita in `main` con commit `cc0c418f`; deployment Railway
+`9cba224f-284a-4c97-b8eb-ee01c8a4d668` riuscito. Applicato l'indice unico sparse
+`graderRecoveryId_1`, senza duplicati preesistenti e senza modificare contatti.
+Controlli production: health 200, check anonimo 403, check autenticato 200,
+sync accodata 400. Rimossi dai log di avvio i dettagli dell'URI MongoDB.
+Recupero MenuChat `off`, inoltro automatico `false`, campagna operativa in bozza:
+questo rilascio non abilita invii ai ristoranti.
 Il runbook completo e la configurazione sono in `menuchat-v2/docs/grader-recovery.md`.
