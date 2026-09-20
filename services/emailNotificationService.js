@@ -190,20 +190,23 @@ const TEAM_BCC = ['marco.benvenuti91@gmail.com', 'federico@midachat.com'];
  * @param {string} params.logLabel - Cosa scrivere nel log a invio riuscito.
  * @returns {Promise<Object>} Esito dell'invio; non lancia mai.
  */
-const sendTeamNotification = async ({ subject, html, logLabel }) => {
+const sendTeamNotification = async ({ subject, html, logLabel, idempotencyKey }) => {
   try {
     if (!resend || !process.env.RESEND_API_KEY) {
       console.warn('⚠️ Resend non configurato, skip notifica');
       return { success: false, error: 'Resend non configurato' };
     }
 
-    const result = await resend.emails.send({
+    const message = {
       from: fromEmail,
       to: TEAM_TO,
       bcc: TEAM_BCC,
       subject,
       html
-    });
+    };
+    const result = idempotencyKey
+      ? await resend.emails.send(message, { idempotencyKey })
+      : await resend.emails.send(message);
 
     if (result?.error || !result?.data?.id) {
       const resendError = toSafeString(
@@ -325,7 +328,10 @@ export const sendInboundLeadNotification = async ({
   leadSource,
   rankCheckerData,
   reportLink,
-  callRequest
+  callRequest,
+  recovery,
+  notificationAt,
+  idempotencyKey
 } = {}) => {
   try {
     const contactData = asObject(contact);
@@ -347,13 +353,16 @@ export const sendInboundLeadNotification = async ({
 
     const callData = asObject(callRequest);
     const hasCallRequest = Boolean(callRequest) && callData.requested !== false;
-    const subjectPrefix = hasCallRequest
+    const isRecovery = leadSource === 'grader-abandoned';
+    const subjectPrefix = isRecovery ? '♻️ Lead recuperato dal grader'
+      : hasCallRequest
       ? '📞 Chiamata richiesta dal lead grader'
       : isNew
         ? '🎯 Nuovo lead grader'
         : '♻️ Lead grader riattivato';
     const emailSubject = sanitizeSubjectPart(
-      `${subjectPrefix}: ${restaurantName} — ${subjectRank} per «${keyword}»`,
+      isRecovery ? `${subjectPrefix}: ${restaurantName} — da contattare`
+        : `${subjectPrefix}: ${restaurantName} — ${subjectRank} per «${keyword}»`,
       240
     );
 
@@ -430,11 +439,12 @@ export const sendInboundLeadNotification = async ({
 <body style="font-family:Arial,sans-serif;line-height:1.5;color:#333;margin:0;padding:0;background:#f4f4f4;">
 <div style="max-width:640px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
   <div style="background:linear-gradient(135deg,#7c3aed,#4f46e5);color:#fff;padding:24px 20px;text-align:center;">
-    <h1 style="margin:0;font-size:24px;">${hasCallRequest ? '📞 Chiamata richiesta' : isNew ? '🎯 Nuovo lead grader' : '♻️ Lead grader riattivato'}</h1>
+    <h1 style="margin:0;font-size:24px;">${isRecovery ? '♻️ Lead recuperato dal grader' : hasCallRequest ? '📞 Chiamata richiesta' : isNew ? '🎯 Nuovo lead grader' : '♻️ Lead grader riattivato'}</h1>
     <p style="margin:8px 0 0;font-size:15px;opacity:0.95;">${escapeHtml(restaurantName)}${city ? ` — ${escapeHtml(city)}` : ''}</p>
   </div>
 
   <div style="padding:24px 20px;font-size:14px;">
+    ${isRecovery ? `<p>Ha cercato il ristorante sul grader senza completare il form. È stato inviato il messaggio di recupero tramite <strong>${asObject(recovery).channel === 'whatsapp' ? 'WhatsApp' : 'e-mail'}</strong> il ${escapeHtml(formatDateTime(asObject(recovery).sentAt))}.</p><p><strong>Da contattare:</strong> i recapiti provengono dalle informazioni pubbliche del locale.</p>` : ''}
     <div style="background:#f5f3ff;border-left:4px solid #7c3aed;padding:14px;margin-bottom:16px;border-radius:4px;">
       <h2 style="color:#6d28d9;margin:0 0 10px;font-size:18px;">🏪 Contatto</h2>
       <p style="margin:4px 0;"><strong>Locale:</strong> ${escapeHtml(restaurantName)}</p>
@@ -485,7 +495,7 @@ export const sendInboundLeadNotification = async ({
     </div>
 
     <div style="margin-top:20px;padding-top:14px;border-top:1px solid #e5e7eb;font-size:11px;color:#6b7280;text-align:center;">
-      Lead ricevuto il ${new Date().toLocaleString('it-IT', { timeZone: 'Europe/Rome' })}
+      Lead ricevuto il ${formatDateTime(notificationAt || new Date())}
     </div>
   </div>
 </div>
@@ -494,6 +504,7 @@ export const sendInboundLeadNotification = async ({
     return await sendTeamNotification({
       subject: emailSubject,
       html,
+      idempotencyKey,
       logLabel: `Notifica lead grader inviata al team per ${restaurantName}`
     });
   } catch (error) {

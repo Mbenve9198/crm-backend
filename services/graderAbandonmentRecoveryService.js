@@ -1,5 +1,6 @@
 import validator from 'validator';
 import { normalizePhoneToE164, legacyPhoneLookupPattern } from './phoneIdentityService.js';
+import { createGraderRecoveryNotifier } from './graderRecoveryNotificationService.js';
 
 export const RECOVERY_LIST = 'Posizione — recupero abbandoni';
 export function parseRecoveryInput(body, sync = false) {
@@ -37,8 +38,8 @@ export function recoveryIdentityQuery(input) {
   if (input.phone) alternatives.push({ phone: legacyPhoneLookupPattern(input.phone) });
   return { $or: alternatives };
 }
-export function createGraderRecoveryService(Contact, User, env = process.env) {
-  return {
+export function createGraderRecoveryService(Contact, User, env = process.env, notify = createGraderRecoveryNotifier(Contact)) {
+  const service = {
     async check(input) {
       const contact = await Contact.findOne(recoveryIdentityQuery(input));
       // Existing contacts are excluded conservatively, including clients and opt-outs.
@@ -50,7 +51,7 @@ export function createGraderRecoveryService(Contact, User, env = process.env) {
       const previous = matches[0];
       if (previous?.graderRecoveryId === input.recoveryId) return { success: true, contactId: String(previous._id) };
       if (previous?.graderRecoveryId) throw Object.assign(new Error('Recupero già collegato'), { status: 409 });
-      const properties = { id: input.recoveryId, placeId: input.placeId, channel: input.channel,
+      const properties = { id: input.recoveryId, placeId: input.placeId, restaurantName: input.restaurantName, channel: input.channel,
         reportUrl: input.reportUrl, sentAt: input.sentAt, providerMessageId: input.providerMessageId,
         deliveryStatus: 'sent', provider: input.provider, providerCampaignId: input.providerCampaignId,
         providerLeadId: input.providerLeadId, publicPhone: input.phone, publicEmail: input.email, leadSource: 'grader-abandoned' };
@@ -70,7 +71,7 @@ export function createGraderRecoveryService(Contact, User, env = process.env) {
       try {
         const created = await Contact.create({ graderRecoveryId: input.recoveryId, name: input.restaurantName,
           ...(input.email ? { email: input.email } : {}), ...(input.phone ? { phone: input.phone } : {}),
-          source: 'grader_abandoned', lists: [RECOVERY_LIST], status: 'contattato',
+          source: 'grader_abandoned', lists: [RECOVERY_LIST], status: 'da contattare',
           properties: { graderRecovery: properties }, owner: owner._id, createdBy: owner._id });
         return { success: true, contactId: String(created._id) };
       } catch (error) {
@@ -79,6 +80,15 @@ export function createGraderRecoveryService(Contact, User, env = process.env) {
         if (!duplicate) throw Object.assign(new Error('Recapito già presente nel CRM'), { status: 409 });
         return { success: true, contactId: String(duplicate._id) };
       }
+    },
+  };
+  return {
+    check: service.check,
+    async sync(input) {
+      const result = await service.sync(input);
+      // A failed team notification retries this sync, never the lead's message.
+      await notify(result.contactId);
+      return result;
     },
   };
 }

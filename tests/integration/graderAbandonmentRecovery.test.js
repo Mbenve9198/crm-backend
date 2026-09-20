@@ -14,7 +14,7 @@ beforeAll(async () => {
   await mongoose.connect(mongo.getUri());
   await Contact.init();
   const User = { findOne: () => ({ sort: async () => ({ _id: ownerId }) }) };
-  service = createGraderRecoveryService(Contact, User, {});
+  service = createGraderRecoveryService(Contact, User, {}, async () => {});
 }, 120000);
 afterAll(async () => { await mongoose.disconnect(); await mongo?.stop(); });
 beforeEach(async () => { await Contact.deleteMany({}); });
@@ -26,7 +26,7 @@ it('creates a tagged contact and deduplicates simultaneous sync retries', async 
   expect(await Contact.countDocuments()).toBe(1);
   expect(contact.lists).toContain(RECOVERY_LIST);
   expect(contact.source).toBe('grader_abandoned');
-  expect(contact.status).toBe('contattato');
+  expect(contact.status).toBe('da contattare');
   expect(contact.properties.graderRecovery.reportUrl).toBe(input.reportUrl);
 });
 it('excludes existing clients and opt-outs by restaurant, email or decorated phone', async () => {
@@ -54,3 +54,4 @@ it('rejects ambiguous identities and malformed payloads', async () => {
   expect(() => parseRecoveryInput({ ...input, placeId: { $ne: null } })).toThrow();
   expect(() => parseRecoveryInput({ ...input, reportUrl: 'javascript:alert(1)' }, true)).toThrow();
 });
+

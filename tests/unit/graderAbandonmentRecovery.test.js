@@ -13,13 +13,13 @@ beforeEach(() => {
     create: vi.fn(async values => { const doc = new ContactModel(values); await doc.validate(); return doc; }),
     findOneAndUpdate: vi.fn().mockResolvedValue({ _id: 'existing' }) };
   const User = { findOne: () => ({ sort: async () => ({ _id: owner }) }) };
-  service = createGraderRecoveryService(Contact, User, {});
+  service = createGraderRecoveryService(Contact, User, {}, async () => {});
 });
 it('creates a model-valid dedicated contact with the new list and delivery metadata', async () => {
   expect(await service.check(input)).toEqual({ eligible: true, reason: 'new_restaurant' });
   expect((await service.sync(parseRecoveryInput(input, true))).success).toBe(true);
   expect(Contact.create).toHaveBeenCalledWith(expect.objectContaining({ source: 'grader_abandoned',
-    status: 'contattato', lists: [RECOVERY_LIST], graderRecoveryId: input.recoveryId, createdBy: owner }));
+    status: 'da contattare', lists: [RECOVERY_LIST], graderRecoveryId: input.recoveryId, createdBy: owner }));
   expect(Contact.create.mock.calls[0][0].properties.graderRecovery.reportUrl).toBe(input.reportUrl);
 });
 it('does not change verified phone, owner, status or existing lists on a late matching contact', async () => {
@@ -78,3 +78,4 @@ it('stores confirmed Smartlead delivery identifiers without changing the abandon
   expect(Contact.create.mock.calls[0][0]).toMatchObject({ source: 'grader_abandoned', lists: [RECOVERY_LIST],
     properties: { graderRecovery: { deliveryStatus: 'sent', provider: 'smartlead', providerCampaignId: 3987276, providerLeadId: 1234 } } });
 });
+

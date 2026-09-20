@@ -32,6 +32,22 @@ afterEach(() => {
 });
 
 describe('sendInboundLeadNotification', () => {
+  it('uses the same team recipients for abandoned leads with a distinct subject and an idempotency key', async () => {
+    const { sendInboundLeadNotification } = await importNotificationService();
+    await sendInboundLeadNotification({ contact: { _id: 'recovery-contact', name: 'Locale <Test>',
+      phone: '+393331112222', email: 'info@locale.test' }, isNew: true, leadSource: 'grader-abandoned',
+      recovery: { channel: 'whatsapp', sentAt: '2026-09-20T09:30:00Z' },
+      notificationAt: '2026-09-20T09:30:00Z', reportLink: 'https://menuchat.it/posizione/r/test',
+      idempotencyKey: 'grader-recovery-test' });
+    const [message, options] = resendSendMock.mock.calls[0];
+    expect(message.to).toEqual(['marco@midachat.com']);
+    expect(message.bcc).toEqual(['marco.benvenuti91@gmail.com', 'federico@midachat.com']);
+    expect(message.subject).toContain('Lead recuperato dal grader: Locale <Test> — da contattare');
+    expect(message.html).toContain('senza completare il form');
+    expect(message.html).toContain('Locale &lt;Test&gt;');
+    expect(message.html).toContain('grader-abandoned');
+    expect(options).toEqual({ idempotencyKey: 'grader-recovery-test' });
+  });
   it('gestisce rankCheckerData parziale o malformato senza lanciare', async () => {
     const { sendInboundLeadNotification } = await importNotificationService();
 
