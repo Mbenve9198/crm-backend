@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import Contact from '../../models/contactModel.js';
+import { recoveryData } from '../fixtures/graderRecoveryData.js';
 import { createGraderRecoveryService } from '../../services/graderAbandonmentRecoveryService.js';
 import { createGraderRecoveryNotifier } from '../../services/graderRecoveryNotificationService.js';
 
@@ -66,4 +67,23 @@ it('notifies for confirmed email recoveries too', async () => {
   await service.sync({ ...input, channel: 'email', provider: 'smartlead', deliveryStatus: 'sent',
     providerCampaignId: 123, providerLeadId: 456 });
   expect(send).toHaveBeenCalledWith(expect.objectContaining({ recovery: { channel: 'email', sentAt: input.sentAt } }));
+});
+it('includes available grader analysis in new team notifications and freezes it across retries', async () => {
+  const rich = { ...input, graderData: recoveryData };
+  send.mockRejectedValueOnce(new Error('ambiguous response'));
+  await expect(service.sync(rich)).rejects.toThrow();
+  expect(send.mock.calls[0][0]).toMatchObject({ rankCheckerData: { keyword: 'trattoria',
+    ranking: { mainRank: 2 }, restaurantData: { address: 'Via Roma 1', rating: 4.8 } },
+    contact: { properties: { restaurantCity: 'Roma' } } });
+  now = new Date(now.getTime() + 6 * 60_000);
+  await service.sync({ ...rich, graderData: { ...recoveryData, keyword: 'pizzeria' } });
+  expect(send.mock.calls[1][0]).toEqual(send.mock.calls[0][0]);
+  await service.sync(rich);
+  expect(send).toHaveBeenCalledTimes(2);
+});
+it('backfills a previously notified recovery without repeating its internal email', async () => {
+  await service.sync(input);
+  await service.sync({ ...input, graderData: recoveryData });
+  expect(send).toHaveBeenCalledTimes(1);
+  expect((await Contact.findOne({})).rankCheckerData.keyword).toBe('trattoria');
 });

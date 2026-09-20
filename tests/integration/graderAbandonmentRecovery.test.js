@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 import mongoose from 'mongoose';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import Contact from '../../models/contactModel.js';
+import { recoveryData } from '../fixtures/graderRecoveryData.js';
 import { createGraderRecoveryService, parseRecoveryInput, RECOVERY_LIST } from '../../services/graderAbandonmentRecoveryService.js';
 
 let mongo, service;
@@ -18,6 +19,26 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => { await mongoose.disconnect(); await mongo?.stop(); });
 beforeEach(async () => { await Contact.deleteMany({}); });
+it('enriches an already synchronized recovery once without erasing commercial or verified data', async () => {
+  const original = await service.sync(input);
+  await Contact.updateOne({ _id: original.contactId }, { $set: { status: 'interessato',
+    'properties.salesNote': 'Richiamare lunedì', 'rankCheckerData.hasDigitalMenu': true,
+    'properties.graderRecoveryNotification.sentAt': new Date() } });
+  const rich = parseRecoveryInput({ ...input, graderData: { ...recoveryData, qualificationData: { hasDigitalMenu: false } } }, true);
+  await service.sync(rich);
+  await service.sync(rich);
+  const updated = await Contact.findById(original.contactId);
+  expect(await Contact.countDocuments()).toBe(1);
+  expect(updated.status).toBe('interessato');
+  expect(updated.rankCheckerData.ranking.fullResults).toEqual(recoveryData.rankingResults);
+  expect(updated.rankCheckerData.restaurantData.coordinates.lat).toBe(0);
+  expect(updated.rankCheckerData.hasDigitalMenu).toBe(true);
+  expect(updated.properties.salesNote).toBe('Richiamare lunedì');
+  expect(updated.properties.rankCheckerReport).toBe(input.reportUrl);
+  expect(updated.properties.graderRecoveryNotification.sentAt).toBeTruthy();
+  expect(String(updated.owner)).toBe(String(ownerId));
+  expect(updated.phone).toBe(input.phone);
+});
 it('creates a tagged contact and deduplicates simultaneous sync retries', async () => {
   expect(await service.check(input)).toEqual({ eligible: true, reason: 'new_restaurant' });
   const result = await Promise.all([service.sync(parseRecoveryInput(input, true)), service.sync(parseRecoveryInput(input, true))]);
@@ -54,4 +75,3 @@ it('rejects ambiguous identities and malformed payloads', async () => {
   expect(() => parseRecoveryInput({ ...input, placeId: { $ne: null } })).toThrow();
   expect(() => parseRecoveryInput({ ...input, reportUrl: 'javascript:alert(1)' }, true)).toThrow();
 });
-
