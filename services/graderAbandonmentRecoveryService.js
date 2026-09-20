@@ -1,4 +1,5 @@
 import validator from 'validator';
+import { parseRecoveryData, recoveryContactData, recoveryEnrichmentUpdate } from './graderRecoveryDataService.js';
 import { normalizePhoneToE164, legacyPhoneLookupPattern } from './phoneIdentityService.js';
 import { createGraderRecoveryNotifier } from './graderRecoveryNotificationService.js';
 
@@ -29,7 +30,8 @@ export function parseRecoveryInput(body, sync = false) {
   return { recoveryId: body.recoveryId, placeId: body.placeId.trim(), restaurantName: body.restaurantName.trim(),
     phone: phone || null, email, channel: body.channel, reportUrl: body.reportUrl,
     sentAt: body.sentAt, providerMessageId: body.providerMessageId, deliveryStatus: body.deliveryStatus,
-    provider: body.provider, providerCampaignId: body.providerCampaignId, providerLeadId: body.providerLeadId };
+    provider: body.provider, providerCampaignId: body.providerCampaignId, providerLeadId: body.providerLeadId,
+    ...(sync && body.graderData !== undefined ? { graderData: parseRecoveryData(body.graderData) } : {}) };
 }
 export function recoveryIdentityQuery(input) {
   const alternatives = [{ graderRecoveryId: input.recoveryId }, { 'rankCheckerData.placeId': input.placeId },
@@ -49,35 +51,43 @@ export function createGraderRecoveryService(Contact, User, env = process.env, no
       const matches = await Contact.find(recoveryIdentityQuery(input)).limit(2);
       if (matches.length > 1) throw Object.assign(new Error('Identità CRM ambigua'), { status: 409 });
       const previous = matches[0];
-      if (previous?.graderRecoveryId === input.recoveryId) return { success: true, contactId: String(previous._id) };
-      if (previous?.graderRecoveryId) throw Object.assign(new Error('Recupero già collegato'), { status: 409 });
+      if (previous?.graderRecoveryId === input.recoveryId && !input.graderData) return { success: true, contactId: String(previous._id) };
+      if (previous?.graderRecoveryId && previous.graderRecoveryId !== input.recoveryId) throw Object.assign(new Error('Recupero già collegato'), { status: 409 });
       const properties = { id: input.recoveryId, placeId: input.placeId, restaurantName: input.restaurantName, channel: input.channel,
         reportUrl: input.reportUrl, sentAt: input.sentAt, providerMessageId: input.providerMessageId,
         deliveryStatus: 'sent', provider: input.provider, providerCampaignId: input.providerCampaignId,
-        providerLeadId: input.providerLeadId, publicPhone: input.phone, publicEmail: input.email, leadSource: 'grader-abandoned' };
+        providerLeadId: input.providerLeadId, publicPhone: input.phone, publicEmail: input.email, leadSource: 'grader-abandoned',
+        ...(input.graderData ? { graderData: input.graderData } : {}) };
       if (previous) {
         // A contact created between preflight and sync keeps its owner/status/verified phone.
-        const updated = await Contact.findOneAndUpdate({ _id: previous._id, graderRecoveryId: { $exists: false } }, {
-          $set: { graderRecoveryId: input.recoveryId, 'properties.graderRecovery': properties },
+        const updated = await Contact.findOneAndUpdate({ _id: previous._id,
+          graderRecoveryId: previous.graderRecoveryId || { $exists: false },
+          ...(previous.updatedAt ? { updatedAt: previous.updatedAt } : {}) }, {
+          $set: { graderRecoveryId: input.recoveryId,
+            ...(previous.graderRecoveryId ? { 'properties.graderRecovery.graderData': input.graderData }
+              : { 'properties.graderRecovery': properties }),
+            ...recoveryEnrichmentUpdate(input, previous) },
           $addToSet: { lists: RECOVERY_LIST },
         }, { new: true, runValidators: true });
         if (!updated) throw Object.assign(new Error('Contatto aggiornato nel frattempo'), { status: 409 });
-        return { success: true, contactId: String(updated._id) };
+        return { success: true, contactId: String(updated._id), ...(input.graderData ? { dataVersion: 1 } : {}) };
       }
       let owner = env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL
         ? await User.findOne({ email: env.INBOUND_LEAD_DEFAULT_OWNER_EMAIL.toLowerCase(), isActive: true }) : null;
       owner ??= await User.findOne({ role: { $in: ['admin', 'manager'] }, isActive: true }).sort({ createdAt: 1 });
       if (!owner) throw Object.assign(new Error('Owner CRM non configurato'), { status: 503 });
       try {
+        const data = recoveryContactData(input);
         const created = await Contact.create({ graderRecoveryId: input.recoveryId, name: input.restaurantName,
           ...(input.email ? { email: input.email } : {}), ...(input.phone ? { phone: input.phone } : {}),
           source: 'grader_abandoned', lists: [RECOVERY_LIST], status: 'da contattare',
-          properties: { graderRecovery: properties }, owner: owner._id, createdBy: owner._id });
-        return { success: true, contactId: String(created._id) };
+          ...data, properties: { ...data.properties, graderRecovery: properties }, owner: owner._id, createdBy: owner._id });
+        return { success: true, contactId: String(created._id), ...(input.graderData ? { dataVersion: 1 } : {}) };
       } catch (error) {
         if (error.code !== 11000) throw error;
         const duplicate = await Contact.findOne({ graderRecoveryId: input.recoveryId });
         if (!duplicate) throw Object.assign(new Error('Recapito già presente nel CRM'), { status: 409 });
+        if (input.graderData) return service.sync(input);
         return { success: true, contactId: String(duplicate._id) };
       }
     },

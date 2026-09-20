@@ -1,4 +1,5 @@
 import { sendInboundLeadNotification } from './emailNotificationService.js';
+import { recoveryContactData } from './graderRecoveryDataService.js';
 
 const FIELD = 'properties.graderRecoveryNotification';
 const unavailable = () => Object.assign(new Error('Notifica recupero non disponibile'), { status: 503 });
@@ -11,6 +12,10 @@ export function createGraderRecoveryNotifier(Contact, send = sendInboundLeadNoti
     const notice = contact.properties?.graderRecoveryNotification || {};
     if (notice.sentAt) return;
     const at = now();
+    // Keep retries byte-for-byte stable even if CRM enrichment arrives later.
+    const analysis = notice.analysis || (!notice.firstAttemptAt
+      ? recoveryContactData({ ...contact.properties.graderRecovery,
+        reportUrl: contact.properties.graderRecovery.reportUrl }) : {});
     // Resend retains idempotency keys for 24 hours. Never replay an old ambiguous send.
     if (notice.firstAttemptAt && at - new Date(notice.firstAttemptAt) >= 23 * 3600_000) throw unavailable();
     const claimed = await Contact.findOneAndUpdate({ _id: contact._id,
@@ -18,7 +23,8 @@ export function createGraderRecoveryNotifier(Contact, send = sendInboundLeadNoti
       [`${FIELD}.sentAt`]: { $exists: false },
       $or: [{ [`${FIELD}.leaseUntil`]: { $exists: false } }, { [`${FIELD}.leaseUntil`]: { $lte: at } }],
     }, { $set: { [`${FIELD}.firstAttemptAt`]: notice.firstAttemptAt || at,
-      [`${FIELD}.leaseUntil`]: new Date(at.getTime() + 5 * 60_000), [`${FIELD}.attemptedAt`]: at } }, { new: true });
+      [`${FIELD}.leaseUntil`]: new Date(at.getTime() + 5 * 60_000), [`${FIELD}.attemptedAt`]: at,
+      [`${FIELD}.analysis`]: analysis } }, { new: true });
     if (!claimed) {
       const latest = await Contact.findById(contactId);
       if (latest?.properties?.graderRecoveryNotification?.sentAt) return;
@@ -27,7 +33,9 @@ export function createGraderRecoveryNotifier(Contact, send = sendInboundLeadNoti
     const recovery = claimed.properties.graderRecovery;
     const result = await send({
       contact: { _id: claimed._id, name: recovery.restaurantName || claimed.name,
-        phone: recovery.publicPhone, email: recovery.publicEmail },
+        phone: recovery.publicPhone, email: recovery.publicEmail,
+        ...(analysis.properties ? { properties: analysis.properties } : {}) },
+      ...(analysis.rankCheckerData ? { rankCheckerData: analysis.rankCheckerData } : {}),
       isNew: true, leadSource: 'grader-abandoned', reportLink: recovery.reportUrl,
       recovery: { channel: recovery.channel, sentAt: recovery.sentAt },
       notificationAt: recovery.sentAt,

@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 import ContactModel from '../../models/contactModel.js';
+import { recoveryData } from '../fixtures/graderRecoveryData.js';
 import { createGraderRecoveryService, parseRecoveryInput, RECOVERY_LIST } from '../../services/graderAbandonmentRecoveryService.js';
 
 const owner = new mongoose.Types.ObjectId();
@@ -14,6 +15,33 @@ beforeEach(() => {
     findOneAndUpdate: vi.fn().mockResolvedValue({ _id: 'existing' }) };
   const User = { findOne: () => ({ sort: async () => ({ _id: owner }) }) };
   service = createGraderRecoveryService(Contact, User, {}, async () => {});
+});
+it('persists all grader analysis in the fields used by the CRM without inventing form answers', async () => {
+  const result = await service.sync(parseRecoveryInput({ ...input, graderData: recoveryData }, true));
+  expect(result.dataVersion).toBe(1);
+  const values = Contact.create.mock.calls[0][0];
+  const doc = new ContactModel(values).toObject();
+  expect(doc.rankCheckerData).toMatchObject({ placeId: input.placeId, keyword: 'trattoria',
+    ranking: { mainRank: 2, competitorsAhead: 1, fullResults: recoveryData.rankingResults },
+    restaurantData: { address: 'Via Roma 1', rating: 4.8, reviewCount: 100, coordinates: { lat: 0, lng: 12.5 } } });
+  expect(doc.rankCheckerData.hasDigitalMenu).toBeUndefined();
+  expect(doc.rankCheckerData.qualifiedAt).toBeUndefined();
+  expect(doc.graderLeadId).toBeUndefined();
+  expect(doc.properties).toMatchObject({ restaurantCity: 'Roma', website: recoveryData.website,
+    menuUrl: recoveryData.menuUrl, rankCheckerReport: input.reportUrl });
+  expect(doc.properties.contactName).toBeUndefined();
+  expect(doc.properties.callRequested).toBeUndefined();
+});
+it('retains actual false and zero qualification values and rejects malformed enrichment', async () => {
+  await service.sync(parseRecoveryInput({ ...input, graderData: { ...recoveryData,
+    qualificationData: { hasDigitalMenu: false, willingToAdoptMenu: false, dailyCovers: 30, estimatedMonthlyReviews: 0 } } }, true));
+  expect(Contact.create.mock.calls[0][0].rankCheckerData).toMatchObject({ hasDigitalMenu: false,
+    willingToAdoptMenu: false, dailyCovers: 30, estimatedMonthlyReviews: 0 });
+  for (const data of [{ ...recoveryData, website: 'javascript:alert(1)' }, { ...recoveryData, version: 2 },
+    { ...recoveryData, qualificationData: { hasDigitalMenu: 'false' } },
+    { ...recoveryData, rankingResults: { ...recoveryData.rankingResults, analysis: { '$set': { status: 'won' } } } }]) {
+    expect(() => parseRecoveryInput({ ...input, graderData: data }, true)).toThrow('Dati analisi recupero non validi');
+  }
 });
 it('creates a model-valid dedicated contact with the new list and delivery metadata', async () => {
   expect(await service.check(input)).toEqual({ eligible: true, reason: 'new_restaurant' });
@@ -78,4 +106,3 @@ it('stores confirmed Smartlead delivery identifiers without changing the abandon
   expect(Contact.create.mock.calls[0][0]).toMatchObject({ source: 'grader_abandoned', lists: [RECOVERY_LIST],
     properties: { graderRecovery: { deliveryStatus: 'sent', provider: 'smartlead', providerCampaignId: 3987276, providerLeadId: 1234 } } });
 });
-
