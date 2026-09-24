@@ -7,15 +7,19 @@ export const PIPELINE_STATUSES = [
   'lost after free trial',
 ];
 
-/** Esito chiamata → status contatto se il client non lo manda (tab vecchie / PUT /calls). */
+/**
+ * Esito chiamata → status contatto se il client non lo manda (tab vecchie / PUT /calls).
+ *
+ * "da richiamare" non compare qui di proposito: non viene mai messo in automatico.
+ * Il richiamo è una scelta esplicita dell'operatore (properties.callbackAt) e non
+ * tocca lo status; per cambiare status si usa il selettore nella chiusura chiamata.
+ * Restano mappati solo gli esiti che chiudono il lead (non interessato / trial) o
+ * la prima call, così il contatto esce dalla coda senza passaggi manuali.
+ */
 export const DIALER_OUTCOME_STATUS = {
   'not-interested': 'do_not_contact',
   'free-trial-sold': 'free trial iniziato',
   'first-call': 'contattato',
-  'callback': 'da richiamare',
-  'follow-up': 'da richiamare',
-  'no-answer': 'da richiamare',
-  'voicemail': 'da richiamare',
 };
 
 export function resolveDialerContactStatus(outcome, explicitStatus) {

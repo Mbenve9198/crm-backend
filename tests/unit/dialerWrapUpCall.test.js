@@ -98,10 +98,19 @@ describe('resolveDialerContactStatus', () => {
   });
 
   it('mappa gli altri esiti dialer', () => {
-    expect(resolveDialerContactStatus('voicemail')).toBe('da richiamare');
     expect(resolveDialerContactStatus('first-call')).toBe('contattato');
     expect(resolveDialerContactStatus('free-trial-sold')).toBe('free trial iniziato');
     expect(resolveDialerContactStatus('not-logged')).toBeNull();
+  });
+
+  it('gli esiti di richiamo non toccano lo status', () => {
+    for (const outcome of ['callback', 'follow-up', 'no-answer', 'voicemail']) {
+      expect(resolveDialerContactStatus(outcome)).toBeNull();
+    }
+  });
+
+  it('su un esito di richiamo lo status esplicito resta l\'unica fonte', () => {
+    expect(resolveDialerContactStatus('no-answer', 'da richiamare')).toBe('da richiamare');
   });
 });
 

@@ -47,11 +47,19 @@ export function andFilter(filter, clause) {
   return { ...filter, $and: extra };
 }
 
+/**
+ * Richiamo già scaduto. Non guarda lo status: il richiamo è una scelta
+ * dell'operatore e vale da sé, senza bisogno che il contatto sia "da richiamare".
+ */
 export function dueCallbackClause(nowIso) {
   return {
-    status: 'da richiamare',
     'properties.callbackAt': { $exists: true, $nin: [null, ''], $lte: nowIso },
   };
+}
+
+/** Ha un richiamo fissato, scaduto o ancora in programma. */
+export function anyCallbackClause() {
+  return { 'properties.callbackAt': { $exists: true, $nin: [null, ''] } };
 }
 
 /** Nasconde i richiami futuri: restano in coda solo quelli senza data o già scaduti. */
@@ -67,11 +75,14 @@ export function notFutureCallbackClause(nowIso) {
 
 /**
  * Default "da contattare": include anche i richiami già scaduti (callbackAt <= now)
- * così riappaiono in coda all'orario fissato.
+ * così riappaiono in coda all'orario fissato, e nasconde quelli ancora in
+ * programma. Vale per qualunque status, perché lo status non viene più toccato
+ * dalla chiusura chiamata: è il richiamo a decidere quando il lead torna in coda.
  *
- * Filtro esplicito "da richiamare": mostra tutti i richiami, anche quelli
- * ancora in programma. Altrimenti un contatto fissato per più tardi sparisce
- * dalla coda e l'agent non lo vede finché non scatta l'orario.
+ * Filtro esplicito "da richiamare": mostra tutti i contatti con un richiamo
+ * fissato (più quelli messi a mano su "da richiamare"), anche quelli ancora in
+ * programma. Altrimenti un contatto fissato per più tardi sparisce dalla coda
+ * e l'agent non lo vede finché non scatta l'orario.
  *
  * Gli altri filtri (all, contattato, …) restano senza richiami futuri, così
  * il power dialer non chiama prima del momento concordato.
@@ -80,12 +91,17 @@ export function applyCallbackQueueRules(filter, resolvedStatus, nowIso) {
   if (resolvedStatus === 'da contattare') {
     const next = { ...filter };
     delete next.status;
-    return andFilter(next, {
+    const withDueCallbacks = andFilter(next, {
       $or: [{ status: 'da contattare' }, dueCallbackClause(nowIso)],
     });
+    return andFilter(withDueCallbacks, notFutureCallbackClause(nowIso));
   }
   if (resolvedStatus === 'da richiamare') {
-    return filter;
+    const next = { ...filter };
+    delete next.status;
+    return andFilter(next, {
+      $or: [{ status: 'da richiamare' }, anyCallbackClause()],
+    });
   }
   return andFilter(filter, notFutureCallbackClause(nowIso));
 }
@@ -190,7 +206,6 @@ export function dueFirstExpr(nowIso) {
     $cond: [
       {
         $and: [
-          { $eq: ['$status', 'da richiamare'] },
           { $ne: [{ $ifNull: ['$properties.callbackAt', null] }, null] },
           { $ne: ['$properties.callbackAt', ''] },
           { $lte: ['$properties.callbackAt', nowIso] },
@@ -310,6 +325,7 @@ export default {
   fetchDialerQueue,
   applyCallbackQueueRules,
   dueCallbackClause,
+  anyCallbackClause,
   notFutureCallbackClause,
   dueFirstExpr,
 };
